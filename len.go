@@ -25,7 +25,7 @@ package main
 import (
     "fmt"
     "go/ast"
-    "llvm"
+    "github.com/axw/gollvm/llvm"
 )
 
 func (self *Visitor) VisitLen(expr *ast.CallExpr) llvm.Value {

@@ -30,8 +30,8 @@ import (
     "go/token"
     "go/types"
     "os"
-    "llvm"
     "reflect"
+    "github.com/axw/gollvm/llvm"
 )
 
 const (

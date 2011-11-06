@@ -27,7 +27,7 @@ import (
     "go/ast"
     "go/token"
     "reflect"
-    "llvm"
+    "github.com/axw/gollvm/llvm"
 )
 
 func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) llvm.Value {
@@ -71,13 +71,18 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
 func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) llvm.Value {
     switch decl.Tok {
     case token.IMPORT: // No-op (handled in VisitFile
-    case token.CONST: {
-        panic("Unhandled const declaration");
-    }
     case token.TYPE: {
         panic("Unhandled type declaration");
     }
+    case token.CONST: {
+        panic("Unhandled const declaration");
+        // TODO fallthrough
+    }
     case token.VAR: {
+        //for _, spec := range decl.Specs {
+            //valuespec, ok := spec.(*ast.ValueSpec)
+            //if !ok {panic("Expected *ValueSpec")}
+        //}
         panic("Unhandled var declaration");
     }
     }

@@ -27,7 +27,7 @@ import (
     "go/ast"
     "go/token"
     "reflect"
-    "llvm"
+    "github.com/axw/gollvm/llvm"
 )
 
 func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {

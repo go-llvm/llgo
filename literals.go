@@ -27,7 +27,7 @@ import (
     "go/ast"
     "go/token"
     "strconv"
-    "llvm"
+    "github.com/axw/gollvm/llvm"
 )
 
 func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) llvm.Value {

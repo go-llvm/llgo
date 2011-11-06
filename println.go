@@ -25,7 +25,7 @@ package main
 import (
     "fmt"
     "go/ast"
-    "llvm"
+    "github.com/axw/gollvm/llvm"
 )
 
 func getprintf(module llvm.Module) llvm.Value {

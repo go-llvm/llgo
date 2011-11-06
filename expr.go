@@ -26,8 +26,8 @@ import (
     "fmt"
     "go/ast"
     "go/token"
-    "llvm"
     "reflect"
+    "github.com/axw/gollvm/llvm"
 )
 
 func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
