@@ -11,6 +11,7 @@ at [http://blog.awilkins.id.au](http//blog.awilkins.id.au).
 
 The recommended way to install llgo is to use goinstall. You'll need to set a
 couple of environment variables first:
+
     $ export CGO_CFLAGS=`llvm-config --cflags`
     $ export CGO_LDFLAGS="`llvm-config --ldflags` -Wl,-L`llvm-config --libdir` -lLLVM-`llvm-config --version`"
     $ goinstall github.com/axw/llgo
