@@ -79,5 +79,25 @@ func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) llvm.Value {
     return fn
 }
 
+func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) llvm.Value {
+    type_ := self.GetType(lit.Type)
+    var values []llvm.Value
+    if lit.Elts != nil {
+        values = make([]llvm.Value, len(lit.Elts))
+        for i, elt := range lit.Elts {values[i] = self.VisitExpr(elt)}
+    }
+
+    switch type_.TypeKind() {
+    case llvm.ArrayTypeKind: {
+        elttype := type_.ElementType()
+        for i, value := range values {
+            values[i] = self.maybeCast(value, elttype)
+        }
+        return llvm.ConstArray(elttype, values)
+    }
+    }
+    panic(fmt.Sprint("Unhandled type kind: ", type_.TypeKind()))
+}
+
 // vim: set ft=go :
 

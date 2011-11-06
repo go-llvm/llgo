@@ -152,7 +152,7 @@ func (self *Visitor) maybeCast(value llvm.Value, totype llvm.Type) llvm.Value {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (self *Visitor) GetType(ident *ast.Ident) llvm.Type {
+func (self *Visitor) IdentGetType(ident *ast.Ident) llvm.Type {
     switch ident.Name {
         case "bool": return llvm.Int1Type()
 
@@ -196,6 +196,33 @@ func (self *Visitor) GetType(ident *ast.Ident) llvm.Type {
     return llvm.Type{nil}
 }
 
+func (self *Visitor) GetType(expr ast.Expr) llvm.Type {
+    switch x := (expr).(type) {
+    case *ast.Ident:
+        return self.IdentGetType(x)
+    case *ast.FuncType:
+        type_ := self.VisitFuncType(x)
+        type_ = llvm.PointerType(type_, 0)
+        return type_
+    case *ast.ArrayType:
+        var len_ int = -1
+        if x.Len == nil {panic("Unhandled slice ArrayType")}
+        elttype := self.GetType(x.Elt)
+        _, isellipsis := (x.Len).(*ast.Ellipsis)
+        if !isellipsis {
+            lenvalue := self.VisitExpr(x.Len)
+            if lenvalue.IsAConstantInt().IsNil() {
+                panic("Array length must be a constant integer expression")
+            }
+            len_ = int(lenvalue.ZExtValue())
+        }
+        return llvm.ArrayType(elttype, len_)
+    default:
+        panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
+    }
+    return llvm.Type{nil}
+}
+
 func (self *Visitor) VisitFuncType(f *ast.FuncType) llvm.Type {
     var fn_args []llvm.Type = nil
     var fn_rettype llvm.Type
@@ -206,15 +233,7 @@ func (self *Visitor) VisitFuncType(f *ast.FuncType) llvm.Type {
         fn_rettype = llvm.VoidType()
     } else {
         for i := 0; i < len(f.Results.List); i++ {
-            switch x := (f.Results.List[i].Type).(type) {
-            case *ast.Ident:
-                fn_rettype = self.GetType(x)
-            case *ast.FuncType:
-                fn_rettype = self.VisitFuncType(x)
-                fn_rettype = llvm.PointerType(fn_rettype, 0)
-            default:
-                fmt.Printf("?????? %s\n", reflect.TypeOf(x))
-            }
+            fn_rettype = self.GetType(f.Results.List[i].Type)
         }
     }
     return llvm.FunctionType(fn_rettype, fn_args, false)

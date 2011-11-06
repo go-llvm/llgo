@@ -48,6 +48,7 @@ func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
     case token.MUL: {return self.builder.CreateMul(x, y, "")}
     case token.QUO: {return self.builder.CreateUDiv(x, y, "")}
     case token.ADD: {return self.builder.CreateAdd(x, y, "")}
+    case token.SUB: {return self.builder.CreateSub(x, y, "")}
     case token.EQL: {return self.builder.CreateICmp(llvm.IntEQ, x, y, "")}
     case token.LSS: {
         return self.builder.CreateICmp(llvm.IntULT, x, y, "")
@@ -77,6 +78,7 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
     case *ast.Ident: {
         switch x.String() {
         case "println": {return self.VisitPrintln(expr)}
+        case "len": {return self.VisitLen(expr)}
         default: {
             // Is it a type? Then this is a conversion (e.g. int(123))
             if expr.Args != nil && len(expr.Args) == 1 {
@@ -109,13 +111,35 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
     panic("Unhandled CallExpr")
 }
 
+func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
+    value := self.VisitExpr(expr.X)
+    // TODO handle maps, strings, slices.
+
+    index := self.VisitExpr(expr.Index)
+    if index.Type().TypeKind() != llvm.IntegerTypeKind {
+        panic("Array index expression must evaluate to an integer")
+    }
+
+    // Is it an array? Then let's get the address of the array so we can
+    // get an element.
+    if value.Type().TypeKind() == llvm.ArrayTypeKind {
+        value = value.Metadata(llvm.MDKindID("address"))
+    }
+
+    zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
+    element := self.builder.CreateGEP(value, []llvm.Value{zero, index}, "")
+    return self.builder.CreateLoad(element, "")
+}
+
 func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     switch x:= expr.(type) {
     case *ast.BasicLit: return self.VisitBasicLit(x)
     case *ast.BinaryExpr: return self.VisitBinaryExpr(x)
     case *ast.FuncLit: return self.VisitFuncLit(x)
+    case *ast.CompositeLit: return self.VisitCompositeLit(x)
     case *ast.UnaryExpr: return self.VisitUnaryExpr(x)
     case *ast.CallExpr: return self.VisitCallExpr(x)
+    case *ast.IndexExpr: return self.VisitIndexExpr(x)
     case *ast.Ident: {
         value, obj := self.Lookup(x.Name)
         if value.IsNil() {
@@ -123,7 +147,9 @@ func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
         } else {
             // XXX how do we reverse this if we want to do "&ident"?
             if obj.Kind == StackVar {
+                ptrvalue := value
                 value = self.builder.CreateLoad(value, "")
+                value.SetMetadata(llvm.MDKindID("address"), ptrvalue)
             }
         }
         return value

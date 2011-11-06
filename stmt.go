@@ -174,6 +174,7 @@ func (self *Visitor) VisitStmt(stmt ast.Stmt) {
     case *ast.ForStmt: self.VisitForStmt(x)
     case *ast.ExprStmt: self.VisitExpr(x.X)
     case *ast.BlockStmt: self.VisitBlockStmt(x)
+    case *ast.DeclStmt: self.VisitDecl(x.Decl)
     default: panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
     }
 }
