@@ -51,7 +51,14 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
             args[i+1] = value
             if i > 0 {format += " "}
             switch kind := value.Type().TypeKind(); kind {
-            case llvm.IntegerTypeKind: {format += "%d"}
+            case llvm.IntegerTypeKind: {
+                switch width := value.Type().IntTypeWidth(); width {
+                case 16: format += "%hd"
+                case 32: format += "%d"
+                case 64: format += "%lld" // FIXME windows
+                default: panic(fmt.Sprint("Unhandled integer width ", width))
+                }
+            }
             case llvm.PointerTypeKind: {
                 // TODO string should be a struct, with length & ptr. We'll
                 // probably encode the type as metadata.
