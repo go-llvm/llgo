@@ -68,31 +68,61 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
     return fn
 }
 
-func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) llvm.Value {
+func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
     switch decl.Tok {
     case token.IMPORT: // No-op (handled in VisitFile
     case token.TYPE: {
         panic("Unhandled type declaration");
     }
     case token.CONST: {
-        panic("Unhandled const declaration");
-        // TODO fallthrough
+        // Create a new scope to put 'iota' in.
+        self.PushScope()
+        defer self.PopScope()
+
+        var expr_valspec *ast.ValueSpec
+        for iota_, spec := range decl.Specs {
+            valspec, ok := spec.(*ast.ValueSpec)
+            if !ok {panic("Expected *ValueSpec")}
+
+            // Set iota.
+            iota_value := llvm.ConstInt(llvm.Int32Type(), uint64(iota_), false)
+            self.Insert("iota", iota_value, false)
+
+            // If no expression is supplied, then use the last expression.
+            if valspec.Values != nil && len(valspec.Values) > 0 {
+                expr_valspec = valspec
+            }
+
+            // TODO value type
+
+            for i, name := range valspec.Names {
+                value := self.VisitExpr(expr_valspec.Values[i])
+                name_ := name.String()
+                if name_ != "_" {
+                    obj := self.LookupObj(name_)
+                    if obj == nil {panic("Constant lookup failed: " + name_)}
+                    obj.Data = value
+                }
+            }
+        }
     }
     case token.VAR: {
         //for _, spec := range decl.Specs {
-            //valuespec, ok := spec.(*ast.ValueSpec)
-            //if !ok {panic("Expected *ValueSpec")}
+        //    valuespec, ok := spec.(*ast.ValueSpec)
+        //    if !ok {panic("Expected *ValueSpec")}
+        //    self.VisitValueSpec(valuespec, isconst)
         //}
-        panic("Unhandled var declaration");
     }
     }
-    return llvm.Value{nil}
 }
 
 func (self *Visitor) VisitDecl(decl ast.Decl) llvm.Value {
     switch x := decl.(type) {
     case *ast.FuncDecl: return self.VisitFuncDecl(x)
-    case *ast.GenDecl: return self.VisitGenDecl(x)
+    case *ast.GenDecl: {
+        self.VisitGenDecl(x)
+        return llvm.Value{nil}
+    }
     }
     panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",
                       reflect.TypeOf(decl),

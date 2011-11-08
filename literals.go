@@ -51,7 +51,13 @@ func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) llvm.Value {
     case token.STRING: {
         s, err := strconv.Unquote(lit.Value)
         if err != nil {panic(err)}
-        return self.builder.CreateGlobalStringPtr(s, "")
+
+        init_ := llvm.ConstString(s, true)
+        value := llvm.AddGlobal(self.module, init_.Type(), "")
+        value.SetInitializer(init_)
+        value.SetGlobalConstant(true)
+        value.SetLinkage(llvm.InternalLinkage) // TODO external if Caps
+        return value
     }
     }
     panic("Unhandled BasicLit node")

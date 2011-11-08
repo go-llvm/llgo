@@ -35,7 +35,7 @@ import (
 )
 
 const (
-    StackVar ast.ObjKind = ast.Lbl + iota
+    StackVar ast.ObjKind = ast.Lbl + iota + 1
 )
 
 type Visitor struct {
@@ -74,19 +74,28 @@ func (self *Visitor) Insert(name string, value llvm.Value, stack bool) {
     if existing != nil {existing.Data = obj.Data}
 }
 
-func (self *Visitor) Lookup(name string) (llvm.Value, *ast.Object) {
+func (self *Visitor) LookupObj(name string) *ast.Object {
     // TODO check for qualified identifiers (x.y), and short-circuit the
     // lookup.
     for scope := self.scope; scope != nil; scope = scope.Outer {
         obj := scope.Lookup(name)
-        if obj != nil {
-            if obj.Data != nil {
-                value, ok := (obj.Data).(llvm.Value)
-                if ok {return value, obj}
-                panic(fmt.Sprint("Expected llvm.Value, found ", obj.Data))
-            } else {
-                panic(fmt.Sprint("Object.Data==nil, Object=", obj))
-            }
+        if obj != nil {return obj}
+    }
+    return nil
+}
+
+func (self *Visitor) Lookup(name string) (llvm.Value, *ast.Object) {
+    obj := self.LookupObj(name)
+    if obj != nil {
+        switch obj.Kind {
+        case StackVar: fallthrough
+        case ast.Con: fallthrough
+        case ast.Fun: fallthrough
+        case ast.Var: {
+            value, ok := (obj.Data).(llvm.Value)
+            if ok {return value, obj}
+            panic(fmt.Sprint("Expected llvm.Value, found ", obj.Data))
+        }
         }
     }
     return llvm.Value{nil}, nil
