@@ -39,6 +39,7 @@ type Visitor struct {
     modulename string
     module llvm.Module
     functions []llvm.Value
+    initfuncs []llvm.Value
     fileset *token.FileSet
     filescope *ast.Scope
     scope *ast.Scope
@@ -233,6 +234,7 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     visitor.filescope = file.Scope
     visitor.scope = file.Scope
     visitor.builder = llvm.GlobalContext().NewBuilder()
+    visitor.initfuncs = make([]llvm.Value, 0)
     defer visitor.builder.Dispose()
     visitor.modulename = file.Name.String()
     visitor.module = llvm.NewModule(visitor.modulename)
@@ -249,6 +251,32 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
 
     // Visit each of the top-level declarations.
     for _, decl := range file.Decls {visitor.VisitDecl(decl);}
+
+    // Create global constructors.
+    //
+    // XXX When imports are handled, we'll need to defer creating
+    //     llvm.global_ctors until we create an executable. This is
+    //     due to (a) imports having to be initialised before the
+    //     importer, and (b) LLVM having no specified order of
+    //     initialisation for ctors with the same priority.
+    if len(visitor.initfuncs) > 0 {
+        elttypes := []llvm.Type{
+            llvm.Int32Type(),
+            llvm.FunctionType(llvm.VoidType(), nil, false)}
+        ctortype := llvm.StructType(elttypes, false)
+        ctors := make([]llvm.Value, len(visitor.initfuncs))
+        for i, fn := range visitor.initfuncs {
+            struct_values := []llvm.Value{
+                llvm.ConstInt(llvm.Int32Type(), 1, false), fn}
+            ctors[i] = llvm.ConstStruct(struct_values, false)
+        }
+
+        global_ctors_init := llvm.ConstArray(ctortype, ctors)
+        global_ctors_var := llvm.AddGlobal(
+            visitor.module, global_ctors_init.Type(), "llvm.global_ctors")
+        global_ctors_var.SetInitializer(global_ctors_init)
+        global_ctors_var.SetLinkage(llvm.AppendingLinkage)
+    }
 
     if *dump {
         visitor.module.Dump()
@@ -293,7 +321,7 @@ func main() {
 
     // Build an LLVM module.
     for _, pkg := range packages {
-        file := ast.MergePackageFiles(pkg, ast.FilterFuncDuplicates)
+        file := ast.MergePackageFiles(pkg, 0)
         file.Scope = ast.NewScope(pkg.Scope)
         VisitFile(fset, file)
     }

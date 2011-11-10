@@ -39,7 +39,12 @@ func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) llvm.Value {
         fn = llvm.AddFunction(self.module, "main", fn_type)
         fn.SetLinkage(llvm.ExternalLinkage)
     } else {
-        if fn_name == "init" {fn_name = ""} // Make init functions anonymous
+        if fn_name == "init" {
+            // Make init functions anonymous
+            fn_name = ""
+        } else {
+            f.Name.Obj.Data = fn
+        }
         fn = llvm.AddFunction(self.module, fn_name, fn_type)
         fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
     }
@@ -51,7 +56,7 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
     obj := f.Name.Obj
 
     var fn llvm.Value
-    if obj.Data != nil {
+    if obj != nil && obj.Data != nil {
         var ok bool
         fn, ok = (obj.Data).(llvm.Value)
         if !ok {panic("obj.Data is not nil and is not a llvm.Value")}
@@ -78,9 +83,7 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
 
     // Is it an 'init' function? Then record it.
     if name == "init" {
-        // TODO
-        //self.initfunctions = append(self.initfunctions, fn)
-        panic("TODO")
+        self.initfuncs = append(self.initfuncs, fn)
     } else {
         obj.Data = fn
     }
