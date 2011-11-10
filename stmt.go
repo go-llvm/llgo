@@ -31,7 +31,7 @@ import (
 )
 
 func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
-    value := self.VisitExpr(stmt.X)
+    value := self.builder.CreateLoad(self.VisitExpr(stmt.X), "")
     one := llvm.ConstInt(value.Type(), 1, false)
 
     switch stmt.Tok {
@@ -46,9 +46,8 @@ func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     // update the value in the scope.
     switch x := stmt.X.(type) {
     case *ast.Ident: {
-        if !self.Store(x.Name, value) {
-            panic(fmt.Sprintf("No object found with name '%s'", x.Name))
-        }
+        ptr, _ := (x.Obj.Data).(llvm.Value)
+        self.builder.CreateStore(value, ptr)
         return
     }
     }
@@ -91,10 +90,15 @@ func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
         case *ast.Ident: {
             if x.Name != "_" {
                 value := values[i]
+                obj := x.Obj
                 if stmt.Tok == token.DEFINE {
-                    self.Insert(x.Name, value, true)
+                    ptr := self.builder.CreateAlloca(value.Type(), x.Name)
+                    setindirect(ptr)
+                    self.builder.CreateStore(value, ptr)
+                    obj.Data = ptr
                 } else {
-                    self.Store(x.Name, value)
+                    ptr, _ := (obj.Data).(llvm.Value)
+                    self.builder.CreateStore(value, ptr)
                 }
             }
         }

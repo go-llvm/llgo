@@ -30,29 +30,79 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
+func isglobal(value llvm.Value) bool {
+    return !value.IsAGlobalVariable().IsNil()
+}
+
+func isindirect(value llvm.Value) bool {
+    return !value.Metadata(llvm.MDKindID("indirect")).IsNil()
+}
+
+func setindirect(value llvm.Value) {
+    value.SetMetadata(llvm.MDKindID("indirect"),
+                      llvm.ConstNull(llvm.Int1Type()))
+}
+
 func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
     x := self.VisitExpr(expr.X)
     y := self.VisitExpr(expr.Y)
 
-    // If either is a const and the other is not, then cast the other is not,
-    // cast the constant to the other's type.
+    // If either is a const and the other is not, then cast the constant to the
+    // other's type (to support untyped literals/expressions).
     x_const, y_const := x.IsConstant(), y.IsConstant()
     if x_const && !y_const {
+        if isglobal(x) {x = x.Initializer()}
+        if isindirect(y) {y = self.builder.CreateLoad(y, "")}
         x = self.maybeCast(x, y.Type())
     } else if !x_const && y_const {
+        if isglobal(y) {y = y.Initializer()}
+        if isindirect(x) {x = self.builder.CreateLoad(x, "")}
         y = self.maybeCast(y, x.Type())
+    } else if x_const && y_const {
+        // If either constant is a global variable, 'dereference' it by taking
+        // its initializer, which will never change.
+        if isglobal(x) {x = x.Initializer()}
+        if isglobal(y) {y = y.Initializer()}
     }
 
     // TODO check types/sign, use float operators if appropriate.
     switch expr.Op {
-    case token.MUL: {return self.builder.CreateMul(x, y, "")}
-    case token.QUO: {return self.builder.CreateUDiv(x, y, "")}
-    case token.ADD: {return self.builder.CreateAdd(x, y, "")}
-    case token.SUB: {return self.builder.CreateSub(x, y, "")}
-    case token.EQL: {return self.builder.CreateICmp(llvm.IntEQ, x, y, "")}
-    case token.LSS: {
-        return self.builder.CreateICmp(llvm.IntULT, x, y, "")
-    }
+    case token.MUL:
+        if x_const && y_const {
+            return llvm.ConstMul(x, y)
+        } else {
+            return self.builder.CreateMul(x, y, "")
+        }
+    case token.QUO:
+        if x_const && y_const {
+            return llvm.ConstUDiv(x, y)
+        } else {
+            return self.builder.CreateUDiv(x, y, "")
+        }
+    case token.ADD:
+        if x_const && y_const {
+            return llvm.ConstAdd(x, y)
+        } else {
+            return self.builder.CreateAdd(x, y, "")
+        }
+    case token.SUB:
+        if x_const && y_const {
+            return llvm.ConstSub(x, y)
+        } else {
+            return self.builder.CreateSub(x, y, "")
+        }
+    case token.EQL:
+        if x_const && y_const {
+            return llvm.ConstICmp(llvm.IntEQ, x, y)
+        } else {
+            return self.builder.CreateICmp(llvm.IntEQ, x, y, "")
+        }
+    case token.LSS:
+        if x_const && y_const {
+            return llvm.ConstICmp(llvm.IntULT, x, y)
+        } else {
+            return self.builder.CreateICmp(llvm.IntULT, x, y, "")
+        }
     }
     panic(fmt.Sprint("Unhandled operator: ", expr.Op))
 }
@@ -64,7 +114,7 @@ func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
         if !value.IsAConstant().IsNil() {
             value = llvm.ConstNeg(value)
         } else {
-            value = self.builder.CreateNeg(value, "negate") // XXX name?
+            value = self.builder.CreateNeg(value, "")
         }
     }
     case token.ADD: {/*No-op*/}
@@ -89,11 +139,11 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
                 }
             }
 
-            fn, obj := self.Lookup(x.String())
+            fn, obj := self.Resolve(x.Obj), x.Obj
             if fn.IsNil() {
                 panic(fmt.Sprintf(
                     "No function found with name '%s'", x.String()))
-            } else if obj.Kind == StackVar {
+            } else if obj.Kind == ast.Var {
                 fn = self.builder.CreateLoad(fn, "")
             }
 
@@ -116,6 +166,7 @@ func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
     // TODO handle maps, strings, slices.
 
     index := self.VisitExpr(expr.Index)
+    if isindirect(index) {index = self.builder.CreateLoad(index, "")}
     if index.Type().TypeKind() != llvm.IntegerTypeKind {
         panic("Array index expression must evaluate to an integer")
     }
@@ -141,18 +192,8 @@ func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     case *ast.CallExpr: return self.VisitCallExpr(x)
     case *ast.IndexExpr: return self.VisitIndexExpr(x)
     case *ast.Ident: {
-        value, obj := self.Lookup(x.Name)
-        if value.IsNil() {
-            panic(fmt.Sprintf("No object found with name '%s'", x.Name))
-        } else {
-            // XXX how do we reverse this if we want to do "&ident"?
-            if obj.Kind == StackVar {
-                ptrvalue := value
-                value = self.builder.CreateLoad(value, "")
-                value.SetMetadata(llvm.MDKindID("address"), ptrvalue)
-            }
-        }
-        return value
+        if x.Obj == nil {x.Obj = self.LookupObj(x.Name)}
+        return self.Resolve(x.Obj)
     }
     }
     panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))

@@ -48,7 +48,13 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
         args = make([]llvm.Value, len(expr.Args)+1)
         for i, expr := range expr.Args {
             value := self.VisitExpr(expr)
-            args[i+1] = value
+
+            // Is it a global variable or non-constant? Then we'll need to load
+            // it if it's not a pointer to an array.
+            if isindirect(value) {
+                value = self.builder.CreateLoad(value, "")
+            }
+
             if i > 0 {format += " "}
             switch kind := value.Type().TypeKind(); kind {
             case llvm.IntegerTypeKind: {
@@ -59,13 +65,31 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
                 default: panic(fmt.Sprint("Unhandled integer width ", width))
                 }
             }
+            case llvm.ArrayTypeKind: {
+                // If we see a constant array, we either:
+                //     Create an internal constant if it's a constant array, or
+                //     Create space on the stack and store it there.
+                init_ := value
+                if value.IsConstant() {
+                    value = llvm.AddGlobal(self.module, init_.Type(), "")
+                    value.SetInitializer(init_)
+                    value.SetGlobalConstant(true)
+                    value.SetLinkage(llvm.InternalLinkage)
+                } else {
+                    value = self.builder.CreateAlloca(init_.Type(), "")
+                    self.builder.CreateStore(init_, value)
+                }
+                fallthrough
+            }
             case llvm.PointerTypeKind: {
+                // FIXME don't assume string...
                 // TODO string should be a struct, with length & ptr. We'll
                 // probably encode the type as metadata.
                 format += "%s"
             }
             default: {panic(fmt.Sprint("Unhandled type kind: ", kind))}
             }
+            args[i+1] = value
         }
         format += "\n"
     } else {

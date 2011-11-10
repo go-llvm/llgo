@@ -51,13 +51,7 @@ func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) llvm.Value {
     case token.STRING: {
         s, err := strconv.Unquote(lit.Value)
         if err != nil {panic(err)}
-
-        init_ := llvm.ConstString(s, true)
-        value := llvm.AddGlobal(self.module, init_.Type(), "")
-        value.SetInitializer(init_)
-        value.SetGlobalConstant(true)
-        value.SetLinkage(llvm.InternalLinkage) // TODO external if Caps
-        return value
+        return llvm.ConstString(s, true)
     }
     }
     panic("Unhandled BasicLit node")
@@ -89,15 +83,40 @@ func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) llvm.Value {
     type_ := self.GetType(lit.Type)
     var values []llvm.Value
     if lit.Elts != nil {
-        values = make([]llvm.Value, len(lit.Elts))
-        for i, elt := range lit.Elts {values[i] = self.VisitExpr(elt)}
+        valuemap := make(map[int]llvm.Value)
+        maxi := 0
+        for i, elt := range lit.Elts {
+            var value llvm.Value
+            if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
+                key := self.VisitExpr(kv.Key)
+                i = -1
+                if !key.IsAConstant().IsNil() {i = int(key.SExtValue())}
+                value = self.VisitExpr(kv.Value)
+            } else {
+                value = self.VisitExpr(elt)
+            }
+            if i >= 0 {
+                if i > maxi {maxi = i}
+                valuemap[i] = value
+            } else {
+                panic("array index must be non-negative integer constant")
+            }
+        }
+        values = make([]llvm.Value, maxi+1)
+        for i, value := range valuemap {
+            values[i] = value
+        }
     }
 
     switch type_.TypeKind() {
     case llvm.ArrayTypeKind: {
         elttype := type_.ElementType()
         for i, value := range values {
-            values[i] = self.maybeCast(value, elttype)
+            if value.IsNil() {
+                values[i] = llvm.ConstNull(elttype)
+            } else {
+                values[i] = self.maybeCast(value, elttype)
+            }
         }
         return llvm.ConstArray(elttype, values)
     }

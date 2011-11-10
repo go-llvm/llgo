@@ -34,10 +34,6 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-const (
-    StackVar ast.ObjKind = ast.Lbl + iota + 1
-)
-
 type Visitor struct {
     builder llvm.Builder
     modulename string
@@ -46,32 +42,6 @@ type Visitor struct {
     fileset *token.FileSet
     filescope *ast.Scope
     scope *ast.Scope
-}
-
-// TODO take a param to say whether the value is assigned to a constant?
-func (self *Visitor) Insert(name string, value llvm.Value, stack bool) {
-    t := value.Type()
-    var obj *ast.Object
-    switch t.TypeKind() {
-    case llvm.FunctionTypeKind: {
-        obj = ast.NewObj(ast.Fun, name)
-        obj.Data = value
-    }
-    default: {
-        // TODO differentiate between constant and variable?
-        if stack {
-            obj = ast.NewObj(StackVar, name)
-            ptr := self.builder.CreateAlloca(value.Type(), name)
-            self.builder.CreateStore(value, ptr)
-            obj.Data = ptr
-        } else {
-            obj = ast.NewObj(ast.Var, name)
-            obj.Data = value
-        }
-    }
-    }
-    existing := self.scope.Insert(obj)
-    if existing != nil {existing.Data = obj.Data}
 }
 
 func (self *Visitor) LookupObj(name string) *ast.Object {
@@ -84,37 +54,40 @@ func (self *Visitor) LookupObj(name string) *ast.Object {
     return nil
 }
 
-func (self *Visitor) Lookup(name string) (llvm.Value, *ast.Object) {
-    obj := self.LookupObj(name)
-    if obj != nil {
-        switch obj.Kind {
-        case StackVar: fallthrough
-        case ast.Con: fallthrough
-        case ast.Fun: fallthrough
-        case ast.Var: {
-            value, ok := (obj.Data).(llvm.Value)
-            if ok {return value, obj}
-            panic(fmt.Sprint("Expected llvm.Value, found ", obj.Data))
+func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
+    value, isvalue := (obj.Data).(llvm.Value)
+
+    switch obj.Kind {
+    case ast.Con:
+        if !isvalue {
+            valspec, _ := (obj.Decl).(*ast.ValueSpec)
+            self.VisitValueSpec(valspec, true)
+            value, isvalue = (obj.Data).(llvm.Value)
         }
+    case ast.Fun:
+        if !isvalue {
+            funcdecl, _ := (obj.Decl).(*ast.FuncDecl)
+            value = self.VisitFuncProtoDecl(funcdecl)
+            obj.Data = value
+        }
+    case ast.Var:
+        if !isvalue {
+            valspec, _ := (obj.Decl).(*ast.ValueSpec)
+            self.VisitValueSpec(valspec, false)
+            value, isvalue = (obj.Data).(llvm.Value)
         }
     }
-    return llvm.Value{nil}, nil
+
+    if !isvalue {
+        panic(fmt.Sprint("Expected llvm.Value, found ", obj.Data))
+    }
+    return value
 }
 
-// Store a value in alloca (stack-allocated) memory.
-func (self *Visitor) Store(name string, value llvm.Value) bool {
-    for scope := self.scope; scope != nil; scope = scope.Outer {
-        obj := scope.Lookup(name)
-        if obj != nil && obj.Data != nil && obj.Kind == StackVar {
-            ptr, ok := (obj.Data).(llvm.Value)
-            if ok {
-                self.builder.CreateStore(value, ptr)
-                return true
-            }
-        }
-        panic(fmt.Sprint("Failed to find stack allocated variable"))
-    }
-    return false
+func (self *Visitor) Lookup(name string) (llvm.Value, *ast.Object) {
+    obj := self.LookupObj(name)
+    if obj != nil {return self.Resolve(obj), obj}
+    return llvm.Value{nil}, nil
 }
 
 func (self *Visitor) PushScope() *ast.Scope {
@@ -271,6 +244,9 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
         fmt.Println("Import: ", importspec)
     }
 
+    // Perform fixups.
+    fixConstDecls(file)
+
     // Visit each of the top-level declarations.
     for _, decl := range file.Decls {visitor.VisitDecl(decl);}
 
@@ -301,7 +277,7 @@ func main() {
     }
 */
 
-    // Create 
+    // Create a new scope for each package.
     for _, pkg := range packages {
         pkg.Scope = ast.NewScope(types.Universe)
         obj := ast.NewObj(ast.Pkg, pkg.Name)
@@ -317,10 +293,9 @@ func main() {
 
     // Build an LLVM module.
     for _, pkg := range packages {
-        for _, file := range pkg.Files {
-            file.Scope.Outer = pkg.Scope
-            VisitFile(fset, file)
-        }
+        file := ast.MergePackageFiles(pkg, ast.FilterFuncDuplicates)
+        file.Scope = ast.NewScope(pkg.Scope)
+        VisitFile(fset, file)
     }
 }
 
