@@ -70,6 +70,7 @@ func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
             funcdecl, _ := (obj.Decl).(*ast.FuncDecl)
             value = self.VisitFuncProtoDecl(funcdecl)
             obj.Data = value
+            isvalue = true
         }
     case ast.Var:
         if !isvalue {
