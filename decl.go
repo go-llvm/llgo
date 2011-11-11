@@ -91,13 +91,10 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
 }
 
 func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-    // TODO (from language spec)
-    // If the type is absent and the corresponding expression evaluates to
-    // an untyped constant, the type of the declared variable is bool, int,
-    // float64, or string respectively, depending on whether the value is
-    // a boolean, integer, floating-point, or string constant.
-
-    // TODO value type
+    var value_type llvm.Type
+    if valspec.Type != nil {
+        value_type = self.GetType(valspec.Type)
+    }
 
     var iota_obj *ast.Object = types.Universe.Lookup("iota")
     defer func(data interface{}) {
@@ -126,50 +123,93 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
         // Expression may have side-effects, so compute it regardless of
         // whether it'll be assigned to a name.
         var value llvm.Value
-        if valspec.Values[i] != nil {
+        if valspec.Values != nil && i < len(valspec.Values) &&
+           valspec.Values[i] != nil {
             value = self.VisitExpr(valspec.Values[i])
         }
 
+        // TODO (from language spec)
+        // If the type is absent and the corresponding expression evaluates to
+        // an untyped constant, the type of the declared variable is bool, int,
+        // float64, or string respectively, depending on whether the value is
+        // a boolean, integer, floating-point, or string constant.
+        if value_type.IsNil() {
+            value_type = value.Type()
+        }
+
+        ispackagelevel := len(self.functions) == 0
         name := name_.String()
         if name != "_" {
-            exported := name_.IsExported()
-            constprim := !(value.IsAConstantInt().IsNil() ||
-                           value.IsAConstantFP().IsNil())
-            if isconst && constprim && !exported {
-                // Not exported, and it's a constant. Let's forego creating the
-                // internal constant and just pass around the llvm.Value.
-                obj.Kind = ast.Con // Change to constant
-                obj.Data = value
-            } else {
+            if !ispackagelevel {
+                // The variable should be allocated on the stack if it's
+                // declared inside a function.
                 init_ := value
-
-                // If we're assigning another constant to the constant, then
-                // just take its initializer.
-                if isconst && !init_.IsNil() && isglobal(init_) {
-                    init_ = init_.Initializer()
+                value = self.builder.CreateAlloca(value_type, name)
+                if init_.IsNil() {
+                    // If no initialiser was specified, set it to the
+                    // zero value.
+                    init_ = llvm.ConstNull(value_type)
                 }
-
-                value = llvm.AddGlobal(self.module, init_.Type(), name)
-                if !init_.IsNil() {value.SetInitializer(init_)}
-                if isconst {value.SetGlobalConstant(true)}
-                if !exported {value.SetLinkage(llvm.InternalLinkage)}
-                obj.Data = value
-
-                // If it's not an array, we should mark the value as being
-                // "indirect" (i.e. it must be loaded before use).
-                if init_.Type().TypeKind() != llvm.ArrayTypeKind {
-                    setindirect(value)
+                self.builder.CreateStore(init_, value)
+                setindirect(value)
+            } else {
+                exported := name_.IsExported()
+                constprim := !(value.IsAConstantInt().IsNil() ||
+                               value.IsAConstantFP().IsNil())
+                if isconst && constprim && !exported {
+                    // Not exported, and it's a constant. Let's forego creating
+                    // the internal constant and just pass around the
+                    // llvm.Value.
+                    obj.Kind = ast.Con // Change to constant
+                    obj.Data = self.maybeCast(value, value_type)
+                } else {
+                    init_ := value
+    
+                    // If we're assigning another constant to the constant, then
+                    // just take its initializer.
+                    if isconst && !init_.IsNil() && isglobal(init_) {
+                        init_ = init_.Initializer()
+                    }
+    
+                    value = llvm.AddGlobal(self.module, value_type, name)
+                    if !init_.IsNil() {
+                        init_ = self.maybeCast(init_, value_type)
+                        value.SetInitializer(init_)
+                    }
+                    if isconst {value.SetGlobalConstant(true)}
+                    if !exported {value.SetLinkage(llvm.InternalLinkage)}
+                    obj.Data = value
+    
+                    // If it's not an array, we should mark the value as being
+                    // "indirect" (i.e. it must be loaded before use).
+                    if value_type.TypeKind() != llvm.ArrayTypeKind {
+                        setindirect(value)
+                    }
                 }
             }
+            obj.Data = value
         }
     }
+}
+
+func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
+    obj := spec.Name.Obj
+    type_, istype := (obj.Data).(llvm.Type)
+    if !istype {
+        type_ = self.GetType(spec.Type)
+        obj.Data = type_
+    }
+    self.module.AddTypeName(spec.Name.String(), type_)
 }
 
 func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
     switch decl.Tok {
     case token.IMPORT: // No-op (handled in VisitFile
     case token.TYPE: {
-        panic("Unhandled type declaration");
+        for _, spec := range decl.Specs {
+            typespec, _ := spec.(*ast.TypeSpec)
+            self.VisitTypeSpec(typespec)
+        }
     }
     case token.CONST: {
         for _, spec := range decl.Specs {

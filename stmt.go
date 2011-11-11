@@ -44,14 +44,8 @@ func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     //
     // In the case of a simple variable, we simply calculate the new value and
     // update the value in the scope.
-    switch x := stmt.X.(type) {
-    case *ast.Ident: {
-        ptr, _ := (x.Obj.Data).(llvm.Value)
-        self.builder.CreateStore(value, ptr)
-        return
-    }
-    }
-    panic(fmt.Sprint("Unhandled Expr node: ", reflect.TypeOf(stmt.X)))
+    ptr := self.VisitExpr(stmt.X)
+    self.builder.CreateStore(value, ptr)
 }
 
 func (self *Visitor) VisitBlockStmt(stmt *ast.BlockStmt) {
@@ -86,10 +80,10 @@ func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
     values := make([]llvm.Value, len(stmt.Rhs))
     for i, expr := range stmt.Rhs {values[i] = self.VisitExpr(expr)}
     for i, expr := range stmt.Lhs {
+        value := values[i]
         switch x := expr.(type) {
         case *ast.Ident: {
             if x.Name != "_" {
-                value := values[i]
                 obj := x.Obj
                 if stmt.Tok == token.DEFINE {
                     ptr := self.builder.CreateAlloca(value.Type(), x.Name)
@@ -98,11 +92,15 @@ func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
                     obj.Data = ptr
                 } else {
                     ptr, _ := (obj.Data).(llvm.Value)
+                    value = self.maybeCast(value, ptr.Type().ElementType())
                     self.builder.CreateStore(value, ptr)
                 }
             }
         }
-        default: panic("Unhandled assignment")
+        default:
+            ptr := self.VisitExpr(expr)
+            value = self.maybeCast(value, ptr.Type().ElementType())
+            self.builder.CreateStore(value, ptr)
         }
     }
 }

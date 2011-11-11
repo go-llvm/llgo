@@ -40,7 +40,7 @@ func isindirect(value llvm.Value) bool {
 
 func setindirect(value llvm.Value) {
     value.SetMetadata(llvm.MDKindID("indirect"),
-                      llvm.ConstNull(llvm.Int1Type()))
+                      llvm.ConstAllOnes(llvm.Int1Type()))
 }
 
 func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
@@ -182,6 +182,34 @@ func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
     return self.builder.CreateLoad(element, "")
 }
 
+func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
+    lhs := self.VisitExpr(expr.X)
+
+    // Map name to an index.
+    zero_value := llvm.ConstInt(llvm.Int32Type(), 0, false)
+    indexes := make([]llvm.Value, 0)
+    indexes = append(indexes, zero_value)
+
+    struct_type := lhs.Type().ElementType()
+    if struct_type.TypeKind() == llvm.PointerTypeKind {
+        indexes = append(indexes, zero_value)
+        struct_type = struct_type.ElementType()
+    }
+
+    index := self.typefields[struct_type.C][expr.Sel.String()]
+    index_value := llvm.ConstInt(llvm.Int32Type(), uint64(index), false)
+    indexes = append(indexes, index_value)
+
+    if lhs.Type().TypeKind() == llvm.PointerTypeKind {
+        value := self.builder.CreateGEP(lhs, indexes, "")
+        setindirect(value)
+        return value
+    } else {
+        // TODO use 'extractvalue' instruction
+    }
+    panic("Don't know how to extract from a register-based struct")
+}
+
 func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     switch x:= expr.(type) {
     case *ast.BasicLit: return self.VisitBasicLit(x)
@@ -191,6 +219,7 @@ func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     case *ast.UnaryExpr: return self.VisitUnaryExpr(x)
     case *ast.CallExpr: return self.VisitCallExpr(x)
     case *ast.IndexExpr: return self.VisitIndexExpr(x)
+    case *ast.SelectorExpr: return self.VisitSelectorExpr(x)
     case *ast.Ident: {
         if x.Obj == nil {x.Obj = self.LookupObj(x.Name)}
         return self.Resolve(x.Obj)
