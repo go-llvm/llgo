@@ -34,15 +34,15 @@ import (
 )
 
 type Visitor struct {
-    builder llvm.Builder
+    builder    llvm.Builder
     modulename string
-    module llvm.Module
-    functions []llvm.Value
-    initfuncs []llvm.Value
-    typefields map[interface{}]map[string]int
-    fileset *token.FileSet
-    filescope *ast.Scope
-    scope *ast.Scope
+    module     llvm.Module
+    functions  []llvm.Value
+    initfuncs  []llvm.Value
+    typeinfo   map[interface{}]*TypeInfo
+    fileset    *token.FileSet
+    filescope  *ast.Scope
+    scope      *ast.Scope
 }
 
 func (self *Visitor) LookupObj(name string) *ast.Object {
@@ -74,8 +74,14 @@ func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
         }
     case ast.Var:
         if !isvalue {
-            valspec, _ := (obj.Decl).(*ast.ValueSpec)
-            self.VisitValueSpec(valspec, false)
+            switch x := (obj.Decl).(type) {
+            case *ast.ValueSpec:
+                self.VisitValueSpec(x, false)
+            case *ast.Field:
+                // No-op. Fields will be yielded for function arg/recv/ret.
+                // We update the .Data field of the object when we enter the
+                // function definition.
+            }
             value, isvalue = (obj.Data).(llvm.Value)
         }
     }
@@ -147,7 +153,7 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     visitor.scope = file.Scope
     visitor.builder = llvm.GlobalContext().NewBuilder()
     visitor.initfuncs = make([]llvm.Value, 0)
-    visitor.typefields = make(map[interface{}]map[string]int)
+    visitor.typeinfo = make(map[interface{}]*TypeInfo)
     defer visitor.builder.Dispose()
     visitor.modulename = file.Name.String()
     visitor.module = llvm.NewModule(visitor.modulename)
@@ -160,7 +166,8 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     }
 
     // Perform fixups.
-    fixConstDecls(file)
+    visitor.fixConstDecls(file)
+    visitor.fixMethodDecls(file)
 
     // Visit each of the top-level declarations.
     for _, decl := range file.Decls {visitor.VisitDecl(decl);}

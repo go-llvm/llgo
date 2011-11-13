@@ -124,12 +124,13 @@ func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
 }
 
 func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
+    var fn llvm.Value
     switch x := (expr.Fun).(type) {
-    case *ast.Ident: {
+    case *ast.Ident:
         switch x.String() {
-        case "println": {return self.VisitPrintln(expr)}
-        case "len": {return self.VisitLen(expr)}
-        default: {
+        case "println": return self.VisitPrintln(expr)
+        case "len": return self.VisitLen(expr)
+        default:
             // Is it a type? Then this is a conversion (e.g. int(123))
             if expr.Args != nil && len(expr.Args) == 1 {
                 typ := self.GetType(x)
@@ -139,26 +140,47 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
                 }
             }
 
-            fn, obj := self.Resolve(x.Obj), x.Obj
+            fn = self.Resolve(x.Obj)
             if fn.IsNil() {
                 panic(fmt.Sprintf(
                     "No function found with name '%s'", x.String()))
-            } else if obj.Kind == ast.Var {
-                fn = self.builder.CreateLoad(fn, "")
             }
+        }
+    default:
+        fn = self.VisitExpr(expr.Fun)
+    }
 
-            // TODO handle varargs
-            var args []llvm.Value = nil
-            if expr.Args != nil {
-                args = make([]llvm.Value, len(expr.Args))
-                for i, expr := range expr.Args {args[i] = self.VisitExpr(expr)}
-            }
-            return self.builder.CreateCall(fn, args, "")
+    //if isindirect(fn) {
+    //    fn = self.builder.CreateLoad(fn, "")
+    //}
+
+    // Is it a method call? We'll extract the receiver from metadata here,
+    // and add it in as the first argument later.
+    receiver := fn.Metadata(llvm.MDKindID("receiver"))
+
+    // TODO handle varargs
+    var args []llvm.Value = nil
+    if expr.Args != nil {
+        arg_offset := 0
+        if !receiver.IsNil() {
+            arg_offset++
+            args = make([]llvm.Value, len(expr.Args)+1)
+            args[0] = receiver
+        } else {
+            args = make([]llvm.Value, len(expr.Args))
         }
+
+        fn_type := fn.Type().ElementType() // fn.Type() is a ptr-to-fn
+        param_types := fn_type.ParamTypes()
+        for i, expr := range expr.Args {
+            value := self.VisitExpr(expr)
+            param_type := param_types[arg_offset+i]
+            args[arg_offset+i] = self.maybeCast(value, param_type)
         }
+    } else if !receiver.IsNil() {
+        args = []llvm.Value{receiver}
     }
-    }
-    panic("Unhandled CallExpr")
+    return self.builder.CreateCall(fn, args, "")
 }
 
 func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
@@ -185,29 +207,45 @@ func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
 func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
     lhs := self.VisitExpr(expr.X)
 
+    // TODO handle interfaces.
+
+    // TODO when we support embedded types, we'll need to do a breadth-first
+    // search for the name, since the specification says to take the shallowest
+    // field with the specified name.
+
     // Map name to an index.
     zero_value := llvm.ConstInt(llvm.Int32Type(), 0, false)
     indexes := make([]llvm.Value, 0)
     indexes = append(indexes, zero_value)
 
-    struct_type := lhs.Type().ElementType()
-    if struct_type.TypeKind() == llvm.PointerTypeKind {
+    element_type := lhs.Type().ElementType()
+    if element_type.TypeKind() == llvm.PointerTypeKind {
         indexes = append(indexes, zero_value)
-        struct_type = struct_type.ElementType()
+        element_type = element_type.ElementType()
     }
 
-    index := self.typefields[struct_type.C][expr.Sel.String()]
-    index_value := llvm.ConstInt(llvm.Int32Type(), uint64(index), false)
-    indexes = append(indexes, index_value)
-
-    if lhs.Type().TypeKind() == llvm.PointerTypeKind {
-        value := self.builder.CreateGEP(lhs, indexes, "")
-        setindirect(value)
-        return value
+    typeinfo := self.typeinfo[element_type.C]
+    index, ok := typeinfo.FieldIndex(expr.Sel.String())
+    if ok {
+        index_value := llvm.ConstInt(llvm.Int32Type(), uint64(index), false)
+        indexes = append(indexes, index_value)
+        if lhs.Type().TypeKind() == llvm.PointerTypeKind {
+            value := self.builder.CreateGEP(lhs, indexes, "")
+            setindirect(value)
+            return value
+        }
+        panic("Don't know how to extract from a register-based struct")
     } else {
-        // TODO use 'extractvalue' instruction
+        method_obj := typeinfo.MethodByName(expr.Sel.String())
+        if method_obj != nil {
+            method := self.Resolve(method_obj)
+            method.SetMetadata(llvm.MDKindID("receiver"), lhs)
+            return method
+        } else {
+            panic("Failed to locate field or method: " + expr.Sel.String())
+        }
     }
-    panic("Don't know how to extract from a register-based struct")
+    return llvm.Value{nil}
 }
 
 func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {

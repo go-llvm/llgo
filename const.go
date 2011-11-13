@@ -29,7 +29,7 @@ import (
 
 // fixConstDecls will walk through a file and update ConstDecl's so that each
 // ValueSpec has a valid Values Expr-list.
-func fixConstDecls(file *ast.File) {
+func (self *Visitor) fixConstDecls(file *ast.File) {
     if file.Decls == nil {return}
     for _, decl := range file.Decls {
         if gendecl, ok := decl.(*ast.GenDecl); ok {

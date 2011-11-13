@@ -42,11 +42,25 @@ func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) llvm.Value {
         if fn_name == "init" {
             // Make init functions anonymous
             fn_name = ""
-        } else {
-            f.Name.Obj.Data = fn
+        } else if f.Recv != nil {
+            return_type := fn_type.ReturnType()
+            param_types := fn_type.ParamTypes()
+            isvararg := fn_type.IsFunctionVarArg()
+
+            // Add receiver as the first parameter type.
+            recv_type := []llvm.Type{self.GetType(f.Recv.List[0].Type)}
+            if param_types == nil {
+                param_types = recv_type
+            } else {
+                param_types = append(recv_type, param_types...)
+            }
+            fn_type = llvm.FunctionType(return_type, param_types, isvararg)
         }
         fn = llvm.AddFunction(self.module, fn_name, fn_type)
         fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
+    }
+    if f.Name.Obj != nil {
+        f.Name.Obj.Data = fn
     }
     return fn
 }
@@ -62,6 +76,26 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
         if !ok {panic("obj.Data is not nil and is not a llvm.Value")}
     } else {
         fn = self.VisitFuncProtoDecl(f)
+    }
+
+    // Bind receiver, arguments and return values to their identifiers/objects.
+    param_i := 0
+    if f.Recv != nil {
+        f.Recv.List[0].Names[0].Obj.Data = fn.Param(0)
+        param_i++
+    }
+    if param_i < fn.ParamsCount() {
+        for _, field := range f.Type.Params.List {
+            namecount := len(field.Names)
+            if namecount > 0 {
+                for j := 0; j < namecount; j++ {
+                    name := field.Names[j]
+                    value := fn.Param(param_i+j)
+                    if name.String() != "_" {name.Obj.Data = value}
+                }
+            }
+            param_i += namecount
+        }
     }
 
     entry := llvm.AddBasicBlock(fn, "entry")
@@ -85,7 +119,9 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
     if name == "init" {
         self.initfuncs = append(self.initfuncs, fn)
     } else {
-        obj.Data = fn
+        if obj != nil {
+            obj.Data = fn
+        }
     }
     return fn
 }

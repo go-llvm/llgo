@@ -29,6 +29,31 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
+// A struct for maintaining information about types. Types are persisted in the
+// LLVM bitcode, and store information about struct fields and methods.
+//
+// XXX persistence isn't implemented yet
+type TypeInfo struct {
+    Methods      map[string]*ast.Object
+    FieldIndexes map[string]int
+}
+
+// Look up a method by name. If the func declaration for the method has not yet
+// been processed, then we'll look it up in the package scope wherein the type
+// was defined.
+func (t *TypeInfo) MethodByName(name string) *ast.Object {
+    if t.Methods != nil {
+        return t.Methods[name]
+    }
+    return nil
+}
+
+func (t *TypeInfo) FieldIndex(name string) (i int, exists bool) {
+    i, exists = t.FieldIndexes[name]
+    return
+}
+
+// Get an llvm.Type from an identifier.
 func (self *Visitor) IdentGetType(ident *ast.Ident) llvm.Type {
     switch ident.Name {
         case "bool": return llvm.Int1Type()
@@ -81,8 +106,7 @@ func (self *Visitor) GetType(expr ast.Expr) llvm.Type {
         return self.IdentGetType(x)
     case *ast.FuncType:
         type_ := self.VisitFuncType(x)
-        type_ = llvm.PointerType(type_, 0)
-        return type_
+        return llvm.PointerType(type_, 0)
     case *ast.ArrayType:
         var len_ int = -1
         if x.Len == nil {panic("Unhandled slice ArrayType")}
@@ -99,6 +123,9 @@ func (self *Visitor) GetType(expr ast.Expr) llvm.Type {
     case *ast.StructType:
         type_ := self.VisitStructType(x)
         return type_
+    case *ast.StarExpr:
+        type_ := self.GetType(x.X)
+        return llvm.PointerType(type_, 0)
     default:
         panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
     }
@@ -109,11 +136,24 @@ func (self *Visitor) VisitFuncType(f *ast.FuncType) llvm.Type {
     var fn_args []llvm.Type = nil
     var fn_rettype llvm.Type
 
-    // TODO process args
+    if f.Params != nil && f.Params.List != nil {
+        fn_args = make([]llvm.Type, 0)
+        for i := 0; i < len(f.Params.List); i++ {
+            namecount := 1
+            if f.Params.List[i].Names != nil {
+                namecount = len(f.Params.List[i].Names)
+            }
+            args := make([]llvm.Type, namecount)
+            typ := self.GetType(f.Params.List[i].Type)
+            for j := 0; j < namecount; j++ {args[j] = typ}
+            fn_args = append(fn_args, args...)
+        }
+    }
 
     if f.Results == nil || f.Results.List == nil {
         fn_rettype = llvm.VoidType()
     } else {
+        // TODO handle aggregate return types
         for i := 0; i < len(f.Results.List); i++ {
             fn_rettype = self.GetType(f.Results.List[i].Type)
         }
@@ -122,11 +162,12 @@ func (self *Visitor) VisitFuncType(f *ast.FuncType) llvm.Type {
 }
 
 func (self *Visitor) VisitStructType(s *ast.StructType) llvm.Type {
+    typeinfo := &TypeInfo{}
+
     var elttypes []llvm.Type
-    var names map[string]int
     if s.Fields != nil && s.Fields.List != nil {
         elttypes = []llvm.Type{}
-        names = make(map[string]int, len(s.Fields.List))
+        typeinfo.FieldIndexes = make(map[string]int, len(s.Fields.List))
         var i int = 0
         for _, field := range s.Fields.List {
             // TODO handle field tag
@@ -135,7 +176,7 @@ func (self *Visitor) VisitStructType(s *ast.StructType) llvm.Type {
                 fieldtypes := make([]llvm.Type, len(field.Names))
                 for j, name := range field.Names {
                     fieldtypes[j] = fieldtype
-                    names[name.String()] = i+j
+                    typeinfo.FieldIndexes[name.String()] = i+j
                 }
                 elttypes = append(elttypes, fieldtypes...)
                 i += len(field.Names)
@@ -148,7 +189,7 @@ func (self *Visitor) VisitStructType(s *ast.StructType) llvm.Type {
     type_ := llvm.StructType(elttypes, false)
 
     // Add a mapping from type to a slice of names.
-    self.typefields[type_.C] = names
+    self.typeinfo[type_.C] = typeinfo
 
     // TODO record the names as a global constant array. Then any
     // values of this struct type will have a metadata node attached

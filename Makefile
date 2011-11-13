@@ -9,7 +9,8 @@ GOFILES=llgo.go \
         literals.go \
         len.go \
         const.go \
-        types.go
+        types.go \
+        methods.go
 
 include $(GOROOT)/src/Make.cmd
 
