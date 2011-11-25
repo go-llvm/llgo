@@ -57,7 +57,7 @@ func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) llvm.Value {
             fn_type = llvm.FunctionType(return_type, param_types, isvararg)
         }
         fn = llvm.AddFunction(self.module, fn_name, fn_type)
-        fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
+        //fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
     }
     if f.Name.Obj != nil {
         f.Name.Obj.Data = fn
@@ -91,6 +91,7 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
                 for j := 0; j < namecount; j++ {
                     name := field.Names[j]
                     value := fn.Param(param_i+j)
+                    value.SetName(name.String())
                     if name.String() != "_" {name.Obj.Data = value}
                 }
             }
@@ -185,6 +186,8 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                     // If no initialiser was specified, set it to the
                     // zero value.
                     init_ = llvm.ConstNull(value_type)
+                } else {
+                    init_ = self.maybeCast(init_, value_type)
                 }
                 self.builder.CreateStore(init_, value)
                 setindirect(value)

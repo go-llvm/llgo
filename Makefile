@@ -10,7 +10,8 @@ GOFILES=llgo.go \
         len.go \
         const.go \
         types.go \
-        methods.go
+        methods.go \
+        goroutine.go
 
 include $(GOROOT)/src/Make.cmd
 

@@ -91,13 +91,11 @@ func (self *Visitor) IdentGetType(ident *ast.Ident) llvm.Type {
             case *ast.TypeSpec:
                 self.VisitTypeSpec(x)
                 type_, istype = (obj.Data).(llvm.Type)
-            default: panic("Unhandled type")
             }
         }
         if istype {return type_}
     }
-
-    panic("Failed to resolve type: " + ident.Name)
+    return llvm.Type{nil}
 }
 
 func (self *Visitor) GetType(expr ast.Expr) llvm.Type {

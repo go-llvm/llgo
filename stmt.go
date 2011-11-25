@@ -167,6 +167,86 @@ func (self *Visitor) VisitForStmt(stmt *ast.ForStmt) {
     self.builder.SetInsertPointAtEnd(done_block)
 }
 
+func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
+    //stmt.Call *ast.CallExpr
+    // TODO 
+    var fn llvm.Value
+    switch x := (stmt.Call.Fun).(type) {
+    case *ast.Ident:
+        fn = self.Resolve(x.Obj)
+        if fn.IsNil() {
+            panic(fmt.Sprintf(
+                "No function found with name '%s'", x.String()))
+        }
+    default:
+        fn = self.VisitExpr(stmt.Call.Fun)
+    }
+
+    // Evaluate arguments, store in a structure on the stack.
+    var args_struct_type llvm.Type
+    var args_mem llvm.Value
+    var args_size llvm.Value
+    if stmt.Call.Args != nil {
+        fn_type := fn.Type().ElementType()
+        param_types := fn_type.ParamTypes()
+        args_struct_type = llvm.StructType(param_types, false)
+        args_mem = self.builder.CreateAlloca(args_struct_type, "")
+        for i, expr := range stmt.Call.Args {
+            value_i := self.VisitExpr(expr)
+            value_i = self.maybeCast(value_i, param_types[i])
+            arg_i := self.builder.CreateGEP(args_mem, []llvm.Value{
+                    llvm.ConstInt(llvm.Int32Type(), 0, false),
+                    llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
+            if isindirect(value_i) {
+                value_i = self.builder.CreateLoad(value_i, "")
+            }
+            self.builder.CreateStore(value_i, arg_i)
+        }
+        args_size = llvm.SizeOf(args_struct_type)
+    } else {
+        args_struct_type = llvm.VoidType()
+        args_mem = llvm.ConstNull(llvm.PointerType(args_struct_type, 0))
+        args_size = llvm.ConstInt(llvm.Int32Type(), 0, false)
+    }
+
+    // When done, return to where we were.
+    defer self.builder.SetInsertPointAtEnd(self.builder.GetInsertBlock())
+
+    // Create a function that will take a pointer to a structure of the type
+    // defined above, or no parameters if there are none to pass.
+    indirect_fn_type := llvm.FunctionType(
+        llvm.VoidType(),
+        []llvm.Type{llvm.PointerType(args_struct_type, 0)}, false)
+    indirect_fn := llvm.AddFunction(self.module, "", indirect_fn_type)
+    indirect_fn.SetFunctionCallConv(llvm.CCallConv)
+
+    // Call "newgoroutine" with the indirect function and stored args.
+    newgoroutine := getnewgoroutine(self.module)
+    ngr_param_types := newgoroutine.Type().ElementType().ParamTypes()
+    fn_arg := self.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
+    args_arg := self.builder.CreateBitCast(args_mem,
+        llvm.PointerType(llvm.Int8Type(), 0), "")
+    size_arg := self.maybeCast(args_size, llvm.Int32Type())
+    self.builder.CreateCall(newgoroutine,
+        []llvm.Value{fn_arg, args_arg, size_arg}, "")
+
+    entry := llvm.AddBasicBlock(indirect_fn, "entry")
+    self.builder.SetInsertPointAtEnd(entry)
+    var args []llvm.Value
+    if stmt.Call.Args != nil {
+        args_mem = indirect_fn.Param(0)
+        args = make([]llvm.Value, len(stmt.Call.Args))
+        for i := range stmt.Call.Args {
+            arg_i := self.builder.CreateGEP(args_mem, []llvm.Value{
+                       llvm.ConstInt(llvm.Int32Type(), 0, false),
+                       llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
+            args[i] = self.builder.CreateLoad(arg_i, "")
+        }
+    }
+    self.builder.CreateCall(fn, args, "")
+    self.builder.CreateRetVoid()
+}
+
 func (self *Visitor) VisitStmt(stmt ast.Stmt) {
     switch x := stmt.(type) {
     case *ast.ReturnStmt: self.VisitReturnStmt(x)
@@ -177,6 +257,7 @@ func (self *Visitor) VisitStmt(stmt ast.Stmt) {
     case *ast.ExprStmt: self.VisitExpr(x.X)
     case *ast.BlockStmt: self.VisitBlockStmt(x)
     case *ast.DeclStmt: self.VisitDecl(x.Decl)
+    case *ast.GoStmt: self.VisitGoStmt(x)
     default: panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
     }
 }
