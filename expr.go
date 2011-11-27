@@ -63,6 +63,9 @@ func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
         // its initializer, which will never change.
         if isglobal(x) {x = x.Initializer()}
         if isglobal(y) {y = y.Initializer()}
+    } else {
+        if isindirect(x) {x = self.builder.CreateLoad(x, "")}
+        if isindirect(y) {y = self.builder.CreateLoad(y, "")}
     }
 
     // TODO check types/sign, use float operators if appropriate.
@@ -130,6 +133,7 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
         switch x.String() {
         case "println": return self.VisitPrintln(expr)
         case "len": return self.VisitLen(expr)
+        case "new": return self.VisitNew(expr)
         default:
             // Is it a type? Then this is a conversion (e.g. int(123))
             if expr.Args != nil && len(expr.Args) == 1 {
@@ -206,6 +210,14 @@ func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
 
 func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
     lhs := self.VisitExpr(expr.X)
+    if lhs.IsNil() {
+        // The only time we should get a nil result is if the object is a
+        // package.
+        pkgident := (expr.X).(*ast.Ident)
+        pkgscope := (pkgident.Obj.Data).(*ast.Scope)
+        obj := pkgscope.Lookup(expr.Sel.String())
+        return self.Resolve(obj)
+    }
 
     // TODO handle interfaces.
 
@@ -248,6 +260,21 @@ func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
     return llvm.Value{nil}
 }
 
+func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) llvm.Value {
+    // Are we dereferencing a pointer that's on the stack? Then load the stack
+    // value.
+    operand := self.VisitExpr(expr.X)
+    if isindirect(operand) {
+        operand = self.builder.CreateLoad(operand, "")
+    }
+
+    // We don't want to immediately load the value, as we might be doing an
+    // assignment rather than an evaluation. Instead, we return the pointer and
+    // tell the caller to load it on demand.
+    setindirect(operand)
+    return operand
+}
+
 func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     switch x:= expr.(type) {
     case *ast.BasicLit: return self.VisitBasicLit(x)
@@ -258,6 +285,7 @@ func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
     case *ast.CallExpr: return self.VisitCallExpr(x)
     case *ast.IndexExpr: return self.VisitIndexExpr(x)
     case *ast.SelectorExpr: return self.VisitSelectorExpr(x)
+    case *ast.StarExpr: return self.VisitStarExpr(x)
     case *ast.Ident: {
         if x.Obj == nil {x.Obj = self.LookupObj(x.Name)}
         return self.Resolve(x.Obj)

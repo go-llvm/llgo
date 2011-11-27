@@ -28,6 +28,7 @@ import (
     "go/token"
     "go/types"
     "reflect"
+    "strconv"
     "github.com/axw/gollvm/llvm"
 )
 
@@ -241,27 +242,41 @@ func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
     self.module.AddTypeName(spec.Name.String(), type_)
 }
 
+func (self *Visitor) VisitImportSpec(spec *ast.ImportSpec) {
+    // TODO we will need to create our own Importer.
+    path, err := strconv.Unquote(spec.Path.Value)
+    if err != nil {panic(err)}
+    pkg, err := types.GcImporter(self.imports, path)
+    if err != nil {panic(err)}
+
+    // TODO handle spec.Name (local package name), if not nil
+
+    // Insert the package object into the scope.
+    self.filescope.Outer.Insert(pkg)
+}
+
 func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
     switch decl.Tok {
-    case token.IMPORT: // No-op (handled in VisitFile
-    case token.TYPE: {
+    case token.IMPORT:
+        for _, spec := range decl.Specs {
+            importspec, _ := spec.(*ast.ImportSpec)
+            self.VisitImportSpec(importspec)
+        }
+    case token.TYPE:
         for _, spec := range decl.Specs {
             typespec, _ := spec.(*ast.TypeSpec)
             self.VisitTypeSpec(typespec)
         }
-    }
-    case token.CONST: {
+    case token.CONST:
         for _, spec := range decl.Specs {
             valspec, _ := spec.(*ast.ValueSpec)
             self.VisitValueSpec(valspec, true)
         }
-    }
-    case token.VAR: {
+    case token.VAR:
         for _, spec := range decl.Specs {
             valspec, _ := spec.(*ast.ValueSpec)
             self.VisitValueSpec(valspec, false)
         }
-    }
     }
 }
 

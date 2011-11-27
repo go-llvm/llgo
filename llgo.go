@@ -40,6 +40,7 @@ type Visitor struct {
     functions  []llvm.Value
     initfuncs  []llvm.Value
     typeinfo   map[interface{}]*TypeInfo
+    imports    map[string]*ast.Object
     fileset    *token.FileSet
     filescope  *ast.Scope
     scope      *ast.Scope
@@ -56,6 +57,7 @@ func (self *Visitor) LookupObj(name string) *ast.Object {
 }
 
 func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
+    if obj.Kind == ast.Pkg {return llvm.Value{nil}}
     value, isvalue := (obj.Data).(llvm.Value)
 
     switch obj.Kind {
@@ -157,13 +159,8 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     defer visitor.builder.Dispose()
     visitor.modulename = file.Name.String()
     visitor.module = llvm.NewModule(visitor.modulename)
+    visitor.imports = make(map[string]*ast.Object)
     defer visitor.module.Dispose()
-
-    // Process imports first.
-    for _, importspec := range file.Imports {
-        // 
-        fmt.Println("Import: ", importspec)
-    }
 
     // Perform fixups.
     visitor.fixConstDecls(file)
@@ -216,14 +213,6 @@ func main() {
         fmt.Printf("ParseFiles failed: %s\n", err.String())
         os.Exit(1)
     }
-
-    // Resolve imports.
-/*
-    imports := make(map[string]*ast.Object)
-    for _, pkg := range packages {
-        types.GcImporter(imports, path)
-    }
-*/
 
     // Create a new scope for each package.
     for _, pkg := range packages {

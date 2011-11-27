@@ -11,7 +11,8 @@ GOFILES=llgo.go \
         const.go \
         types.go \
         methods.go \
-        goroutine.go
+        goroutine.go \
+        new.go
 
 include $(GOROOT)/src/Make.cmd
 
