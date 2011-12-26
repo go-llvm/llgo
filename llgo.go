@@ -195,6 +195,9 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
         global_ctors_var.SetLinkage(llvm.AppendingLinkage)
     }
 
+    // Create debug metadata.
+    visitor.createCompileUnitMetadata()
+
     if *dump {
         visitor.module.Dump()
     } else {

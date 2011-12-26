@@ -63,7 +63,7 @@ func (self *Visitor) VisitReturnStmt(stmt *ast.ReturnStmt) {
         if len(stmt.Results) == 1 {
             value := self.VisitExpr(stmt.Results[0])
             cur_fn := self.functions[len(self.functions)-1]
-            fn_type := cur_fn.Type().ReturnType()
+            fn_type := cur_fn.Type().ElementType()
             return_type := fn_type.ReturnType()
             self.builder.CreateRet(self.maybeCast(value, return_type))
         } else {

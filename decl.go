@@ -106,12 +106,13 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
     self.functions = append(self.functions, fn)
     if f.Body != nil {self.VisitBlockStmt(f.Body)}
     self.functions = self.functions[0:len(self.functions)-1]
-    fn_type := fn.Type().ReturnType() // fn.Type() is a pointer-to-function
+    fn_type := fn.Type().ElementType() // fn.Type() is a pointer-to-function
 
     if fn_type.ReturnType().TypeKind() == llvm.VoidTypeKind {
         last_block := fn.LastBasicBlock()
+
         lasti := last_block.LastInstruction()
-        if lasti.IsNil() || lasti.Opcode() != llvm.Ret {
+        if lasti.IsNil() || lasti.InstructionOpcode() != llvm.Ret {
             // Assume nil return type, AST should be checked first.
             self.builder.CreateRetVoid()
         }
@@ -239,7 +240,6 @@ func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
         type_ = self.GetType(spec.Type)
         obj.Data = type_
     }
-    self.module.AddTypeName(spec.Name.String(), type_)
 }
 
 func (self *Visitor) VisitImportSpec(spec *ast.ImportSpec) {

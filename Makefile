@@ -12,7 +12,9 @@ GOFILES=llgo.go \
         types.go \
         methods.go \
         goroutine.go \
-        new.go
+        new.go \
+        debug.go \
+        version.go
 
 include $(GOROOT)/src/Make.cmd
 

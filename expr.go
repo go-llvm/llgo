@@ -35,12 +35,13 @@ func isglobal(value llvm.Value) bool {
 }
 
 func isindirect(value llvm.Value) bool {
-    return !value.Metadata(llvm.MDKindID("indirect")).IsNil()
+    //return !value.Metadata(llvm.MDKindID("indirect")).IsNil()
+    return false
 }
 
 func setindirect(value llvm.Value) {
-    value.SetMetadata(llvm.MDKindID("indirect"),
-                      llvm.ConstAllOnes(llvm.Int1Type()))
+    //value.SetMetadata(llvm.MDKindID("indirect"),
+    //                  llvm.ConstAllOnes(llvm.Int1Type()))
 }
 
 func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
@@ -63,6 +64,8 @@ func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
         // its initializer, which will never change.
         if isglobal(x) {x = x.Initializer()}
         if isglobal(y) {y = y.Initializer()}
+        // XXX temporary fix; we should be using exp/types/Const.
+        y = self.maybeCast(y, x.Type())
     } else {
         if isindirect(x) {x = self.builder.CreateLoad(x, "")}
         if isindirect(y) {y = self.builder.CreateLoad(y, "")}
@@ -160,7 +163,8 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
 
     // Is it a method call? We'll extract the receiver from metadata here,
     // and add it in as the first argument later.
-    receiver := fn.Metadata(llvm.MDKindID("receiver"))
+    //receiver := fn.Metadata(llvm.MDKindID("receiver")) // TODO
+    receiver := llvm.Value{nil}
 
     // TODO handle varargs
     var args []llvm.Value = nil
