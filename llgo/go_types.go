@@ -8,7 +8,7 @@
 // Package types declares the types used to represent Go types.
 //
 
-package main
+package llgo
 
 import (
 	"go/ast"

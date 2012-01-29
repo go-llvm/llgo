@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "go/ast"
@@ -28,7 +28,7 @@ import (
 
 // fixMethodDecls will walk through a file and associate functions with their
 // receiver type.
-func (self *Visitor) fixMethodDecls(file *ast.File) {
+func (self *compiler) fixMethodDecls(file *ast.File) {
     if file.Decls == nil {return}
     for _, decl := range file.Decls {
         if funcdecl, ok := decl.(*ast.FuncDecl); ok {

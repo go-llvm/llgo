@@ -20,19 +20,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "go/ast"
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitNew(expr *ast.CallExpr) Value {
+func (self *compiler) VisitNew(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
-    typ := self.GetType(expr.Args[0]).LLVMType()
-    mem := self.builder.CreateMalloc(typ, "")
-    self.builder.CreateStore(llvm.ConstNull(typ), mem)
-    return NewLLVMValue(self.builder, mem)
+    typ := self.GetType(expr.Args[0])
+    llvm_typ := typ.LLVMType()
+    mem := self.builder.CreateMalloc(llvm_typ, "")
+    self.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
+    return NewLLVMValue(self.builder, mem, typ)
 }
 
 // vim: set ft=go :

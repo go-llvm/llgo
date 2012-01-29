@@ -6,7 +6,7 @@
 
 // This file implements operations on ideal constants.
 
-package main
+package llgo
 
 import (
 	"big"

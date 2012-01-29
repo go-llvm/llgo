@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
@@ -28,20 +28,20 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) Value {
+func (self *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
     return NewConstValue(lit.Kind, lit.Value)
 }
 
-func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) Value {
+func (self *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
     fn_type := self.VisitFuncType(lit.Type)
-    fn := llvm.AddFunction(self.module, "", fn_type.LLVMType())
+    fn := llvm.AddFunction(self.module.Module, "", fn_type.LLVMType())
     fn.SetFunctionCallConv(llvm.FastCallConv)
 
     defer self.builder.SetInsertPointAtEnd(self.builder.GetInsertBlock())
     entry := llvm.AddBasicBlock(fn, "entry")
     self.builder.SetInsertPointAtEnd(entry)
 
-    fn_value := NewLLVMValue(self.builder, fn)
+    fn_value := NewLLVMValue(self.builder, fn, fn_type)
     self.functions = append(self.functions, fn_value)
     self.VisitBlockStmt(lit.Body)
     if fn_type.Results == nil {
@@ -56,7 +56,7 @@ func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) Value {
 }
 
 // XXX currently only handles composite array literals
-func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) Value {
+func (self *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
     typ := self.GetType(lit.Type)
     var values []Value
     if lit.Elts != nil {
@@ -99,7 +99,7 @@ func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) Value {
             }
         }
         return NewLLVMValue(self.builder,
-            llvm.ConstArray(elttype.LLVMType(), llvm_values))
+            llvm.ConstArray(elttype.LLVMType(), llvm_values), typ)
     }
     }
     panic(fmt.Sprint("Unhandled type kind: ", typ))

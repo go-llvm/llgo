@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
@@ -30,7 +30,7 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
+func (self *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     ptr := self.VisitExpr(stmt.X)
     value := self.builder.CreateLoad(ptr.LLVMValue(), "")
     one := llvm.ConstInt(value.Type(), 1, false)
@@ -48,7 +48,7 @@ func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     self.builder.CreateStore(value, ptr.LLVMValue())
 }
 
-func (self *Visitor) VisitBlockStmt(stmt *ast.BlockStmt) {
+func (self *compiler) VisitBlockStmt(stmt *ast.BlockStmt) {
     self.PushScope()
     defer self.PopScope()
     for _, stmt := range stmt.List {
@@ -56,7 +56,7 @@ func (self *Visitor) VisitBlockStmt(stmt *ast.BlockStmt) {
     }
 }
 
-func (self *Visitor) VisitReturnStmt(stmt *ast.ReturnStmt) {
+func (self *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
     if stmt.Results == nil {
         self.builder.CreateRetVoid()
     } else {
@@ -79,7 +79,7 @@ func (self *Visitor) VisitReturnStmt(stmt *ast.ReturnStmt) {
     }
 }
 
-func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
+func (self *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
     values := make([]Value, len(stmt.Rhs))
     for i, expr := range stmt.Rhs {values[i] = self.VisitExpr(expr)}
     for i, expr := range stmt.Lhs {
@@ -110,7 +110,7 @@ func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
     }
 }
 
-func (self *Visitor) VisitIfStmt(stmt *ast.IfStmt) {
+func (self *compiler) VisitIfStmt(stmt *ast.IfStmt) {
     curr_block := self.builder.GetInsertBlock()
     if_block := llvm.AddBasicBlock(curr_block.Parent(), "if")
     else_block := llvm.AddBasicBlock(curr_block.Parent(), "else")
@@ -135,7 +135,7 @@ func (self *Visitor) VisitIfStmt(stmt *ast.IfStmt) {
     self.builder.CreateBr(resume_block)
 }
 
-func (self *Visitor) VisitForStmt(stmt *ast.ForStmt) {
+func (self *compiler) VisitForStmt(stmt *ast.ForStmt) {
     curr_block := self.builder.GetInsertBlock()
     var cond_block, loop_block, done_block llvm.BasicBlock
     if stmt.Cond != nil {
@@ -174,7 +174,7 @@ func (self *Visitor) VisitForStmt(stmt *ast.ForStmt) {
     self.builder.SetInsertPointAtEnd(done_block)
 }
 
-func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
+func (self *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     //stmt.Call *ast.CallExpr
     // TODO 
     var fn Value
@@ -229,11 +229,11 @@ func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
     indirect_fn_type := llvm.FunctionType(
         llvm.VoidType(),
         []llvm.Type{llvm.PointerType(args_struct_type, 0)}, false)
-    indirect_fn := llvm.AddFunction(self.module, "", indirect_fn_type)
+    indirect_fn := llvm.AddFunction(self.module.Module, "", indirect_fn_type)
     indirect_fn.SetFunctionCallConv(llvm.CCallConv)
 
     // Call "newgoroutine" with the indirect function and stored args.
-    newgoroutine := getnewgoroutine(self.module)
+    newgoroutine := getnewgoroutine(self.module.Module)
     ngr_param_types := newgoroutine.Type().ElementType().ParamTypes()
     fn_arg := self.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
     args_arg := self.builder.CreateBitCast(args_mem,
@@ -258,7 +258,7 @@ func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
     self.builder.CreateRetVoid()
 }
 
-func (self *Visitor) VisitStmt(stmt ast.Stmt) {
+func (self *compiler) VisitStmt(stmt ast.Stmt) {
     switch x := stmt.(type) {
     case *ast.ReturnStmt: self.VisitReturnStmt(x)
     case *ast.AssignStmt: self.VisitAssignStmt(x)

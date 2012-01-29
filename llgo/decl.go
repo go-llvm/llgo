@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
@@ -32,75 +32,50 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
+func (self *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     fn_type := self.VisitFuncType(f.Type)
     fn_name := f.Name.String()
-    var fn llvm.Value
-    if self.modulename == "main" && fn_name == "main" {
-        fn = llvm.AddFunction(self.module, "main", fn_type.LLVMType())
+
+    // Make "init" functions anonymous.
+    if fn_name == "init" {fn_name = ""}
+    fn := llvm.AddFunction(self.module.Module, fn_name, fn_type.LLVMType())
+    if self.module.Name == "main" && fn_name == "main" {
         fn.SetLinkage(llvm.ExternalLinkage)
-    } else {
-/* TODO move this to LLVMType()
-        if fn_name == "init" {
-            // Make init functions anonymous
-            fn_name = ""
-        } else if f.Recv != nil {
-            return_type := llvm.VoidType() //fn_type.ReturnType() TODO
-            param_types := make([]llvm.Type, 0) //fn_type.ParamTypes()
-            isvararg := fn_type.IsVariadic
-
-            // Add receiver as the first parameter type.
-            recv_type := self.GetType(f.Recv.List[0].Type)
-            if recv_type != nil {
-                param_types = append(param_types, recv_type.LLVMType())
-            }
-
-            for _, param := range fn_type.Params {
-                param_type := param.Type.(Type)
-                param_types = append(param_types, param_type.LLVMType())
-            }
-
-            fn_type = llvm.FunctionType(return_type, param_types, isvararg)
-        }
-        fn = llvm.AddFunction(self.module, fn_name, fn_type.LLVMType())
-        //fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
-*/
     }
     if f.Name.Obj != nil {
         f.Name.Obj.Data = fn
         f.Name.Obj.Type = fn_type
     }
-    return NewLLVMValue(self.builder, fn)
+    return NewLLVMValue(self.builder, fn, fn_type)
 }
 
-func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) Value {
+func (self *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     name := f.Name.String()
-    obj := f.Name.Obj
+    fn, _ := self.Lookup(name)
+    if fn == nil {fn = self.VisitFuncProtoDecl(f)}
 
-    var fn Value
-    if obj != nil && obj.Data != nil {
-        var ok bool
-        fn, ok = (obj.Data).(Value)
-        if !ok {panic("obj.Data is not nil and is not a llvm.Value")}
-    } else {
-        fn = self.VisitFuncProtoDecl(f)
-    }
-    fn_type := obj.Type.(*Func)
+    fn_type := fn.Type().(*Func)
     llvm_fn := fn.LLVMValue()
 
     // Bind receiver, arguments and return values to their identifiers/objects.
     param_i := 0
     if f.Recv != nil {
         param_0 := llvm_fn.Param(0)
-        f.Recv.List[0].Names[0].Obj.Data = NewLLVMValue(self.builder, param_0)
+        recv_obj := fn_type.Recv
+        //recv_obj := f.Recv.List[0].Names[0].Obj
+        recv_type := recv_obj.Type.(Type)
+        recv_obj.Data = NewLLVMValue(self.builder, param_0, recv_type)
         param_i++
     }
     if param_i < len(fn_type.Params) {
         for _, param := range fn_type.Params {
             name := param.Name
+            param_type := param.Type.(Type)
             value := llvm_fn.Param(param_i)
             value.SetName(name)
-            if name != "_" {param.Data = NewLLVMValue(self.builder, value)}
+            if name != "_" {
+                param.Data = NewLLVMValue(self.builder, value, param_type)
+            }
             param_i++
         }
     }
@@ -123,14 +98,14 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) Value {
     if name == "init" {
         self.initfuncs = append(self.initfuncs, fn)
     } else {
-        if obj != nil {
-            obj.Data = fn
-        }
+        //if obj != nil {
+        //    obj.Data = fn
+        //}
     }
     return fn
 }
 
-func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
+func (self *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
     var value_type Type
     if valspec.Type != nil {
         value_type = self.GetType(valspec.Type)
@@ -196,7 +171,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 }
                 self.builder.CreateStore(llvm_init, stack_value)
                 //setindirect(value) TODO
-                value = NewLLVMValue(self.builder, stack_value)
+                value = NewLLVMValue(self.builder, stack_value, value_type)
             } else {
                 exported := name_.IsExported()
 
@@ -217,7 +192,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 } else {
                     init_ := value
                     global_value := llvm.AddGlobal(
-                        self.module, value_type.LLVMType(), name)
+                        self.module.Module, value_type.LLVMType(), name)
                     if init_ != nil {
                         init_ = init_.Convert(value_type)
                         global_value.SetInitializer(init_.LLVMValue())
@@ -229,7 +204,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                         global_value.SetLinkage(llvm.InternalLinkage)
                     }
 
-                    value = NewLLVMValue(self.builder, global_value)
+                    value = NewLLVMValue(self.builder, global_value, value_type)
                     obj.Data = value
     
                     // If it's not an array, we should mark the value as being
@@ -245,7 +220,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
     }
 }
 
-func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
+func (self *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
     obj := spec.Name.Obj
     type_, istype := (obj.Data).(Type)
     if !istype {
@@ -254,7 +229,7 @@ func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
     }
 }
 
-func (self *Visitor) VisitImportSpec(spec *ast.ImportSpec) {
+func (self *compiler) VisitImportSpec(spec *ast.ImportSpec) {
     // TODO we will need to create our own Importer.
     path, err := strconv.Unquote(spec.Path.Value)
     if err != nil {panic(err)}
@@ -267,7 +242,7 @@ func (self *Visitor) VisitImportSpec(spec *ast.ImportSpec) {
     self.filescope.Outer.Insert(pkg)
 }
 
-func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
+func (self *compiler) VisitGenDecl(decl *ast.GenDecl) {
     switch decl.Tok {
     case token.IMPORT:
         for _, spec := range decl.Specs {
@@ -292,7 +267,7 @@ func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
     }
 }
 
-func (self *Visitor) VisitDecl(decl ast.Decl) Value {
+func (self *compiler) VisitDecl(decl ast.Decl) Value {
     switch x := decl.(type) {
     case *ast.FuncDecl: return self.VisitFuncDecl(x)
     case *ast.GenDecl: {

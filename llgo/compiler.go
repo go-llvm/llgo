@@ -20,23 +20,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
-    "flag"
-    "go/parser"
     "go/ast"
     "go/token"
-    "go/types"
     "os"
+    "runtime"
     "github.com/axw/gollvm/llvm"
 )
 
-type Visitor struct {
+type Module struct {
+    llvm.Module
+    Name     string
+    Disposed bool
+}
+
+func (m Module) Dispose() {
+    if !m.Disposed {
+        m.Disposed = true
+        m.Module.Dispose()
+    }
+}
+
+type compiler struct {
     builder    llvm.Builder
-    modulename string
-    module     llvm.Module
+    module     *Module
     functions  []Value //[]llvm.Value
     initfuncs  []Value //[]llvm.Value
     typeinfo   map[interface{}]*TypeInfo
@@ -46,7 +56,7 @@ type Visitor struct {
     scope      *ast.Scope
 }
 
-func (self *Visitor) LookupObj(name string) *ast.Object {
+func (self *compiler) LookupObj(name string) *ast.Object {
     // TODO check for qualified identifiers (x.y), and short-circuit the
     // lookup.
     for scope := self.scope; scope != nil; scope = scope.Outer {
@@ -56,7 +66,7 @@ func (self *Visitor) LookupObj(name string) *ast.Object {
     return nil
 }
 
-func (self *Visitor) Resolve(obj *ast.Object) Value {
+func (self *compiler) Resolve(obj *ast.Object) Value {
     if obj.Kind == ast.Pkg {return nil}
     value, isvalue := (obj.Data).(Value)
 
@@ -94,18 +104,18 @@ func (self *Visitor) Resolve(obj *ast.Object) Value {
     return value
 }
 
-func (self *Visitor) Lookup(name string) (Value, *ast.Object) {
+func (self *compiler) Lookup(name string) (Value, *ast.Object) {
     obj := self.LookupObj(name)
     if obj != nil {return self.Resolve(obj), obj}
     return nil, nil
 }
 
-func (self *Visitor) PushScope() *ast.Scope {
+func (self *compiler) PushScope() *ast.Scope {
     self.scope = ast.NewScope(self.scope)
     return self.scope
 }
 
-func (self *Visitor) PopScope() *ast.Scope {
+func (self *compiler) PopScope() *ast.Scope {
     scope := self.scope
     self.scope = self.scope.Outer
     return scope
@@ -113,34 +123,37 @@ func (self *Visitor) PopScope() *ast.Scope {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
+    compiler := new(compiler)
+    compiler.fileset = fset
+    compiler.filescope = file.Scope
+    compiler.scope = file.Scope
+    compiler.initfuncs = make([]Value, 0)
+    compiler.typeinfo = make(map[interface{}]*TypeInfo)
+    compiler.imports = make(map[string]*ast.Object)
 
+    // Create a Builder, for building LLVM instructions.
+    compiler.builder = llvm.GlobalContext().NewBuilder()
+    defer compiler.builder.Dispose()
 
-///////////////////////////////////////////////////////////////////////////////
-
-var dump *bool = flag.Bool(
-                    "dump", false,
-                    "Dump the AST to stderr instead of generating bitcode")
-
-func VisitFile(fset *token.FileSet, file *ast.File) {
-    visitor := new(Visitor)
-    visitor.fileset = fset
-    visitor.filescope = file.Scope
-    visitor.scope = file.Scope
-    visitor.builder = llvm.GlobalContext().NewBuilder()
-    visitor.initfuncs = make([]Value, 0)
-    visitor.typeinfo = make(map[interface{}]*TypeInfo)
-    defer visitor.builder.Dispose()
-    visitor.modulename = file.Name.String()
-    visitor.module = llvm.NewModule(visitor.modulename)
-    visitor.imports = make(map[string]*ast.Object)
-    defer visitor.module.Dispose()
+    // Create a Module, which contains the LLVM bitcode. Dispose it on panic,
+    // otherwise we'll set a finalizer at the end. The caller may invoke
+    // Dispose manually, which will render the finalizer a no-op.
+    modulename := file.Name.String()
+    compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
+    defer func() {
+        if e := recover(); e != nil {
+            compiler.module.Dispose()
+            panic(e)
+        }
+    }()
 
     // Perform fixups.
-    visitor.fixConstDecls(file)
-    visitor.fixMethodDecls(file)
+    compiler.fixConstDecls(file)
+    compiler.fixMethodDecls(file)
 
     // Visit each of the top-level declarations.
-    for _, decl := range file.Decls {visitor.VisitDecl(decl);}
+    for _, decl := range file.Decls {compiler.VisitDecl(decl);}
 
     // Create global constructors.
     //
@@ -149,13 +162,14 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     //     due to (a) imports having to be initialised before the
     //     importer, and (b) LLVM having no specified order of
     //     initialisation for ctors with the same priority.
-    if len(visitor.initfuncs) > 0 {
+    if len(compiler.initfuncs) > 0 {
         elttypes := []llvm.Type{
             llvm.Int32Type(),
-            llvm.FunctionType(llvm.VoidType(), nil, false)}
+            llvm.PointerType(
+                llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
         ctortype := llvm.StructType(elttypes, false)
-        ctors := make([]llvm.Value, len(visitor.initfuncs))
-        for i, fn := range visitor.initfuncs {
+        ctors := make([]llvm.Value, len(compiler.initfuncs))
+        for i, fn := range compiler.initfuncs {
             struct_values := []llvm.Value{
                 llvm.ConstInt(llvm.Int32Type(), 1, false),
                 fn.LLVMValue()}
@@ -164,53 +178,17 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
 
         global_ctors_init := llvm.ConstArray(ctortype, ctors)
         global_ctors_var := llvm.AddGlobal(
-            visitor.module, global_ctors_init.Type(), "llvm.global_ctors")
+            compiler.module.Module, global_ctors_init.Type(),
+            "llvm.global_ctors")
         global_ctors_var.SetInitializer(global_ctors_init)
         global_ctors_var.SetLinkage(llvm.AppendingLinkage)
     }
 
-    // Create debug metadata.
-    //visitor.createCompileUnitMetadata()
+    // Create debug metadata. TODO
+    //compiler.createCompileUnitMetadata()
 
-    if *dump {
-        visitor.module.Dump()
-    } else {
-        err := llvm.WriteBitcodeToFile(visitor.module, os.Stdout)
-        if err != nil {fmt.Println(err)}
-    }
-}
-
-func main() {
-    flag.Parse()
-    fset := token.NewFileSet()
-
-    filenames := flag.Args()
-    packages, err := parser.ParseFiles(fset, filenames, 0)
-    if err != nil {
-        fmt.Printf("ParseFiles failed: %s\n", err.String())
-        os.Exit(1)
-    }
-
-    // Create a new scope for each package.
-    for _, pkg := range packages {
-        pkg.Scope = ast.NewScope(types.Universe)
-        obj := ast.NewObj(ast.Pkg, pkg.Name)
-        obj.Data = pkg.Scope
-    }
-
-    // Type check and fill in the AST.
-    for _, pkg := range packages {
-        // TODO Imports? Or will 'Check' fill it in?
-        types.Check(fset, pkg)
-        //fmt.Println(pkg.Imports)
-    }
-
-    // Build an LLVM module.
-    for _, pkg := range packages {
-        file := ast.MergePackageFiles(pkg, 0)
-        file.Scope = ast.NewScope(pkg.Scope)
-        VisitFile(fset, file)
-    }
+    runtime.SetFinalizer(compiler.module, func(m *Module){m.Dispose()})
+    return compiler.module, nil
 }
 
 // vim: set ft=go :

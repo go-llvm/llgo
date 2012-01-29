@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "github.com/axw/gollvm/llvm"
@@ -103,7 +103,7 @@ func createGlobalVariableMetadata(global llvm.Value) llvm.Value {
     });
 }
 
-func (self *Visitor) createCompileUnitMetadata() {
+func (self *compiler) createCompileUnitMetadata() {
     enumtypes := []llvm.Value{};
     retainedtypes := []llvm.Value{};
     functions := []llvm.Value{};

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -20,35 +20,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
-    "fmt"
-    "strconv"
-    "unsafe"
     "go/ast"
     "go/token"
 )
 
-func (self *Visitor) VisitLen(expr *ast.CallExpr) Value {
-    if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
-
-    value := self.VisitExpr(expr.Args[0])
-    switch typ := (value.Type()).(type) {
-    case *Pointer:
-        // XXX Converting to a string to be converted back to an int is silly.
-        // The values need an overhaul? Perhaps have types based on fundamental
-        // types, with the additional methods to make them llgo.Value's.
-        if a, isarray := typ.Base.(*Array); isarray {
-            return NewConstValue(token.INT, strconv.Uitoa64(a.Len))
+// fixConstDecls will walk through a file and update ConstDecl's so that each
+// ValueSpec has a valid Values Expr-list.
+func (self *compiler) fixConstDecls(file *ast.File) {
+    if file.Decls == nil {return}
+    for _, decl := range file.Decls {
+        if gendecl, ok := decl.(*ast.GenDecl); ok {
+            if gendecl.Tok == token.CONST {
+                var expr_valspec *ast.ValueSpec
+                for _, spec := range gendecl.Specs {
+                    valspec, ok := spec.(*ast.ValueSpec)
+                    if !ok {panic("Expected *ValueSpec")}
+                    if valspec.Values != nil && len(valspec.Values) > 0 {
+                        expr_valspec = valspec
+                    } else {
+                        valspec.Type = expr_valspec.Type
+                        valspec.Values = expr_valspec.Values
+                    }
+                }
+            }
         }
-        return NewConstValue(token.INT,
-            strconv.Uitoa(uint(unsafe.Sizeof(uintptr(0)))))
-    case *Array:
-        // FIXME should be int (arch), not int32.
-        return NewConstValue(token.INT, strconv.Uitoa64(typ.Len))
     }
-    panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }
 
 // vim: set ft=go :

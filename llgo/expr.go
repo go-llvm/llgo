@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
@@ -45,16 +45,16 @@ func setindirect(value Value) {
     //                  llvm.ConstAllOnes(llvm.Int1Type()))
 }
 
-func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
+func (self *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
     panic("unimplemented")
 }
 
-func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
+func (self *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
     panic("unimplemented")
 }
 
 /*
-func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
+func (self *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
     x := self.VisitExpr(expr.X)
     y := self.VisitExpr(expr.Y)
 
@@ -123,7 +123,7 @@ func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
     panic(fmt.Sprint("Unhandled operator: ", expr.Op))
 }
 
-func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
+func (self *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
     value := self.VisitExpr(expr.X)
     switch expr.Op {
     case token.SUB: {
@@ -140,7 +140,7 @@ func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
 }
 */
 
-func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) Value {
+func (self *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     var fn Value
     switch x := (expr.Fun).(type) {
     case *ast.Ident:
@@ -178,6 +178,7 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) Value {
     receiver := llvm.Value{nil}
 
     // TODO handle varargs
+    fn_type := fn.Type().(*Func)
     var args []llvm.Value = nil
     if expr.Args != nil {
         arg_offset := 0
@@ -189,7 +190,6 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) Value {
             args = make([]llvm.Value, len(expr.Args))
         }
 
-        fn_type := fn.Type().(*Func)
         param_types := fn_type.Params
         for i, expr := range expr.Args {
             value := self.VisitExpr(expr)
@@ -199,11 +199,21 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) Value {
     } else if !receiver.IsNil() {
         args = []llvm.Value{receiver}
     }
+
+    var result_type Type
+    switch len(fn_type.Results) {
+        case 0:
+        case 1: result_type = self.ObjGetType(fn_type.Results[0])
+        default:
+            panic("Multiple results not handled yet")
+    }
+
     return NewLLVMValue(self.builder,
-        self.builder.CreateCall(fn.LLVMValue(), args, ""))
+        self.builder.CreateCall(fn.LLVMValue(), args, ""),
+        result_type)
 }
 
-func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) Value {
+func (self *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     value := self.VisitExpr(expr.X)
     // TODO handle maps, strings, slices.
 
@@ -233,14 +243,20 @@ func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) Value {
     //    value = value.Metadata(llvm.MDKindID("address"))
     //}
 
+    var result_type Type
+    switch typ := value.Type().(type) {
+    case *Array: result_type = typ.Elt
+    case *Slice: result_type = typ.Elt
+    }
+
     zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
     element := self.builder.CreateGEP(
         value.LLVMValue(), []llvm.Value{zero, index.LLVMValue()}, "")
     result := self.builder.CreateLoad(element, "")
-    return NewLLVMValue(self.builder, result)
+    return NewLLVMValue(self.builder, result, result_type)
 }
 
-func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
+func (self *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     lhs := self.VisitExpr(expr.X)
     if lhs == nil {
         // The only time we should get a nil result is if the object is a
@@ -297,7 +313,7 @@ func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     return nil
 }
 
-func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) Value {
+func (self *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
     // Are we dereferencing a pointer that's on the stack? Then load the stack
     // value.
     operand := self.VisitExpr(expr.X)
@@ -313,7 +329,7 @@ func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) Value {
     return operand
 }
 
-func (self *Visitor) VisitExpr(expr ast.Expr) Value {
+func (self *compiler) VisitExpr(expr ast.Expr) Value {
     switch x:= expr.(type) {
     case *ast.BasicLit: return self.VisitBasicLit(x)
     case *ast.BinaryExpr: return self.VisitBinaryExpr(x)

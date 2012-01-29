@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "big"
@@ -76,7 +76,7 @@ func (t *TypeInfo) FieldIndex(name string) (i int, exists bool) {
 }
 
 // Get a Type from an identifier.
-func (self *Visitor) IdentGetType(ident *ast.Ident) Type {
+func (self *compiler) IdentGetType(ident *ast.Ident) Type {
     switch ident.Name {
         case "bool": return BoolType
         case "byte": return ByteType
@@ -99,9 +99,11 @@ func (self *Visitor) IdentGetType(ident *ast.Ident) Type {
         case "complex64": return Complex64Type
         case "complex128": return Complex128Type
     }
+    return self.ObjGetType(ident.Obj)
+}
 
-    // Resolve the object to a type.
-    obj := ident.Obj
+// Get a Type from an ast object.
+func (self *compiler) ObjGetType(obj *ast.Object) Type {
     if obj != nil {
         type_, istype := (obj.Data).(Type)
         if !istype {
@@ -116,7 +118,7 @@ func (self *Visitor) IdentGetType(ident *ast.Ident) Type {
     return nil
 }
 
-func (self *Visitor) GetType(expr ast.Expr) Type {
+func (self *compiler) GetType(expr ast.Expr) Type {
     switch x := (expr).(type) {
     case *ast.Ident:
         return self.IdentGetType(x)
@@ -155,7 +157,7 @@ func (self *Visitor) GetType(expr ast.Expr) Type {
     return nil
 }
 
-func (self *Visitor) VisitFuncType(f *ast.FuncType) *Func {
+func (self *compiler) VisitFuncType(f *ast.FuncType) *Func {
     var fn_type Func
 
     if f.Params != nil && f.Params.List != nil {
@@ -198,7 +200,7 @@ func (self *Visitor) VisitFuncType(f *ast.FuncType) *Func {
     return &fn_type
 }
 
-func (self *Visitor) VisitStructType(s *ast.StructType) *Struct {
+func (self *compiler) VisitStructType(s *ast.StructType) *Struct {
     var typ Struct
     if s.Fields != nil && s.Fields.List != nil {
         var i int = 0
@@ -236,7 +238,7 @@ func (self *Visitor) VisitStructType(s *ast.StructType) *Struct {
     return &typ
 }
 
-func (self *Visitor) VisitInterfaceType(i *ast.InterfaceType) *Interface {
+func (self *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {
     var iface Interface
     if i.Methods != nil && i.Methods.List != nil {
         for _, field := range i.Methods.List {

@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "fmt"
@@ -40,7 +40,7 @@ func getprintf(module llvm.Module) llvm.Value {
     return printf
 }
 
-func (self *Visitor) VisitPrintln(expr *ast.CallExpr) Value {
+func (self *compiler) VisitPrintln(expr *ast.CallExpr) Value {
     var args []llvm.Value = nil
     var format string
     if expr.Args != nil {
@@ -70,7 +70,8 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) Value {
                     // automatically convert constant strings to globals?
                     if !llvm_value.IsAConstant().IsNil() &&
                        llvm_value.IsAGlobalValue().IsNil() {
-                        g := llvm.AddGlobal(self.module, llvm_value.Type(), "")
+                        g := llvm.AddGlobal(
+                            self.module.Module, llvm_value.Type(), "")
                         g.SetInitializer(llvm_value)
                         g.SetGlobalConstant(true)
                         g.SetLinkage(llvm.InternalLinkage)
@@ -90,7 +91,7 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) Value {
                 switch init_.(type) {
                 case ConstValue:
                     llvm_value = llvm.AddGlobal(
-                        self.module, init_value.Type(), "")
+                        self.module.Module, init_value.Type(), "")
                     llvm_value.SetInitializer(init_value)
                     llvm_value.SetGlobalConstant(true)
                     llvm_value.SetLinkage(llvm.InternalLinkage)
@@ -119,9 +120,9 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) Value {
     }
     args[0] = self.builder.CreateGlobalStringPtr(format, "")
 
-    printf := getprintf(self.module)
-    return NewLLVMValue(
-        self.builder, self.builder.CreateCall(printf, args, ""))
+    printf := getprintf(self.module.Module)
+    return NewLLVMValue(self.builder,
+        self.builder.CreateCall(printf, args, ""), Int32Type)
 }
 
 // vim: set ft=go :

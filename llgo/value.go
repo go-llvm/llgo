@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package main
+package llgo
 
 import (
     "go/token"
@@ -59,10 +59,9 @@ type ConstValue struct {
     typ *Basic
 }
 
-// Create a new dynamic value from an LLVM Builder and Value pair.
-// TODO specify type
-func NewLLVMValue(b llvm.Builder, v llvm.Value) Value {
-    return &LLVMValue{b, v, nil}
+// Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
+func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) Value {
+    return &LLVMValue{b, v, t}
 }
 
 // Create a new constant value from a literal with accompanying type, as
@@ -104,7 +103,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(b, result)
+        return NewLLVMValue(b, result, lhs.typ)
     case ConstValue:
         // TODO
     }
@@ -122,7 +121,7 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
     default:
         panic("Unhandled operator: ")// + expr.Op)
     }
-    return NewLLVMValue(b, result)
+    return NewLLVMValue(b, result, v.typ)
 }
 
 func (v *LLVMValue) Convert(typ Type) Value {
@@ -152,7 +151,7 @@ func (v *LLVMValue) LLVMValue() llvm.Value {
 }
 
 func (v *LLVMValue) Type() Type {
-    return nil
+    return v.typ
 }
 
 ///////////////////////////////////////////////////////////////////////////////
