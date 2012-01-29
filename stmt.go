@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -31,7 +31,8 @@ import (
 )
 
 func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
-    value := self.builder.CreateLoad(self.VisitExpr(stmt.X), "")
+    ptr := self.VisitExpr(stmt.X)
+    value := self.builder.CreateLoad(ptr.LLVMValue(), "")
     one := llvm.ConstInt(value.Type(), 1, false)
 
     switch stmt.Tok {
@@ -44,8 +45,7 @@ func (self *Visitor) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     //
     // In the case of a simple variable, we simply calculate the new value and
     // update the value in the scope.
-    ptr := self.VisitExpr(stmt.X)
-    self.builder.CreateStore(value, ptr)
+    self.builder.CreateStore(value, ptr.LLVMValue())
 }
 
 func (self *Visitor) VisitBlockStmt(stmt *ast.BlockStmt) {
@@ -62,10 +62,13 @@ func (self *Visitor) VisitReturnStmt(stmt *ast.ReturnStmt) {
     } else {
         if len(stmt.Results) == 1 {
             value := self.VisitExpr(stmt.Results[0])
-            cur_fn := self.functions[len(self.functions)-1]
-            fn_type := cur_fn.Type().ElementType()
-            return_type := fn_type.ReturnType()
-            self.builder.CreateRet(self.maybeCast(value, return_type))
+            //cur_fn := self.functions[len(self.functions)-1]
+            //fn_type := cur_fn.Type()
+
+            // TODO Convert value to the function's return type.
+            result := value
+
+            self.builder.CreateRet(result.LLVMValue())
         } else {
             // TODO
             for _, expr := range stmt.Results {
@@ -77,7 +80,7 @@ func (self *Visitor) VisitReturnStmt(stmt *ast.ReturnStmt) {
 }
 
 func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
-    values := make([]llvm.Value, len(stmt.Rhs))
+    values := make([]Value, len(stmt.Rhs))
     for i, expr := range stmt.Rhs {values[i] = self.VisitExpr(expr)}
     for i, expr := range stmt.Lhs {
         value := values[i]
@@ -86,21 +89,23 @@ func (self *Visitor) VisitAssignStmt(stmt *ast.AssignStmt) {
             if x.Name != "_" {
                 obj := x.Obj
                 if stmt.Tok == token.DEFINE {
-                    ptr := self.builder.CreateAlloca(value.Type(), x.Name)
-                    setindirect(ptr)
-                    self.builder.CreateStore(value, ptr)
+                    ptr := self.builder.CreateAlloca(
+                        value.Type().LLVMType(), x.Name)
+                    //setindirect(ptr) TODO
+                    self.builder.CreateStore(value.LLVMValue(), ptr)
                     obj.Data = ptr
                 } else {
-                    ptr, _ := (obj.Data).(llvm.Value)
-                    value = self.maybeCast(value, ptr.Type().ElementType())
-                    self.builder.CreateStore(value, ptr)
+                    ptr, _ := (obj.Data).(Value)
+                    value = value.Convert(Deref(ptr.Type()))
+                    self.builder.CreateStore(
+                        value.LLVMValue(), ptr.LLVMValue())
                 }
             }
         }
         default:
             ptr := self.VisitExpr(expr)
-            value = self.maybeCast(value, ptr.Type().ElementType())
-            self.builder.CreateStore(value, ptr)
+            value = value.Convert(Deref(ptr.Type()))
+            self.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
         }
     }
 }
@@ -118,7 +123,8 @@ func (self *Visitor) VisitIfStmt(stmt *ast.IfStmt) {
     }
 
     cond_val := self.VisitExpr(stmt.Cond)
-    self.builder.CreateCondBr(cond_val, if_block, else_block)
+    self.builder.CreateCondBr(
+        cond_val.LLVMValue(), if_block, else_block)
 
     self.builder.SetInsertPointAtEnd(if_block)
     self.VisitBlockStmt(stmt.Body)
@@ -150,7 +156,8 @@ func (self *Visitor) VisitForStmt(stmt *ast.ForStmt) {
         self.builder.CreateBr(cond_block)
         self.builder.SetInsertPointAtEnd(cond_block)
         cond_val := self.VisitExpr(stmt.Cond)
-        self.builder.CreateCondBr(cond_val, loop_block, done_block)
+        self.builder.CreateCondBr(
+            cond_val.LLVMValue(), loop_block, done_block)
     } else {
         self.builder.CreateBr(loop_block)
     }
@@ -170,11 +177,11 @@ func (self *Visitor) VisitForStmt(stmt *ast.ForStmt) {
 func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
     //stmt.Call *ast.CallExpr
     // TODO 
-    var fn llvm.Value
+    var fn Value
     switch x := (stmt.Call.Fun).(type) {
     case *ast.Ident:
         fn = self.Resolve(x.Obj)
-        if fn.IsNil() {
+        if fn == nil {
             panic(fmt.Sprintf(
                 "No function found with name '%s'", x.String()))
         }
@@ -187,20 +194,25 @@ func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
     var args_mem llvm.Value
     var args_size llvm.Value
     if stmt.Call.Args != nil {
-        fn_type := fn.Type().ElementType()
-        param_types := fn_type.ParamTypes()
+        param_types := make([]llvm.Type, 0)
+        fn_type, _ := (fn.Type()).(*Func)
+        for _, param := range fn_type.Params {
+            typ := param.Type.(Type)
+            param_types = append(param_types, typ.LLVMType())
+        }
         args_struct_type = llvm.StructType(param_types, false)
         args_mem = self.builder.CreateAlloca(args_struct_type, "")
         for i, expr := range stmt.Call.Args {
             value_i := self.VisitExpr(expr)
-            value_i = self.maybeCast(value_i, param_types[i])
+            value_i = value_i.Convert(fn_type.Params[i].Type.(Type))
             arg_i := self.builder.CreateGEP(args_mem, []llvm.Value{
                     llvm.ConstInt(llvm.Int32Type(), 0, false),
                     llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-            if isindirect(value_i) {
-                value_i = self.builder.CreateLoad(value_i, "")
-            }
-            self.builder.CreateStore(value_i, arg_i)
+            // TODO
+            //if isindirect(value_i) {
+            //    value_i = self.builder.CreateLoad(value_i, "")
+            //}
+            self.builder.CreateStore(value_i.LLVMValue(), arg_i)
         }
         args_size = llvm.SizeOf(args_struct_type)
     } else {
@@ -226,9 +238,8 @@ func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
     fn_arg := self.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
     args_arg := self.builder.CreateBitCast(args_mem,
         llvm.PointerType(llvm.Int8Type(), 0), "")
-    size_arg := self.maybeCast(args_size, llvm.Int32Type())
     self.builder.CreateCall(newgoroutine,
-        []llvm.Value{fn_arg, args_arg, size_arg}, "")
+        []llvm.Value{fn_arg, args_arg, args_size}, "")
 
     entry := llvm.AddBasicBlock(indirect_fn, "entry")
     self.builder.SetInsertPointAtEnd(entry)
@@ -243,7 +254,7 @@ func (self *Visitor) VisitGoStmt(stmt *ast.GoStmt) {
             args[i] = self.builder.CreateLoad(arg_i, "")
         }
     }
-    self.builder.CreateCall(fn, args, "")
+    self.builder.CreateCall(fn.LLVMValue(), args, "")
     self.builder.CreateRetVoid()
 }
 

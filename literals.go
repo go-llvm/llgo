@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -25,50 +25,26 @@ package main
 import (
     "fmt"
     "go/ast"
-    "go/token"
-    "strconv"
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) llvm.Value {
-    switch lit.Kind {
-    case token.INT: {
-        // XXX how do we determine type properly (size, signedness)? It must
-        // be based on the expression/declaration in which it is used? Do
-        // we just take the best-fit, and cast as necessary?
-        var value uint64
-        n, err := fmt.Sscan(lit.Value, &value)
-        if err != nil {
-            panic(err.String())
-        } else if n != 1 {
-            panic("Failed to extract integer value")
-        }
-        return llvm.ConstInt(llvm.Int64Type(), value, false)
-    }
-    //case token.FLOAT:
-    //case token.IMAG:
-    //case token.CHAR:
-    case token.STRING: {
-        s, err := strconv.Unquote(lit.Value)
-        if err != nil {panic(err)}
-        return llvm.ConstString(s, true)
-    }
-    }
-    panic("Unhandled BasicLit node")
+func (self *Visitor) VisitBasicLit(lit *ast.BasicLit) Value {
+    return NewConstValue(lit.Kind, lit.Value)
 }
 
-func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) llvm.Value {
+func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) Value {
     fn_type := self.VisitFuncType(lit.Type)
-    fn := llvm.AddFunction(self.module, "", fn_type)
+    fn := llvm.AddFunction(self.module, "", fn_type.LLVMType())
     fn.SetFunctionCallConv(llvm.FastCallConv)
 
     defer self.builder.SetInsertPointAtEnd(self.builder.GetInsertBlock())
     entry := llvm.AddBasicBlock(fn, "entry")
     self.builder.SetInsertPointAtEnd(entry)
 
-    self.functions = append(self.functions, fn)
+    fn_value := NewLLVMValue(self.builder, fn)
+    self.functions = append(self.functions, fn_value)
     self.VisitBlockStmt(lit.Body)
-    if fn_type.ReturnType().TypeKind() == llvm.VoidTypeKind {
+    if fn_type.Results == nil {
         lasti := entry.LastInstruction()
         if lasti.IsNil() || lasti.Opcode() != llvm.Ret {
             // Assume nil return type, AST should be checked first.
@@ -76,21 +52,24 @@ func (self *Visitor) VisitFuncLit(lit *ast.FuncLit) llvm.Value {
         }
     }
     self.functions = self.functions[0:len(self.functions)-1]
-    return fn
+    return fn_value
 }
 
-func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) llvm.Value {
-    type_ := self.GetType(lit.Type)
-    var values []llvm.Value
+// XXX currently only handles composite array literals
+func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) Value {
+    typ := self.GetType(lit.Type)
+    var values []Value
     if lit.Elts != nil {
-        valuemap := make(map[int]llvm.Value)
+        valuemap := make(map[int]Value)
         maxi := 0
         for i, elt := range lit.Elts {
-            var value llvm.Value
+            var value Value
             if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
                 key := self.VisitExpr(kv.Key)
                 i = -1
-                if !key.IsAConstant().IsNil() {i = int(key.SExtValue())}
+                if const_key, isconst := key.(*ConstValue); isconst {
+                    i = int(const_key.Int64())
+                }
                 value = self.VisitExpr(kv.Value)
             } else {
                 value = self.VisitExpr(elt)
@@ -102,26 +81,28 @@ func (self *Visitor) VisitCompositeLit(lit *ast.CompositeLit) llvm.Value {
                 panic("array index must be non-negative integer constant")
             }
         }
-        values = make([]llvm.Value, maxi+1)
+        values = make([]Value, maxi+1)
         for i, value := range valuemap {
             values[i] = value
         }
     }
 
-    switch type_.TypeKind() {
-    case llvm.ArrayTypeKind: {
-        elttype := type_.ElementType()
+    switch typ_ := typ.(type) {
+    case *Array: {
+        elttype := typ_.Elt
+        llvm_values := make([]llvm.Value, len(values))
         for i, value := range values {
-            if value.IsNil() {
-                values[i] = llvm.ConstNull(elttype)
+            if value == nil {
+                llvm_values[i] = llvm.ConstNull(elttype.LLVMType())
             } else {
-                values[i] = self.maybeCast(value, elttype)
+                llvm_values[i] = value.Convert(elttype).LLVMValue()
             }
         }
-        return llvm.ConstArray(elttype, values)
+        return NewLLVMValue(self.builder,
+            llvm.ConstArray(elttype.LLVMType(), llvm_values))
     }
     }
-    panic(fmt.Sprint("Unhandled type kind: ", type_.TypeKind()))
+    panic(fmt.Sprint("Unhandled type kind: ", typ))
 }
 
 // vim: set ft=go :

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -24,26 +24,29 @@ package main
 
 import (
     "fmt"
+    "strconv"
+    "unsafe"
     "go/ast"
-    "github.com/axw/gollvm/llvm"
+    "go/token"
 )
 
-func (self *Visitor) VisitLen(expr *ast.CallExpr) llvm.Value {
+func (self *Visitor) VisitLen(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
 
     value := self.VisitExpr(expr.Args[0])
-    typ := value.Type()
-    switch typ.TypeKind() {
-    case llvm.PointerTypeKind: {
-        if typ.ElementType().TypeKind() != llvm.ArrayTypeKind {break}
-        typ = typ.ElementType()
-        fallthrough
-    }
-    case llvm.ArrayTypeKind: {
+    switch typ := (value.Type()).(type) {
+    case *Pointer:
+        // XXX Converting to a string to be converted back to an int is silly.
+        // The values need an overhaul? Perhaps have types based on fundamental
+        // types, with the additional methods to make them llgo.Value's.
+        if a, isarray := typ.Base.(*Array); isarray {
+            return NewConstValue(token.INT, strconv.Uitoa64(a.Len))
+        }
+        return NewConstValue(token.INT,
+            strconv.Uitoa(uint(unsafe.Sizeof(uintptr(0)))))
+    case *Array:
         // FIXME should be int (arch), not int32.
-        return llvm.ConstInt(
-            llvm.Int32Type(), uint64(typ.ArrayLength()), false)
-    }
+        return NewConstValue(token.INT, strconv.Uitoa64(typ.Len))
     }
     panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }

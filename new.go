@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -27,12 +27,12 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitNew(expr *ast.CallExpr) llvm.Value {
+func (self *Visitor) VisitNew(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
-    typ := self.GetType(expr.Args[0])
+    typ := self.GetType(expr.Args[0]).LLVMType()
     mem := self.builder.CreateMalloc(typ, "")
     self.builder.CreateStore(llvm.ConstNull(typ), mem)
-    return mem
+    return NewLLVMValue(self.builder, mem)
 }
 
 // vim: set ft=go :

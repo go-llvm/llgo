@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -32,90 +32,91 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) llvm.Value {
+func (self *Visitor) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     fn_type := self.VisitFuncType(f.Type)
     fn_name := f.Name.String()
     var fn llvm.Value
     if self.modulename == "main" && fn_name == "main" {
-        fn = llvm.AddFunction(self.module, "main", fn_type)
+        fn = llvm.AddFunction(self.module, "main", fn_type.LLVMType())
         fn.SetLinkage(llvm.ExternalLinkage)
     } else {
+/* TODO move this to LLVMType()
         if fn_name == "init" {
             // Make init functions anonymous
             fn_name = ""
         } else if f.Recv != nil {
-            return_type := fn_type.ReturnType()
-            param_types := fn_type.ParamTypes()
-            isvararg := fn_type.IsFunctionVarArg()
+            return_type := llvm.VoidType() //fn_type.ReturnType() TODO
+            param_types := make([]llvm.Type, 0) //fn_type.ParamTypes()
+            isvararg := fn_type.IsVariadic
 
             // Add receiver as the first parameter type.
-            recv_type := []llvm.Type{self.GetType(f.Recv.List[0].Type)}
-            if param_types == nil {
-                param_types = recv_type
-            } else {
-                param_types = append(recv_type, param_types...)
+            recv_type := self.GetType(f.Recv.List[0].Type)
+            if recv_type != nil {
+                param_types = append(param_types, recv_type.LLVMType())
             }
+
+            for _, param := range fn_type.Params {
+                param_type := param.Type.(Type)
+                param_types = append(param_types, param_type.LLVMType())
+            }
+
             fn_type = llvm.FunctionType(return_type, param_types, isvararg)
         }
-        fn = llvm.AddFunction(self.module, fn_name, fn_type)
+        fn = llvm.AddFunction(self.module, fn_name, fn_type.LLVMType())
         //fn.SetFunctionCallConv(llvm.FastCallConv) // XXX
+*/
     }
     if f.Name.Obj != nil {
         f.Name.Obj.Data = fn
+        f.Name.Obj.Type = fn_type
     }
-    return fn
+    return NewLLVMValue(self.builder, fn)
 }
 
-func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
+func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) Value {
     name := f.Name.String()
     obj := f.Name.Obj
 
-    var fn llvm.Value
+    var fn Value
     if obj != nil && obj.Data != nil {
         var ok bool
-        fn, ok = (obj.Data).(llvm.Value)
+        fn, ok = (obj.Data).(Value)
         if !ok {panic("obj.Data is not nil and is not a llvm.Value")}
     } else {
         fn = self.VisitFuncProtoDecl(f)
     }
+    fn_type := obj.Type.(*Func)
+    llvm_fn := fn.LLVMValue()
 
     // Bind receiver, arguments and return values to their identifiers/objects.
     param_i := 0
     if f.Recv != nil {
-        f.Recv.List[0].Names[0].Obj.Data = fn.Param(0)
+        param_0 := llvm_fn.Param(0)
+        f.Recv.List[0].Names[0].Obj.Data = NewLLVMValue(self.builder, param_0)
         param_i++
     }
-    if param_i < fn.ParamsCount() {
-        for _, field := range f.Type.Params.List {
-            namecount := len(field.Names)
-            if namecount > 0 {
-                for j := 0; j < namecount; j++ {
-                    name := field.Names[j]
-                    value := fn.Param(param_i+j)
-                    value.SetName(name.String())
-                    if name.String() != "_" {name.Obj.Data = value}
-                }
-            }
-            param_i += namecount
+    if param_i < len(fn_type.Params) {
+        for _, param := range fn_type.Params {
+            name := param.Name
+            value := llvm_fn.Param(param_i)
+            value.SetName(name)
+            if name != "_" {param.Data = NewLLVMValue(self.builder, value)}
+            param_i++
         }
     }
 
-    entry := llvm.AddBasicBlock(fn, "entry")
+    entry := llvm.AddBasicBlock(llvm_fn, "entry")
     self.builder.SetInsertPointAtEnd(entry)
 
     self.functions = append(self.functions, fn)
     if f.Body != nil {self.VisitBlockStmt(f.Body)}
     self.functions = self.functions[0:len(self.functions)-1]
-    fn_type := fn.Type().ElementType() // fn.Type() is a pointer-to-function
 
-    if fn_type.ReturnType().TypeKind() == llvm.VoidTypeKind {
-        last_block := fn.LastBasicBlock()
-
-        lasti := last_block.LastInstruction()
-        if lasti.IsNil() || lasti.InstructionOpcode() != llvm.Ret {
-            // Assume nil return type, AST should be checked first.
-            self.builder.CreateRetVoid()
-        }
+    last_block := llvm_fn.LastBasicBlock()
+    lasti := last_block.LastInstruction()
+    if lasti.IsNil() || lasti.InstructionOpcode() != llvm.Ret {
+        // Assume nil return type, AST should be checked first.
+        self.builder.CreateRetVoid()
     }
 
     // Is it an 'init' function? Then record it.
@@ -130,7 +131,7 @@ func (self *Visitor) VisitFuncDecl(f *ast.FuncDecl) llvm.Value {
 }
 
 func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-    var value_type llvm.Type
+    var value_type Type
     if valspec.Type != nil {
         value_type = self.GetType(valspec.Type)
     }
@@ -143,7 +144,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
     for i, name_ := range valspec.Names {
         // We may resolve constants in the process of resolving others.
         obj := name_.Obj
-        if _, isvalue := (obj.Data).(llvm.Value); isvalue {continue}
+        if _, isvalue := (obj.Data).(Value); isvalue {continue}
 
         // Set iota if necessary.
         if isconst {
@@ -161,7 +162,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
         // Expression may have side-effects, so compute it regardless of
         // whether it'll be assigned to a name.
-        var value llvm.Value
+        var value Value
         if valspec.Values != nil && i < len(valspec.Values) &&
            valspec.Values[i] != nil {
             value = self.VisitExpr(valspec.Values[i])
@@ -172,7 +173,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
         // an untyped constant, the type of the declared variable is bool, int,
         // float64, or string respectively, depending on whether the value is
         // a boolean, integer, floating-point, or string constant.
-        if value_type.IsNil() {
+        if value_type == nil {
             value_type = value.Type()
         }
 
@@ -183,49 +184,60 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 // The variable should be allocated on the stack if it's
                 // declared inside a function.
                 init_ := value
-                value = self.builder.CreateAlloca(value_type, name)
-                if init_.IsNil() {
+                var llvm_init llvm.Value
+                stack_value := self.builder.CreateAlloca(
+                    value_type.LLVMType(), name)
+                if init_ == nil {
                     // If no initialiser was specified, set it to the
                     // zero value.
-                    init_ = llvm.ConstNull(value_type)
+                    llvm_init = llvm.ConstNull(value_type.LLVMType())
                 } else {
-                    init_ = self.maybeCast(init_, value_type)
+                    llvm_init = init_.Convert(value_type).LLVMValue()
                 }
-                self.builder.CreateStore(init_, value)
-                setindirect(value)
+                self.builder.CreateStore(llvm_init, stack_value)
+                //setindirect(value) TODO
+                value = NewLLVMValue(self.builder, stack_value)
             } else {
                 exported := name_.IsExported()
-                constprim := !(value.IsAConstantInt().IsNil() ||
-                               value.IsAConstantFP().IsNil())
+
+                // If it's a non-string constant, assign it to .
+                var constprim bool
+                if _, isconstval := value.(ConstValue); isconstval {
+                    if basic, isbasic := (value.Type()).(*Basic); isbasic {
+                        constprim = basic.Kind != String
+                    }
+                }
+
                 if isconst && constprim && !exported {
                     // Not exported, and it's a constant. Let's forego creating
                     // the internal constant and just pass around the
                     // llvm.Value.
                     obj.Kind = ast.Con // Change to constant
-                    obj.Data = self.maybeCast(value, value_type)
+                    obj.Data = value.Convert(value_type)
                 } else {
                     init_ := value
-    
-                    // If we're assigning another constant to the constant, then
-                    // just take its initializer.
-                    if isconst && !init_.IsNil() && isglobal(init_) {
-                        init_ = init_.Initializer()
+                    global_value := llvm.AddGlobal(
+                        self.module, value_type.LLVMType(), name)
+                    if init_ != nil {
+                        init_ = init_.Convert(value_type)
+                        global_value.SetInitializer(init_.LLVMValue())
                     }
-    
-                    value = llvm.AddGlobal(self.module, value_type, name)
-                    if !init_.IsNil() {
-                        init_ = self.maybeCast(init_, value_type)
-                        value.SetInitializer(init_)
+                    if isconst {
+                        global_value.SetGlobalConstant(true)
                     }
-                    if isconst {value.SetGlobalConstant(true)}
-                    if !exported {value.SetLinkage(llvm.InternalLinkage)}
+                    if !exported {
+                        global_value.SetLinkage(llvm.InternalLinkage)
+                    }
+
+                    value = NewLLVMValue(self.builder, global_value)
                     obj.Data = value
     
                     // If it's not an array, we should mark the value as being
                     // "indirect" (i.e. it must be loaded before use).
-                    if value_type.TypeKind() != llvm.ArrayTypeKind {
-                        setindirect(value)
-                    }
+                    // TODO
+                    //if value_type.TypeKind() != llvm.ArrayTypeKind {
+                    //    setindirect(value)
+                    //}
                 }
             }
             obj.Data = value
@@ -235,7 +247,7 @@ func (self *Visitor) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
 func (self *Visitor) VisitTypeSpec(spec *ast.TypeSpec) {
     obj := spec.Name.Obj
-    type_, istype := (obj.Data).(llvm.Type)
+    type_, istype := (obj.Data).(Type)
     if !istype {
         type_ = self.GetType(spec.Type)
         obj.Data = type_
@@ -280,12 +292,12 @@ func (self *Visitor) VisitGenDecl(decl *ast.GenDecl) {
     }
 }
 
-func (self *Visitor) VisitDecl(decl ast.Decl) llvm.Value {
+func (self *Visitor) VisitDecl(decl ast.Decl) Value {
     switch x := decl.(type) {
     case *ast.FuncDecl: return self.VisitFuncDecl(x)
     case *ast.GenDecl: {
         self.VisitGenDecl(x)
-        return llvm.Value{nil}
+        return nil
     }
     }
     panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -37,8 +37,8 @@ type Visitor struct {
     builder    llvm.Builder
     modulename string
     module     llvm.Module
-    functions  []llvm.Value
-    initfuncs  []llvm.Value
+    functions  []Value //[]llvm.Value
+    initfuncs  []Value //[]llvm.Value
     typeinfo   map[interface{}]*TypeInfo
     imports    map[string]*ast.Object
     fileset    *token.FileSet
@@ -56,16 +56,16 @@ func (self *Visitor) LookupObj(name string) *ast.Object {
     return nil
 }
 
-func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
-    if obj.Kind == ast.Pkg {return llvm.Value{nil}}
-    value, isvalue := (obj.Data).(llvm.Value)
+func (self *Visitor) Resolve(obj *ast.Object) Value {
+    if obj.Kind == ast.Pkg {return nil}
+    value, isvalue := (obj.Data).(Value)
 
     switch obj.Kind {
     case ast.Con:
         if !isvalue {
             valspec, _ := (obj.Decl).(*ast.ValueSpec)
             self.VisitValueSpec(valspec, true)
-            value, isvalue = (obj.Data).(llvm.Value)
+            value, isvalue = (obj.Data).(Value)
         }
     case ast.Fun:
         if !isvalue {
@@ -84,20 +84,20 @@ func (self *Visitor) Resolve(obj *ast.Object) llvm.Value {
                 // We update the .Data field of the object when we enter the
                 // function definition.
             }
-            value, isvalue = (obj.Data).(llvm.Value)
+            value, isvalue = (obj.Data).(Value)
         }
     }
 
     if !isvalue {
-        panic(fmt.Sprint("Expected llvm.Value, found ", obj.Data))
+        panic(fmt.Sprint("Expected Value, found ", obj.Data))
     }
     return value
 }
 
-func (self *Visitor) Lookup(name string) (llvm.Value, *ast.Object) {
+func (self *Visitor) Lookup(name string) (Value, *ast.Object) {
     obj := self.LookupObj(name)
     if obj != nil {return self.Resolve(obj), obj}
-    return llvm.Value{nil}, nil
+    return nil, nil
 }
 
 func (self *Visitor) PushScope() *ast.Scope {
@@ -113,33 +113,6 @@ func (self *Visitor) PopScope() *ast.Scope {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (self *Visitor) maybeCast(value llvm.Value, totype llvm.Type) llvm.Value {
-    value_type := value.Type()
-    switch value_type.TypeKind() {
-    case llvm.IntegerTypeKind: {
-        switch totype.TypeKind() {
-        case llvm.IntegerTypeKind: {
-            delta := value_type.IntTypeWidth()-totype.IntTypeWidth()
-            switch {
-            case delta == 0: return value
-            // TODO handle signed/unsigned (SExt/ZExt)
-            case delta < 0: return self.builder.CreateZExt(value, totype, "")
-            case delta > 0: return self.builder.CreateTrunc(value, totype, "")
-            }
-        }
-        }
-    }
-/*
-    case llvm.FloatTypeKind: {
-        switch to_
-    }
-    case llvm.DoubleTypeKind: {
-        
-    }
-*/
-    }
-    return value
-}
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -154,7 +127,7 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     visitor.filescope = file.Scope
     visitor.scope = file.Scope
     visitor.builder = llvm.GlobalContext().NewBuilder()
-    visitor.initfuncs = make([]llvm.Value, 0)
+    visitor.initfuncs = make([]Value, 0)
     visitor.typeinfo = make(map[interface{}]*TypeInfo)
     defer visitor.builder.Dispose()
     visitor.modulename = file.Name.String()
@@ -184,7 +157,8 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
         ctors := make([]llvm.Value, len(visitor.initfuncs))
         for i, fn := range visitor.initfuncs {
             struct_values := []llvm.Value{
-                llvm.ConstInt(llvm.Int32Type(), 1, false), fn}
+                llvm.ConstInt(llvm.Int32Type(), 1, false),
+                fn.LLVMValue()}
             ctors[i] = llvm.ConstStruct(struct_values, false)
         }
 
@@ -196,7 +170,7 @@ func VisitFile(fset *token.FileSet, file *ast.File) {
     }
 
     // Create debug metadata.
-    visitor.createCompileUnitMetadata()
+    //visitor.createCompileUnitMetadata()
 
     if *dump {
         visitor.module.Dump()

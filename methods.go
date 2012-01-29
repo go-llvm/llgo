@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -24,7 +24,6 @@ package main
 
 import (
     "go/ast"
-    "github.com/axw/gollvm/llvm"
 )
 
 // fixMethodDecls will walk through a file and associate functions with their
@@ -43,15 +42,13 @@ func (self *Visitor) fixMethodDecls(file *ast.File) {
                 // Receivers may be a pointer type, or a "base" type.
                 // TODO handle pointer base types (e.g. a declared type whose
                 // base type is a pointer).
-                if typ.TypeKind() == llvm.PointerTypeKind {
-                    typ = typ.ElementType()
-                }
+                typ = Deref(typ)
 
                 // Insert a reference to the FuncDecl's AST object.
-                typeinfo := self.typeinfo[typ.C]
+                typeinfo := self.typeinfo[typ]
                 if typeinfo == nil {
                     typeinfo = &TypeInfo{}
-                    self.typeinfo[typ.C] = typeinfo
+                    self.typeinfo[typ] = typeinfo
                 }
                 if typeinfo.Methods == nil {
                     typeinfo.Methods = make(map[string]*ast.Object)

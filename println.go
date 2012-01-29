@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -40,7 +40,7 @@ func getprintf(module llvm.Module) llvm.Value {
     return printf
 }
 
-func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
+func (self *Visitor) VisitPrintln(expr *ast.CallExpr) Value {
     var args []llvm.Value = nil
     var format string
     if expr.Args != nil {
@@ -48,48 +48,69 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
         args = make([]llvm.Value, len(expr.Args)+1)
         for i, expr := range expr.Args {
             value := self.VisitExpr(expr)
+            llvm_value := value.LLVMValue()
 
             // Is it a global variable or non-constant? Then we'll need to load
             // it if it's not a pointer to an array.
             if isindirect(value) {
-                value = self.builder.CreateLoad(value, "")
+                // TODO
+                //value = self.builder.CreateLoad(value, "")
             }
 
             if i > 0 {format += " "}
-            switch kind := value.Type().TypeKind(); kind {
-            case llvm.IntegerTypeKind: {
-                switch width := value.Type().IntTypeWidth(); width {
-                case 16: format += "%hd"
-                case 32: format += "%d"
-                case 64: format += "%lld" // FIXME windows
-                default: panic(fmt.Sprint("Unhandled integer width ", width))
+            switch typ := (value.Type()).(type) {
+            case *Basic:
+                switch typ.Kind {
+                case Int: format += "%d" // TODO 32/64
+                case Int16: format += "%hd"
+                case Int32: format += "%d"
+                case Int64: format += "%lld" // FIXME windows
+                case String:
+                    // Hrm. This kinda sucks. What's the appropriate way to
+                    // automatically convert constant strings to globals?
+                    if !llvm_value.IsAConstant().IsNil() &&
+                       llvm_value.IsAGlobalValue().IsNil() {
+                        g := llvm.AddGlobal(self.module, llvm_value.Type(), "")
+                        g.SetInitializer(llvm_value)
+                        g.SetGlobalConstant(true)
+                        g.SetLinkage(llvm.InternalLinkage)
+                        llvm_value = g
+                    }
+                    format += "%s"
+                default: panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
                 }
-            }
-            case llvm.ArrayTypeKind: {
+
+            //case *Slice: fallthrough
+            case *Slice, *Array:
                 // If we see a constant array, we either:
                 //     Create an internal constant if it's a constant array, or
                 //     Create space on the stack and store it there.
                 init_ := value
-                if value.IsConstant() {
-                    value = llvm.AddGlobal(self.module, init_.Type(), "")
-                    value.SetInitializer(init_)
-                    value.SetGlobalConstant(true)
-                    value.SetLinkage(llvm.InternalLinkage)
-                } else {
-                    value = self.builder.CreateAlloca(init_.Type(), "")
-                    self.builder.CreateStore(init_, value)
+                init_value := init_.LLVMValue()
+                switch init_.(type) {
+                case ConstValue:
+                    llvm_value = llvm.AddGlobal(
+                        self.module, init_value.Type(), "")
+                    llvm_value.SetInitializer(init_value)
+                    llvm_value.SetGlobalConstant(true)
+                    llvm_value.SetLinkage(llvm.InternalLinkage)
+                case *LLVMValue:
+                    llvm_value = self.builder.CreateAlloca(
+                        init_value.Type(), "")
+                    self.builder.CreateStore(init_value, llvm_value)
                 }
-                fallthrough
-            }
-            case llvm.PointerTypeKind: {
+                // FIXME don't assume string...
+                format += "%s"
+
+            case *Pointer:
                 // FIXME don't assume string...
                 // TODO string should be a struct, with length & ptr. We'll
                 // probably encode the type as metadata.
                 format += "%s"
+            default: panic(fmt.Sprint("Unhandled type kind"))
             }
-            default: {panic(fmt.Sprint("Unhandled type kind: ", kind))}
-            }
-            args[i+1] = value
+
+            args[i+1] = llvm_value
         }
         format += "\n"
     } else {
@@ -99,7 +120,8 @@ func (self *Visitor) VisitPrintln(expr *ast.CallExpr) llvm.Value {
     args[0] = self.builder.CreateGlobalStringPtr(format, "")
 
     printf := getprintf(self.module)
-    return self.builder.CreateCall(printf, args, "")
+    return NewLLVMValue(
+        self.builder, self.builder.CreateCall(printf, args, ""))
 }
 
 // vim: set ft=go :

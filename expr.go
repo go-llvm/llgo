@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -25,25 +25,35 @@ package main
 import (
     "fmt"
     "go/ast"
-    "go/token"
+    //"go/token"
     "reflect"
     "github.com/axw/gollvm/llvm"
 )
 
-func isglobal(value llvm.Value) bool {
-    return !value.IsAGlobalVariable().IsNil()
+func isglobal(value Value) bool {
+    //return !value.IsAGlobalVariable().IsNil()
+    return false
 }
 
-func isindirect(value llvm.Value) bool {
+func isindirect(value Value) bool {
     //return !value.Metadata(llvm.MDKindID("indirect")).IsNil()
     return false
 }
 
-func setindirect(value llvm.Value) {
+func setindirect(value Value) {
     //value.SetMetadata(llvm.MDKindID("indirect"),
     //                  llvm.ConstAllOnes(llvm.Int1Type()))
 }
 
+func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
+    panic("unimplemented")
+}
+
+func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
+    panic("unimplemented")
+}
+
+/*
 func (self *Visitor) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
     x := self.VisitExpr(expr.X)
     y := self.VisitExpr(expr.Y)
@@ -123,14 +133,15 @@ func (self *Visitor) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
             value = self.builder.CreateNeg(value, "")
         }
     }
-    case token.ADD: {/*No-op*/}
+    case token.ADD: // No-op
     default: panic("Unhandled operator: ")// + expr.Op)
     }
     return value
 }
+*/
 
-func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
-    var fn llvm.Value
+func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) Value {
+    var fn Value
     switch x := (expr.Fun).(type) {
     case *ast.Ident:
         switch x.String() {
@@ -141,14 +152,14 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
             // Is it a type? Then this is a conversion (e.g. int(123))
             if expr.Args != nil && len(expr.Args) == 1 {
                 typ := self.GetType(x)
-                if !typ.IsNil() {
+                if typ != nil {
                     value := self.VisitExpr(expr.Args[0])
-                    return self.maybeCast(value, typ)
+                    return value.Convert(typ)
                 }
             }
 
             fn = self.Resolve(x.Obj)
-            if fn.IsNil() {
+            if fn == nil {
                 panic(fmt.Sprintf(
                     "No function found with name '%s'", x.String()))
             }
@@ -178,43 +189,60 @@ func (self *Visitor) VisitCallExpr(expr *ast.CallExpr) llvm.Value {
             args = make([]llvm.Value, len(expr.Args))
         }
 
-        fn_type := fn.Type().ElementType() // fn.Type() is a ptr-to-fn
-        param_types := fn_type.ParamTypes()
+        fn_type := fn.Type().(*Func)
+        param_types := fn_type.Params
         for i, expr := range expr.Args {
             value := self.VisitExpr(expr)
-            param_type := param_types[arg_offset+i]
-            args[arg_offset+i] = self.maybeCast(value, param_type)
+            param_type := param_types[arg_offset+i].Type.(Type)
+            args[arg_offset+i] = value.Convert(param_type).LLVMValue()
         }
     } else if !receiver.IsNil() {
         args = []llvm.Value{receiver}
     }
-    return self.builder.CreateCall(fn, args, "")
+    return NewLLVMValue(self.builder,
+        self.builder.CreateCall(fn.LLVMValue(), args, ""))
 }
 
-func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) llvm.Value {
+func (self *Visitor) VisitIndexExpr(expr *ast.IndexExpr) Value {
     value := self.VisitExpr(expr.X)
     // TODO handle maps, strings, slices.
 
     index := self.VisitExpr(expr.Index)
-    if isindirect(index) {index = self.builder.CreateLoad(index, "")}
-    if index.Type().TypeKind() != llvm.IntegerTypeKind {
-        panic("Array index expression must evaluate to an integer")
+    // TODO
+    //if isindirect(index) {index = self.builder.CreateLoad(index, "")}
+    isint := false
+    if basic, isbasic := index.Type().(*Basic); isbasic {
+        switch basic.Kind {
+        case Uint8: fallthrough
+        case Uint16: fallthrough
+        case Uint32: fallthrough
+        case Uint64: fallthrough
+        case Int8: fallthrough
+        case Int16: fallthrough
+        case Int32: fallthrough
+        case Int64: fallthrough
+        case UntypedInt: isint = true
+        }
     }
+    if !isint {panic("Array index expression must evaluate to an integer")}
 
     // Is it an array? Then let's get the address of the array so we can
     // get an element.
-    if value.Type().TypeKind() == llvm.ArrayTypeKind {
-        value = value.Metadata(llvm.MDKindID("address"))
-    }
+    // TODO
+    //if value.Type().TypeKind() == llvm.ArrayTypeKind {
+    //    value = value.Metadata(llvm.MDKindID("address"))
+    //}
 
     zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
-    element := self.builder.CreateGEP(value, []llvm.Value{zero, index}, "")
-    return self.builder.CreateLoad(element, "")
+    element := self.builder.CreateGEP(
+        value.LLVMValue(), []llvm.Value{zero, index.LLVMValue()}, "")
+    result := self.builder.CreateLoad(element, "")
+    return NewLLVMValue(self.builder, result)
 }
 
-func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
+func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     lhs := self.VisitExpr(expr.X)
-    if lhs.IsNil() {
+    if lhs == nil {
         // The only time we should get a nil result is if the object is a
         // package.
         pkgident := (expr.X).(*ast.Ident)
@@ -234,7 +262,9 @@ func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
     indexes := make([]llvm.Value, 0)
     indexes = append(indexes, zero_value)
 
-    element_type := lhs.Type().ElementType()
+    // TODO
+/*
+    element_type := lhs.Type() //lhs.Type().ElementType()
     if element_type.TypeKind() == llvm.PointerTypeKind {
         indexes = append(indexes, zero_value)
         element_type = element_type.ElementType()
@@ -255,22 +285,26 @@ func (self *Visitor) VisitSelectorExpr(expr *ast.SelectorExpr) llvm.Value {
         method_obj := typeinfo.MethodByName(expr.Sel.String())
         if method_obj != nil {
             method := self.Resolve(method_obj)
-            method.SetMetadata(llvm.MDKindID("receiver"), lhs)
+            // TODO
+            //method.SetMetadata(llvm.MDKindID("receiver"), lhs)
             return method
         } else {
             panic("Failed to locate field or method: " + expr.Sel.String())
         }
     }
-    return llvm.Value{nil}
+    //return llvm.Value{nil}
+*/
+    return nil
 }
 
-func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) llvm.Value {
+func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) Value {
     // Are we dereferencing a pointer that's on the stack? Then load the stack
     // value.
     operand := self.VisitExpr(expr.X)
-    if isindirect(operand) {
-        operand = self.builder.CreateLoad(operand, "")
-    }
+    // TODO
+    //if isindirect(operand) {
+    //    operand = self.builder.CreateLoad(operand, "")
+    //}
 
     // We don't want to immediately load the value, as we might be doing an
     // assignment rather than an evaluation. Instead, we return the pointer and
@@ -279,7 +313,7 @@ func (self *Visitor) VisitStarExpr(expr *ast.StarExpr) llvm.Value {
     return operand
 }
 
-func (self *Visitor) VisitExpr(expr ast.Expr) llvm.Value {
+func (self *Visitor) VisitExpr(expr ast.Expr) Value {
     switch x:= expr.(type) {
     case *ast.BasicLit: return self.VisitBasicLit(x)
     case *ast.BinaryExpr: return self.VisitBinaryExpr(x)
