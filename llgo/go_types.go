@@ -11,6 +11,7 @@
 package llgo
 
 import (
+    "fmt"
 	"go/ast"
 	"sort"
     "github.com/axw/gollvm/llvm"
@@ -75,6 +76,25 @@ type Basic struct {
 	ImplementsType
     Kind BasicTypeKind 
 	// TODO(gri) need a field specifying the exact basic type
+}
+
+func (b *Basic) LLVMType() llvm.Type {
+    switch b.Kind {
+    case Bool: return llvm.Int1Type()
+    case Byte, Int8, Uint8: return llvm.Int8Type()
+    case Int16, Uint16: return llvm.Int16Type()
+    case Uintptr, Int, Int32, Uint, Uint32: return llvm.Int32Type()
+    case Int64, Uint64: return llvm.Int64Type()
+    case Float32: return llvm.FloatType()
+    case Float64: return llvm.DoubleType()
+    //case Complex64: TODO
+    //case Complex128:
+    //case UntypedInt:
+    //case UntypedFloat:
+    //case UntypedComplex:
+    //case String: TODO
+    }
+    panic(fmt.Sprint("unhandled kind: ", b.Kind))
 }
 
 // An Array represents an array type [Len]Elt.

@@ -45,12 +45,15 @@ func setindirect(value Value) {
     //                  llvm.ConstAllOnes(llvm.Int1Type()))
 }
 
-func (self *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
-    panic("unimplemented")
+func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
+    lhs := c.VisitExpr(expr.X)
+    rhs := c.VisitExpr(expr.Y)
+    return lhs.BinaryOp(expr.Op, rhs)
 }
 
-func (self *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
-    panic("unimplemented")
+func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
+    value := c.VisitExpr(expr.X)
+    return value.UnaryOp(expr.Op)
 }
 
 /*

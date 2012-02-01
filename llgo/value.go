@@ -25,7 +25,14 @@ package llgo
 import (
     "go/token"
     "github.com/axw/gollvm/llvm"
+    "math"
     "big"
+    "fmt"
+)
+
+var (
+    maxBigInt32 = big.NewInt(math.MaxInt32)
+    minBigInt32 = big.NewInt(math.MinInt32)
 )
 
 // Value is an interface for representing values returned by Go expressions.
@@ -66,7 +73,7 @@ func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) Value {
 
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
-func NewConstValue(tok token.Token, lit string) Value {
+func NewConstValue(tok token.Token, lit string) ConstValue {
     var typ *Basic
     switch tok {
     case token.INT:    typ = &Basic{Kind: UntypedInt}
@@ -178,8 +185,20 @@ func (v ConstValue) Convert(typ Type) Value {
 }
 
 func (v ConstValue) LLVMValue() llvm.Value {
+    // From the language spec:
+    //   If the type is absent and the corresponding expression evaluates to
+    //   an untyped constant, the type of the declared variable is bool, int,
+    //   float64, or string respectively, depending on whether the value is
+    //   a boolean, integer, floating-point, or string constant.
+
     switch v.typ.Kind {
-    case UntypedInt: fallthrough
+    case UntypedInt:
+        // TODO 32/64bit
+        int_val := v.val.(*big.Int)
+        if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
+            panic(fmt.Sprint("const ", int_val, " overflows int"))
+        }
+        return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
     case UntypedFloat: fallthrough
     case UntypedComplex:
         panic("Attempting to take LLVM value of untyped constant")
@@ -194,12 +213,15 @@ func (v ConstValue) LLVMValue() llvm.Value {
 }
 
 func (v ConstValue) Type() Type {
+    // TODO convert untyped to typed?
+    switch v.typ.Kind {
+    case UntypedInt: return IntType
+    }
     return v.typ
 }
 
 func (v ConstValue) Int64() int64 {
-    int_val, isint := (v.val).(*big.Int)
-    if !isint {panic("Expected an integer")}
+    int_val := v.val.(*big.Int)
     return int_val.Int64()
 }
 

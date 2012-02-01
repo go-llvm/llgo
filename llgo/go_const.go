@@ -164,7 +164,55 @@ func (x Const) String() string {
 }
 
 func (x Const) UnaryOp(op token.Token) Const {
-	panic("unimplemented")
+	var z interface{}
+	switch x := x.val.(type) {
+	case bool:
+		z = unaryBoolOp(x, op)
+	case *big.Int:
+		z = unaryIntOp(x, op)
+	case *big.Rat:
+		z = unaryFloatOp(x, op)
+	case cmplx:
+		z = unaryCmplxOp(x, op)
+	default:
+		panic("unreachable")
+	}
+	return Const{z}
+}
+
+func unaryBoolOp(x bool, op token.Token) interface{} {
+	switch op {
+	case token.NOT:
+        return !x
+    }
+    panic("unreachable")
+}
+
+func unaryIntOp(x *big.Int, op token.Token) interface{} {
+    var z big.Int
+    switch op {
+    case token.ADD: return z.Set(x)
+    case token.SUB: return z.Neg(x)
+    case token.XOR: return z.Not(x)
+    }
+    panic("unreachable")
+}
+
+func unaryFloatOp(x *big.Rat, op token.Token) interface{} {
+    var z big.Rat
+    switch op {
+    case token.ADD: return z.Set(x)
+    case token.SUB: return z.Neg(x)
+    }
+    panic("unreachable")
+}
+
+func unaryCmplxOp(x cmplx, op token.Token) interface{} {
+    switch op {
+    case token.ADD:
+    case token.SUB:
+    }
+    panic("unimplemented")
 }
 
 func (x Const) BinaryOp(op token.Token, y Const) Const {
@@ -218,9 +266,14 @@ func binaryIntOp(x *big.Int, op token.Token, y *big.Int) interface{} {
 	case token.AND_NOT:
 		return z.AndNot(x, y)
 	case token.SHL:
-		panic("unimplemented")
+        // The shift length must be uint, or untyped int and
+        // convertible to uint.
+        // TODO 32/64bit
+        if y.BitLen() > 32 {panic("Excessive shift length")}
+        return z.Lsh(x, uint(y.Int64()))
 	case token.SHR:
-		panic("unimplemented")
+        if y.BitLen() > 32 {panic("Excessive shift length")}
+        return z.Rsh(x, uint(y.Int64()))
 	case token.EQL:
 		return x.Cmp(y) == 0
 	case token.NEQ:

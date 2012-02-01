@@ -124,8 +124,8 @@ func (self *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
         // Set iota if necessary.
         if isconst {
             if iota_, isint := (name_.Obj.Data).(int); isint {
-                iota_value := llvm.ConstInt(
-                    llvm.Int32Type(), uint64(iota_), false)
+                iota_value := NewConstValue(token.INT, strconv.Itoa(iota_))
+                iota_value.typ.Kind = UntypedInt
                 iota_obj.Data = iota_value
 
                 // Con objects with an iota have an embedded ValueSpec
@@ -143,76 +143,80 @@ func (self *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
             value = self.VisitExpr(valspec.Values[i])
         }
 
-        // TODO (from language spec)
-        // If the type is absent and the corresponding expression evaluates to
-        // an untyped constant, the type of the declared variable is bool, int,
-        // float64, or string respectively, depending on whether the value is
-        // a boolean, integer, floating-point, or string constant.
-        if value_type == nil {
-            value_type = value.Type()
-        }
-
-        ispackagelevel := len(self.functions) == 0
         name := name_.String()
         if name != "_" {
-            if !ispackagelevel {
-                // The variable should be allocated on the stack if it's
-                // declared inside a function.
-                init_ := value
-                var llvm_init llvm.Value
-                stack_value := self.builder.CreateAlloca(
-                    value_type.LLVMType(), name)
-                if init_ == nil {
-                    // If no initialiser was specified, set it to the
-                    // zero value.
-                    llvm_init = llvm.ConstNull(value_type.LLVMType())
-                } else {
-                    llvm_init = init_.Convert(value_type).LLVMValue()
-                }
-                self.builder.CreateStore(llvm_init, stack_value)
-                //setindirect(value) TODO
-                value = NewLLVMValue(self.builder, stack_value, value_type)
-            } else {
-                exported := name_.IsExported()
-
-                // If it's a non-string constant, assign it to .
-                var constprim bool
-                if _, isconstval := value.(ConstValue); isconstval {
-                    if basic, isbasic := (value.Type()).(*Basic); isbasic {
-                        constprim = basic.Kind != String
-                    }
+            // For constants, we just pass the ConstValue around. Otherwise, we
+            // will convert it to an LLVMValue.
+            if !isconst {
+                // TODO (from language spec)
+                // If the type is absent and the corresponding expression evaluates to
+                // an untyped constant, the type of the declared variable is bool, int,
+                // float64, or string respectively, depending on whether the value is
+                // a boolean, integer, floating-point, or string constant.
+                if value_type == nil {
+                    value_type = value.Type()
                 }
 
-                if isconst && constprim && !exported {
-                    // Not exported, and it's a constant. Let's forego creating
-                    // the internal constant and just pass around the
-                    // llvm.Value.
-                    obj.Kind = ast.Con // Change to constant
-                    obj.Data = value.Convert(value_type)
-                } else {
+                ispackagelevel := len(self.functions) == 0
+                if !ispackagelevel {
+                    // The variable should be allocated on the stack if it's
+                    // declared inside a function.
                     init_ := value
-                    global_value := llvm.AddGlobal(
-                        self.module.Module, value_type.LLVMType(), name)
-                    if init_ != nil {
-                        init_ = init_.Convert(value_type)
-                        global_value.SetInitializer(init_.LLVMValue())
+                    var llvm_init llvm.Value
+                    stack_value := self.builder.CreateAlloca(
+                        value_type.LLVMType(), name)
+                    if init_ == nil {
+                        // If no initialiser was specified, set it to the
+                        // zero value.
+                        llvm_init = llvm.ConstNull(value_type.LLVMType())
+                    } else {
+                        llvm_init = init_.Convert(value_type).LLVMValue()
                     }
-                    if isconst {
-                        global_value.SetGlobalConstant(true)
-                    }
-                    if !exported {
-                        global_value.SetLinkage(llvm.InternalLinkage)
+                    self.builder.CreateStore(llvm_init, stack_value)
+                    //setindirect(value) TODO
+                    value = NewLLVMValue(self.builder, stack_value, value_type)
+                } else {
+                    exported := name_.IsExported()
+
+                    // If it's a non-string constant, assign it to .
+                    var constprim bool
+                    if _, isconstval := value.(ConstValue); isconstval {
+                        if basic, isbasic := (value.Type()).(*Basic); isbasic {
+                            constprim = basic.Kind != String
+                        }
                     }
 
-                    value = NewLLVMValue(self.builder, global_value, value_type)
-                    obj.Data = value
-    
-                    // If it's not an array, we should mark the value as being
-                    // "indirect" (i.e. it must be loaded before use).
-                    // TODO
-                    //if value_type.TypeKind() != llvm.ArrayTypeKind {
-                    //    setindirect(value)
-                    //}
+                    if isconst && constprim && !exported {
+                        // Not exported, and it's a constant. Let's forego creating
+                        // the internal constant and just pass around the
+                        // llvm.Value.
+                        obj.Kind = ast.Con // Change to constant
+                        obj.Data = value.Convert(value_type)
+                    } else {
+                        init_ := value
+                        global_value := llvm.AddGlobal(
+                            self.module.Module, value_type.LLVMType(), name)
+                        if init_ != nil {
+                            init_ = init_.Convert(value_type)
+                            global_value.SetInitializer(init_.LLVMValue())
+                        }
+                        if isconst {
+                            global_value.SetGlobalConstant(true)
+                        }
+                        if !exported {
+                            global_value.SetLinkage(llvm.InternalLinkage)
+                        }
+
+                        value = NewLLVMValue(self.builder, global_value, value_type)
+                        obj.Data = value
+        
+                        // If it's not an array, we should mark the value as being
+                        // "indirect" (i.e. it must be loaded before use).
+                        // TODO
+                        //if value_type.TypeKind() != llvm.ArrayTypeKind {
+                        //    setindirect(value)
+                        //}
+                    }
                 }
             }
             obj.Data = value
