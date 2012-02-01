@@ -56,31 +56,31 @@ type compiler struct {
     scope      *ast.Scope
 }
 
-func (self *compiler) LookupObj(name string) *ast.Object {
+func (c *compiler) LookupObj(name string) *ast.Object {
     // TODO check for qualified identifiers (x.y), and short-circuit the
     // lookup.
-    for scope := self.scope; scope != nil; scope = scope.Outer {
+    for scope := c.scope; scope != nil; scope = scope.Outer {
         obj := scope.Lookup(name)
         if obj != nil {return obj}
     }
     return nil
 }
 
-func (self *compiler) Resolve(obj *ast.Object) Value {
+func (c *compiler) Resolve(obj *ast.Object) Value {
     if obj.Kind == ast.Pkg {return nil}
     value, isvalue := (obj.Data).(Value)
 
     switch obj.Kind {
     case ast.Con:
         if !isvalue {
-            valspec, _ := (obj.Decl).(*ast.ValueSpec)
-            self.VisitValueSpec(valspec, true)
+            valspec := obj.Decl.(*ast.ValueSpec)
+            c.VisitValueSpec(valspec, true)
             value, isvalue = (obj.Data).(Value)
         }
     case ast.Fun:
         if !isvalue {
-            funcdecl, _ := (obj.Decl).(*ast.FuncDecl)
-            value = self.VisitFuncProtoDecl(funcdecl)
+            funcdecl := obj.Decl.(*ast.FuncDecl)
+            value = c.VisitFuncProtoDecl(funcdecl)
             obj.Data = value
             isvalue = true
         }
@@ -88,7 +88,7 @@ func (self *compiler) Resolve(obj *ast.Object) Value {
         if !isvalue {
             switch x := (obj.Decl).(type) {
             case *ast.ValueSpec:
-                self.VisitValueSpec(x, false)
+                c.VisitValueSpec(x, false)
             case *ast.Field:
                 // No-op. Fields will be yielded for function arg/recv/ret.
                 // We update the .Data field of the object when we enter the
@@ -104,20 +104,20 @@ func (self *compiler) Resolve(obj *ast.Object) Value {
     return value
 }
 
-func (self *compiler) Lookup(name string) (Value, *ast.Object) {
-    obj := self.LookupObj(name)
-    if obj != nil {return self.Resolve(obj), obj}
+func (c *compiler) Lookup(name string) (Value, *ast.Object) {
+    obj := c.LookupObj(name)
+    if obj != nil {return c.Resolve(obj), obj}
     return nil, nil
 }
 
-func (self *compiler) PushScope() *ast.Scope {
-    self.scope = ast.NewScope(self.scope)
-    return self.scope
+func (c *compiler) PushScope() *ast.Scope {
+    c.scope = ast.NewScope(c.scope)
+    return c.scope
 }
 
-func (self *compiler) PopScope() *ast.Scope {
-    scope := self.scope
-    self.scope = self.scope.Outer
+func (c *compiler) PopScope() *ast.Scope {
+    scope := c.scope
+    c.scope = c.scope.Outer
     return scope
 }
 

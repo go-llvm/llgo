@@ -30,14 +30,14 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
-    ptr := self.VisitExpr(stmt.X)
-    value := self.builder.CreateLoad(ptr.LLVMValue(), "")
+func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
+    ptr := c.VisitExpr(stmt.X)
+    value := c.builder.CreateLoad(ptr.LLVMValue(), "")
     one := llvm.ConstInt(value.Type(), 1, false)
 
     switch stmt.Tok {
-    case token.INC: {value = self.builder.CreateAdd(value, one, "")}
-    case token.DEC: {value = self.builder.CreateSub(value, one, "")}
+    case token.INC: {value = c.builder.CreateAdd(value, one, "")}
+    case token.DEC: {value = c.builder.CreateSub(value, one, "")}
     }
 
     // TODO make sure we cover all possibilities (maybe just delegate this to
@@ -45,43 +45,43 @@ func (self *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
     //
     // In the case of a simple variable, we simply calculate the new value and
     // update the value in the scope.
-    self.builder.CreateStore(value, ptr.LLVMValue())
+    c.builder.CreateStore(value, ptr.LLVMValue())
 }
 
-func (self *compiler) VisitBlockStmt(stmt *ast.BlockStmt) {
-    self.PushScope()
-    defer self.PopScope()
+func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt) {
+    c.PushScope()
+    defer c.PopScope()
     for _, stmt := range stmt.List {
-        self.VisitStmt(stmt)
+        c.VisitStmt(stmt)
     }
 }
 
-func (self *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
+func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
     if stmt.Results == nil {
-        self.builder.CreateRetVoid()
+        c.builder.CreateRetVoid()
     } else {
         if len(stmt.Results) == 1 {
-            value := self.VisitExpr(stmt.Results[0])
-            //cur_fn := self.functions[len(self.functions)-1]
+            value := c.VisitExpr(stmt.Results[0])
+            //cur_fn := c.functions[len(c.functions)-1]
             //fn_type := cur_fn.Type()
 
             // TODO Convert value to the function's return type.
             result := value
 
-            self.builder.CreateRet(result.LLVMValue())
+            c.builder.CreateRet(result.LLVMValue())
         } else {
             // TODO
             for _, expr := range stmt.Results {
-                self.VisitExpr(expr)
+                c.VisitExpr(expr)
             }
             panic("Handling multiple results not yet implemented")
         }
     }
 }
 
-func (self *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
+func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
     values := make([]Value, len(stmt.Rhs))
-    for i, expr := range stmt.Rhs {values[i] = self.VisitExpr(expr)}
+    for i, expr := range stmt.Rhs {values[i] = c.VisitExpr(expr)}
     for i, expr := range stmt.Lhs {
         value := values[i]
         switch x := expr.(type) {
@@ -89,54 +89,54 @@ func (self *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
             if x.Name != "_" {
                 obj := x.Obj
                 if stmt.Tok == token.DEFINE {
-                    ptr := self.builder.CreateAlloca(
+                    ptr := c.builder.CreateAlloca(
                         value.Type().LLVMType(), x.Name)
                     //setindirect(ptr) TODO
-                    self.builder.CreateStore(value.LLVMValue(), ptr)
+                    c.builder.CreateStore(value.LLVMValue(), ptr)
                     obj.Data = ptr
                 } else {
                     ptr, _ := (obj.Data).(Value)
                     value = value.Convert(Deref(ptr.Type()))
-                    self.builder.CreateStore(
+                    c.builder.CreateStore(
                         value.LLVMValue(), ptr.LLVMValue())
                 }
             }
         }
         default:
-            ptr := self.VisitExpr(expr)
+            ptr := c.VisitExpr(expr)
             value = value.Convert(Deref(ptr.Type()))
-            self.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
+            c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
         }
     }
 }
 
-func (self *compiler) VisitIfStmt(stmt *ast.IfStmt) {
-    curr_block := self.builder.GetInsertBlock()
+func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
+    curr_block := c.builder.GetInsertBlock()
     if_block := llvm.AddBasicBlock(curr_block.Parent(), "if")
     else_block := llvm.AddBasicBlock(curr_block.Parent(), "else")
     resume_block := llvm.AddBasicBlock(curr_block.Parent(), "endif")
 
     if stmt.Init != nil {
-        self.PushScope()
-        self.VisitStmt(stmt.Init)
-        defer self.PopScope()
+        c.PushScope()
+        c.VisitStmt(stmt.Init)
+        defer c.PopScope()
     }
 
-    cond_val := self.VisitExpr(stmt.Cond)
-    self.builder.CreateCondBr(
+    cond_val := c.VisitExpr(stmt.Cond)
+    c.builder.CreateCondBr(
         cond_val.LLVMValue(), if_block, else_block)
 
-    self.builder.SetInsertPointAtEnd(if_block)
-    self.VisitBlockStmt(stmt.Body)
-    self.builder.CreateBr(resume_block)
+    c.builder.SetInsertPointAtEnd(if_block)
+    c.VisitBlockStmt(stmt.Body)
+    c.builder.CreateBr(resume_block)
 
-    self.builder.SetInsertPointAtEnd(else_block)
-    if stmt.Else != nil {self.VisitStmt(stmt.Else)}
-    self.builder.CreateBr(resume_block)
+    c.builder.SetInsertPointAtEnd(else_block)
+    if stmt.Else != nil {c.VisitStmt(stmt.Else)}
+    c.builder.CreateBr(resume_block)
 }
 
-func (self *compiler) VisitForStmt(stmt *ast.ForStmt) {
-    curr_block := self.builder.GetInsertBlock()
+func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
+    curr_block := c.builder.GetInsertBlock()
     var cond_block, loop_block, done_block llvm.BasicBlock
     if stmt.Cond != nil {
         cond_block = llvm.AddBasicBlock(curr_block.Parent(), "cond")
@@ -146,47 +146,47 @@ func (self *compiler) VisitForStmt(stmt *ast.ForStmt) {
 
     // Is there an initializer? Create a new scope and visit the statement.
     if stmt.Init != nil {
-        self.PushScope()
-        self.VisitStmt(stmt.Init)
-        defer self.PopScope()
+        c.PushScope()
+        c.VisitStmt(stmt.Init)
+        defer c.PopScope()
     }
 
     // Start the loop.
     if stmt.Cond != nil {
-        self.builder.CreateBr(cond_block)
-        self.builder.SetInsertPointAtEnd(cond_block)
-        cond_val := self.VisitExpr(stmt.Cond)
-        self.builder.CreateCondBr(
+        c.builder.CreateBr(cond_block)
+        c.builder.SetInsertPointAtEnd(cond_block)
+        cond_val := c.VisitExpr(stmt.Cond)
+        c.builder.CreateCondBr(
             cond_val.LLVMValue(), loop_block, done_block)
     } else {
-        self.builder.CreateBr(loop_block)
+        c.builder.CreateBr(loop_block)
     }
 
     // Loop body.
-    self.builder.SetInsertPointAtEnd(loop_block)
-    self.VisitBlockStmt(stmt.Body)
-    if stmt.Post != nil {self.VisitStmt(stmt.Post)}
+    c.builder.SetInsertPointAtEnd(loop_block)
+    c.VisitBlockStmt(stmt.Body)
+    if stmt.Post != nil {c.VisitStmt(stmt.Post)}
     if stmt.Cond != nil {
-        self.builder.CreateBr(cond_block)
+        c.builder.CreateBr(cond_block)
     } else {
-        self.builder.CreateBr(loop_block)
+        c.builder.CreateBr(loop_block)
     }
-    self.builder.SetInsertPointAtEnd(done_block)
+    c.builder.SetInsertPointAtEnd(done_block)
 }
 
-func (self *compiler) VisitGoStmt(stmt *ast.GoStmt) {
+func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     //stmt.Call *ast.CallExpr
     // TODO 
     var fn Value
     switch x := (stmt.Call.Fun).(type) {
     case *ast.Ident:
-        fn = self.Resolve(x.Obj)
+        fn = c.Resolve(x.Obj)
         if fn == nil {
             panic(fmt.Sprintf(
                 "No function found with name '%s'", x.String()))
         }
     default:
-        fn = self.VisitExpr(stmt.Call.Fun)
+        fn = c.VisitExpr(stmt.Call.Fun)
     }
 
     // Evaluate arguments, store in a structure on the stack.
@@ -201,18 +201,18 @@ func (self *compiler) VisitGoStmt(stmt *ast.GoStmt) {
             param_types = append(param_types, typ.LLVMType())
         }
         args_struct_type = llvm.StructType(param_types, false)
-        args_mem = self.builder.CreateAlloca(args_struct_type, "")
+        args_mem = c.builder.CreateAlloca(args_struct_type, "")
         for i, expr := range stmt.Call.Args {
-            value_i := self.VisitExpr(expr)
+            value_i := c.VisitExpr(expr)
             value_i = value_i.Convert(fn_type.Params[i].Type.(Type))
-            arg_i := self.builder.CreateGEP(args_mem, []llvm.Value{
+            arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
                     llvm.ConstInt(llvm.Int32Type(), 0, false),
                     llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
             // TODO
             //if isindirect(value_i) {
-            //    value_i = self.builder.CreateLoad(value_i, "")
+            //    value_i = c.builder.CreateLoad(value_i, "")
             //}
-            self.builder.CreateStore(value_i.LLVMValue(), arg_i)
+            c.builder.CreateStore(value_i.LLVMValue(), arg_i)
         }
         args_size = llvm.SizeOf(args_struct_type)
     } else {
@@ -222,53 +222,53 @@ func (self *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     }
 
     // When done, return to where we were.
-    defer self.builder.SetInsertPointAtEnd(self.builder.GetInsertBlock())
+    defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 
     // Create a function that will take a pointer to a structure of the type
     // defined above, or no parameters if there are none to pass.
     indirect_fn_type := llvm.FunctionType(
         llvm.VoidType(),
         []llvm.Type{llvm.PointerType(args_struct_type, 0)}, false)
-    indirect_fn := llvm.AddFunction(self.module.Module, "", indirect_fn_type)
+    indirect_fn := llvm.AddFunction(c.module.Module, "", indirect_fn_type)
     indirect_fn.SetFunctionCallConv(llvm.CCallConv)
 
     // Call "newgoroutine" with the indirect function and stored args.
-    newgoroutine := getnewgoroutine(self.module.Module)
+    newgoroutine := getnewgoroutine(c.module.Module)
     ngr_param_types := newgoroutine.Type().ElementType().ParamTypes()
-    fn_arg := self.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
-    args_arg := self.builder.CreateBitCast(args_mem,
+    fn_arg := c.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
+    args_arg := c.builder.CreateBitCast(args_mem,
         llvm.PointerType(llvm.Int8Type(), 0), "")
-    self.builder.CreateCall(newgoroutine,
+    c.builder.CreateCall(newgoroutine,
         []llvm.Value{fn_arg, args_arg, args_size}, "")
 
     entry := llvm.AddBasicBlock(indirect_fn, "entry")
-    self.builder.SetInsertPointAtEnd(entry)
+    c.builder.SetInsertPointAtEnd(entry)
     var args []llvm.Value
     if stmt.Call.Args != nil {
         args_mem = indirect_fn.Param(0)
         args = make([]llvm.Value, len(stmt.Call.Args))
         for i := range stmt.Call.Args {
-            arg_i := self.builder.CreateGEP(args_mem, []llvm.Value{
+            arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
                        llvm.ConstInt(llvm.Int32Type(), 0, false),
                        llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-            args[i] = self.builder.CreateLoad(arg_i, "")
+            args[i] = c.builder.CreateLoad(arg_i, "")
         }
     }
-    self.builder.CreateCall(fn.LLVMValue(), args, "")
-    self.builder.CreateRetVoid()
+    c.builder.CreateCall(fn.LLVMValue(), args, "")
+    c.builder.CreateRetVoid()
 }
 
-func (self *compiler) VisitStmt(stmt ast.Stmt) {
+func (c *compiler) VisitStmt(stmt ast.Stmt) {
     switch x := stmt.(type) {
-    case *ast.ReturnStmt: self.VisitReturnStmt(x)
-    case *ast.AssignStmt: self.VisitAssignStmt(x)
-    case *ast.IncDecStmt: self.VisitIncDecStmt(x)
-    case *ast.IfStmt: self.VisitIfStmt(x)
-    case *ast.ForStmt: self.VisitForStmt(x)
-    case *ast.ExprStmt: self.VisitExpr(x.X)
-    case *ast.BlockStmt: self.VisitBlockStmt(x)
-    case *ast.DeclStmt: self.VisitDecl(x.Decl)
-    case *ast.GoStmt: self.VisitGoStmt(x)
+    case *ast.ReturnStmt: c.VisitReturnStmt(x)
+    case *ast.AssignStmt: c.VisitAssignStmt(x)
+    case *ast.IncDecStmt: c.VisitIncDecStmt(x)
+    case *ast.IfStmt: c.VisitIfStmt(x)
+    case *ast.ForStmt: c.VisitForStmt(x)
+    case *ast.ExprStmt: c.VisitExpr(x.X)
+    case *ast.BlockStmt: c.VisitBlockStmt(x)
+    case *ast.DeclStmt: c.VisitDecl(x.Decl)
+    case *ast.GoStmt: c.VisitGoStmt(x)
     default: panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
     }
 }

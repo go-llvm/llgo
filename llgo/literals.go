@@ -28,36 +28,36 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
+func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
     return NewConstValue(lit.Kind, lit.Value)
 }
 
-func (self *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
-    fn_type := self.VisitFuncType(lit.Type)
-    fn := llvm.AddFunction(self.module.Module, "", fn_type.LLVMType())
+func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
+    fn_type := c.VisitFuncType(lit.Type)
+    fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
     fn.SetFunctionCallConv(llvm.FastCallConv)
 
-    defer self.builder.SetInsertPointAtEnd(self.builder.GetInsertBlock())
+    defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
     entry := llvm.AddBasicBlock(fn, "entry")
-    self.builder.SetInsertPointAtEnd(entry)
+    c.builder.SetInsertPointAtEnd(entry)
 
-    fn_value := NewLLVMValue(self.builder, fn, fn_type)
-    self.functions = append(self.functions, fn_value)
-    self.VisitBlockStmt(lit.Body)
+    fn_value := NewLLVMValue(c.builder, fn, fn_type)
+    c.functions = append(c.functions, fn_value)
+    c.VisitBlockStmt(lit.Body)
     if fn_type.Results == nil {
         lasti := entry.LastInstruction()
         if lasti.IsNil() || lasti.Opcode() != llvm.Ret {
             // Assume nil return type, AST should be checked first.
-            self.builder.CreateRetVoid()
+            c.builder.CreateRetVoid()
         }
     }
-    self.functions = self.functions[0:len(self.functions)-1]
+    c.functions = c.functions[0:len(c.functions)-1]
     return fn_value
 }
 
 // XXX currently only handles composite array literals
-func (self *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
-    typ := self.GetType(lit.Type)
+func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
+    typ := c.GetType(lit.Type)
     var values []Value
     if lit.Elts != nil {
         valuemap := make(map[int]Value)
@@ -65,14 +65,14 @@ func (self *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
         for i, elt := range lit.Elts {
             var value Value
             if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
-                key := self.VisitExpr(kv.Key)
+                key := c.VisitExpr(kv.Key)
                 i = -1
                 if const_key, isconst := key.(*ConstValue); isconst {
                     i = int(const_key.Int64())
                 }
-                value = self.VisitExpr(kv.Value)
+                value = c.VisitExpr(kv.Value)
             } else {
-                value = self.VisitExpr(elt)
+                value = c.VisitExpr(elt)
             }
             if i >= 0 {
                 if i > maxi {maxi = i}
@@ -98,7 +98,7 @@ func (self *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
                 llvm_values[i] = value.Convert(elttype).LLVMValue()
             }
         }
-        return NewLLVMValue(self.builder,
+        return NewLLVMValue(c.builder,
             llvm.ConstArray(elttype.LLVMType(), llvm_values), typ)
     }
     }

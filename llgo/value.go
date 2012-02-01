@@ -143,8 +143,8 @@ func (v *LLVMValue) Convert(typ Type) Value {
             switch {
             case delta == 0: return value
             // TODO handle signed/unsigned (SExt/ZExt)
-            case delta < 0: return self.builder.CreateZExt(value, totype, "")
-            case delta > 0: return self.builder.CreateTrunc(value, totype, "")
+            case delta < 0: return c.builder.CreateZExt(value, totype, "")
+            case delta > 0: return c.builder.CreateTrunc(value, totype, "")
             }
             return LLVMValue{lhs.builder, value}
         }

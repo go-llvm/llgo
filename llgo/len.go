@@ -30,10 +30,10 @@ import (
     "go/token"
 )
 
-func (self *compiler) VisitLen(expr *ast.CallExpr) Value {
+func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
 
-    value := self.VisitExpr(expr.Args[0])
+    value := c.VisitExpr(expr.Args[0])
     switch typ := (value.Type()).(type) {
     case *Pointer:
         // XXX Converting to a string to be converted back to an int is silly.

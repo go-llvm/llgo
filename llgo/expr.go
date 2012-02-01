@@ -57,31 +57,31 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 }
 
 /*
-func (self *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
-    x := self.VisitExpr(expr.X)
-    y := self.VisitExpr(expr.Y)
+func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
+    x := c.VisitExpr(expr.X)
+    y := c.VisitExpr(expr.Y)
 
     // If either is a const and the other is not, then cast the constant to the
     // other's type (to support untyped literals/expressions).
     x_const, y_const := x.IsConstant(), y.IsConstant()
     if x_const && !y_const {
         if isglobal(x) {x = x.Initializer()}
-        if isindirect(y) {y = self.builder.CreateLoad(y, "")}
-        x = self.maybeCast(x, y.Type())
+        if isindirect(y) {y = c.builder.CreateLoad(y, "")}
+        x = c.maybeCast(x, y.Type())
     } else if !x_const && y_const {
         if isglobal(y) {y = y.Initializer()}
-        if isindirect(x) {x = self.builder.CreateLoad(x, "")}
-        y = self.maybeCast(y, x.Type())
+        if isindirect(x) {x = c.builder.CreateLoad(x, "")}
+        y = c.maybeCast(y, x.Type())
     } else if x_const && y_const {
         // If either constant is a global variable, 'dereference' it by taking
         // its initializer, which will never change.
         if isglobal(x) {x = x.Initializer()}
         if isglobal(y) {y = y.Initializer()}
         // XXX temporary fix; we should be using exp/types/Const.
-        y = self.maybeCast(y, x.Type())
+        y = c.maybeCast(y, x.Type())
     } else {
-        if isindirect(x) {x = self.builder.CreateLoad(x, "")}
-        if isindirect(y) {y = self.builder.CreateLoad(y, "")}
+        if isindirect(x) {x = c.builder.CreateLoad(x, "")}
+        if isindirect(y) {y = c.builder.CreateLoad(y, "")}
     }
 
     // TODO check types/sign, use float operators if appropriate.
@@ -90,50 +90,50 @@ func (self *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
         if x_const && y_const {
             return llvm.ConstMul(x, y)
         } else {
-            return self.builder.CreateMul(x, y, "")
+            return c.builder.CreateMul(x, y, "")
         }
     case token.QUO:
         if x_const && y_const {
             return llvm.ConstUDiv(x, y)
         } else {
-            return self.builder.CreateUDiv(x, y, "")
+            return c.builder.CreateUDiv(x, y, "")
         }
     case token.ADD:
         if x_const && y_const {
             return llvm.ConstAdd(x, y)
         } else {
-            return self.builder.CreateAdd(x, y, "")
+            return c.builder.CreateAdd(x, y, "")
         }
     case token.SUB:
         if x_const && y_const {
             return llvm.ConstSub(x, y)
         } else {
-            return self.builder.CreateSub(x, y, "")
+            return c.builder.CreateSub(x, y, "")
         }
     case token.EQL:
         if x_const && y_const {
             return llvm.ConstICmp(llvm.IntEQ, x, y)
         } else {
-            return self.builder.CreateICmp(llvm.IntEQ, x, y, "")
+            return c.builder.CreateICmp(llvm.IntEQ, x, y, "")
         }
     case token.LSS:
         if x_const && y_const {
             return llvm.ConstICmp(llvm.IntULT, x, y)
         } else {
-            return self.builder.CreateICmp(llvm.IntULT, x, y, "")
+            return c.builder.CreateICmp(llvm.IntULT, x, y, "")
         }
     }
     panic(fmt.Sprint("Unhandled operator: ", expr.Op))
 }
 
-func (self *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
-    value := self.VisitExpr(expr.X)
+func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
+    value := c.VisitExpr(expr.X)
     switch expr.Op {
     case token.SUB: {
         if !value.IsAConstant().IsNil() {
             value = llvm.ConstNeg(value)
         } else {
-            value = self.builder.CreateNeg(value, "")
+            value = c.builder.CreateNeg(value, "")
         }
     }
     case token.ADD: // No-op
@@ -143,36 +143,36 @@ func (self *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
 }
 */
 
-func (self *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
+func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     var fn Value
     switch x := (expr.Fun).(type) {
     case *ast.Ident:
         switch x.String() {
-        case "println": return self.VisitPrintln(expr)
-        case "len": return self.VisitLen(expr)
-        case "new": return self.VisitNew(expr)
+        case "println": return c.VisitPrintln(expr)
+        case "len": return c.VisitLen(expr)
+        case "new": return c.VisitNew(expr)
         default:
             // Is it a type? Then this is a conversion (e.g. int(123))
             if expr.Args != nil && len(expr.Args) == 1 {
-                typ := self.GetType(x)
+                typ := c.GetType(x)
                 if typ != nil {
-                    value := self.VisitExpr(expr.Args[0])
+                    value := c.VisitExpr(expr.Args[0])
                     return value.Convert(typ)
                 }
             }
 
-            fn = self.Resolve(x.Obj)
+            fn = c.Resolve(x.Obj)
             if fn == nil {
                 panic(fmt.Sprintf(
                     "No function found with name '%s'", x.String()))
             }
         }
     default:
-        fn = self.VisitExpr(expr.Fun)
+        fn = c.VisitExpr(expr.Fun)
     }
 
     //if isindirect(fn) {
-    //    fn = self.builder.CreateLoad(fn, "")
+    //    fn = c.builder.CreateLoad(fn, "")
     //}
 
     // Is it a method call? We'll extract the receiver from metadata here,
@@ -195,7 +195,7 @@ func (self *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 
         param_types := fn_type.Params
         for i, expr := range expr.Args {
-            value := self.VisitExpr(expr)
+            value := c.VisitExpr(expr)
             param_type := param_types[arg_offset+i].Type.(Type)
             args[arg_offset+i] = value.Convert(param_type).LLVMValue()
         }
@@ -206,23 +206,23 @@ func (self *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     var result_type Type
     switch len(fn_type.Results) {
         case 0:
-        case 1: result_type = self.ObjGetType(fn_type.Results[0])
+        case 1: result_type = c.ObjGetType(fn_type.Results[0])
         default:
             panic("Multiple results not handled yet")
     }
 
-    return NewLLVMValue(self.builder,
-        self.builder.CreateCall(fn.LLVMValue(), args, ""),
+    return NewLLVMValue(c.builder,
+        c.builder.CreateCall(fn.LLVMValue(), args, ""),
         result_type)
 }
 
-func (self *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
-    value := self.VisitExpr(expr.X)
+func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
+    value := c.VisitExpr(expr.X)
     // TODO handle maps, strings, slices.
 
-    index := self.VisitExpr(expr.Index)
+    index := c.VisitExpr(expr.Index)
     // TODO
-    //if isindirect(index) {index = self.builder.CreateLoad(index, "")}
+    //if isindirect(index) {index = c.builder.CreateLoad(index, "")}
     isint := false
     if basic, isbasic := index.Type().(*Basic); isbasic {
         switch basic.Kind {
@@ -253,21 +253,21 @@ func (self *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     }
 
     zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
-    element := self.builder.CreateGEP(
+    element := c.builder.CreateGEP(
         value.LLVMValue(), []llvm.Value{zero, index.LLVMValue()}, "")
-    result := self.builder.CreateLoad(element, "")
-    return NewLLVMValue(self.builder, result, result_type)
+    result := c.builder.CreateLoad(element, "")
+    return NewLLVMValue(c.builder, result, result_type)
 }
 
-func (self *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
-    lhs := self.VisitExpr(expr.X)
+func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
+    lhs := c.VisitExpr(expr.X)
     if lhs == nil {
         // The only time we should get a nil result is if the object is a
         // package.
         pkgident := (expr.X).(*ast.Ident)
         pkgscope := (pkgident.Obj.Data).(*ast.Scope)
         obj := pkgscope.Lookup(expr.Sel.String())
-        return self.Resolve(obj)
+        return c.Resolve(obj)
     }
 
     // TODO handle interfaces.
@@ -289,13 +289,13 @@ func (self *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
         element_type = element_type.ElementType()
     }
 
-    typeinfo := self.typeinfo[element_type.C]
+    typeinfo := c.typeinfo[element_type.C]
     index, ok := typeinfo.FieldIndex(expr.Sel.String())
     if ok {
         index_value := llvm.ConstInt(llvm.Int32Type(), uint64(index), false)
         indexes = append(indexes, index_value)
         if lhs.Type().TypeKind() == llvm.PointerTypeKind {
-            value := self.builder.CreateGEP(lhs, indexes, "")
+            value := c.builder.CreateGEP(lhs, indexes, "")
             setindirect(value)
             return value
         }
@@ -303,7 +303,7 @@ func (self *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     } else {
         method_obj := typeinfo.MethodByName(expr.Sel.String())
         if method_obj != nil {
-            method := self.Resolve(method_obj)
+            method := c.Resolve(method_obj)
             // TODO
             //method.SetMetadata(llvm.MDKindID("receiver"), lhs)
             return method
@@ -316,13 +316,13 @@ func (self *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     return nil
 }
 
-func (self *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
+func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
     // Are we dereferencing a pointer that's on the stack? Then load the stack
     // value.
-    operand := self.VisitExpr(expr.X)
+    operand := c.VisitExpr(expr.X)
     // TODO
     //if isindirect(operand) {
-    //    operand = self.builder.CreateLoad(operand, "")
+    //    operand = c.builder.CreateLoad(operand, "")
     //}
 
     // We don't want to immediately load the value, as we might be doing an
@@ -332,20 +332,20 @@ func (self *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
     return operand
 }
 
-func (self *compiler) VisitExpr(expr ast.Expr) Value {
+func (c *compiler) VisitExpr(expr ast.Expr) Value {
     switch x:= expr.(type) {
-    case *ast.BasicLit: return self.VisitBasicLit(x)
-    case *ast.BinaryExpr: return self.VisitBinaryExpr(x)
-    case *ast.FuncLit: return self.VisitFuncLit(x)
-    case *ast.CompositeLit: return self.VisitCompositeLit(x)
-    case *ast.UnaryExpr: return self.VisitUnaryExpr(x)
-    case *ast.CallExpr: return self.VisitCallExpr(x)
-    case *ast.IndexExpr: return self.VisitIndexExpr(x)
-    case *ast.SelectorExpr: return self.VisitSelectorExpr(x)
-    case *ast.StarExpr: return self.VisitStarExpr(x)
+    case *ast.BasicLit: return c.VisitBasicLit(x)
+    case *ast.BinaryExpr: return c.VisitBinaryExpr(x)
+    case *ast.FuncLit: return c.VisitFuncLit(x)
+    case *ast.CompositeLit: return c.VisitCompositeLit(x)
+    case *ast.UnaryExpr: return c.VisitUnaryExpr(x)
+    case *ast.CallExpr: return c.VisitCallExpr(x)
+    case *ast.IndexExpr: return c.VisitIndexExpr(x)
+    case *ast.SelectorExpr: return c.VisitSelectorExpr(x)
+    case *ast.StarExpr: return c.VisitStarExpr(x)
     case *ast.Ident: {
-        if x.Obj == nil {x.Obj = self.LookupObj(x.Name)}
-        return self.Resolve(x.Obj)
+        if x.Obj == nil {x.Obj = c.LookupObj(x.Name)}
+        return c.Resolve(x.Obj)
     }
     }
     panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))

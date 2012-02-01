@@ -103,27 +103,27 @@ func createGlobalVariableMetadata(global llvm.Value) llvm.Value {
     });
 }
 
-func (self *compiler) createCompileUnitMetadata() {
+func (c *compiler) createCompileUnitMetadata() {
     enumtypes := []llvm.Value{};
     retainedtypes := []llvm.Value{};
     functions := []llvm.Value{};
     globals := []llvm.Value{};
 
     // Create global metadata.
-    global := self.module.FirstGlobal()
+    global := c.module.FirstGlobal()
     for ; !global.IsNil(); global = llvm.NextGlobal(global) {
         if !global.IsAGlobalVariable().IsNil() {
             name := global.Name()
             first, _ := utf8.DecodeRuneInString(name)
             if unicode.IsUpper(first) {
                 metadata := createGlobalVariableMetadata(global)
-                self.module.AddNamedMetadataOperand("llvm.dbg.gv", metadata)
+                c.module.AddNamedMetadataOperand("llvm.dbg.gv", metadata)
                 globals = append(globals, metadata)
             }
         }
     }
 
-    self.module.AddNamedMetadataOperand("llvm.dbg.cu",
+    c.module.AddNamedMetadataOperand("llvm.dbg.cu",
                                         llvm.MDNode([]llvm.Value{
         llvm.ConstInt(
             llvm.Int32Type(), DW_TAG_compile_unit+LLVMDebugVersion, false),

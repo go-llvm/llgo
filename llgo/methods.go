@@ -28,7 +28,7 @@ import (
 
 // fixMethodDecls will walk through a file and associate functions with their
 // receiver type.
-func (self *compiler) fixMethodDecls(file *ast.File) {
+func (c *compiler) fixMethodDecls(file *ast.File) {
     if file.Decls == nil {return}
     for _, decl := range file.Decls {
         if funcdecl, ok := decl.(*ast.FuncDecl); ok {
@@ -37,7 +37,7 @@ func (self *compiler) fixMethodDecls(file *ast.File) {
                     panic("Expected exactly one receiver")
                 }
                 field := funcdecl.Recv.List[0]
-                typ := self.GetType(field.Type)
+                typ := c.GetType(field.Type)
 
                 // Receivers may be a pointer type, or a "base" type.
                 // TODO handle pointer base types (e.g. a declared type whose
@@ -45,10 +45,10 @@ func (self *compiler) fixMethodDecls(file *ast.File) {
                 typ = Deref(typ)
 
                 // Insert a reference to the FuncDecl's AST object.
-                typeinfo := self.typeinfo[typ]
+                typeinfo := c.typeinfo[typ]
                 if typeinfo == nil {
                     typeinfo = &TypeInfo{}
-                    self.typeinfo[typ] = typeinfo
+                    c.typeinfo[typ] = typeinfo
                 }
                 if typeinfo.Methods == nil {
                     typeinfo.Methods = make(map[string]*ast.Object)

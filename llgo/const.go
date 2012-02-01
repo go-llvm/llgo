@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -29,7 +29,7 @@ import (
 
 // fixConstDecls will walk through a file and update ConstDecl's so that each
 // ValueSpec has a valid Values Expr-list.
-func (self *compiler) fixConstDecls(file *ast.File) {
+func (c *compiler) fixConstDecls(file *ast.File) {
     if file.Decls == nil {return}
     for _, decl := range file.Decls {
         if gendecl, ok := decl.(*ast.GenDecl); ok {

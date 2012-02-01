@@ -40,21 +40,21 @@ func getprintf(module llvm.Module) llvm.Value {
     return printf
 }
 
-func (self *compiler) VisitPrintln(expr *ast.CallExpr) Value {
+func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
     var args []llvm.Value = nil
     var format string
     if expr.Args != nil {
         format = ""
         args = make([]llvm.Value, len(expr.Args)+1)
         for i, expr := range expr.Args {
-            value := self.VisitExpr(expr)
+            value := c.VisitExpr(expr)
             llvm_value := value.LLVMValue()
 
             // Is it a global variable or non-constant? Then we'll need to load
             // it if it's not a pointer to an array.
             if isindirect(value) {
                 // TODO
-                //value = self.builder.CreateLoad(value, "")
+                //value = c.builder.CreateLoad(value, "")
             }
 
             if i > 0 {format += " "}
@@ -71,7 +71,7 @@ func (self *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                     if !llvm_value.IsAConstant().IsNil() &&
                        llvm_value.IsAGlobalValue().IsNil() {
                         g := llvm.AddGlobal(
-                            self.module.Module, llvm_value.Type(), "")
+                            c.module.Module, llvm_value.Type(), "")
                         g.SetInitializer(llvm_value)
                         g.SetGlobalConstant(true)
                         g.SetLinkage(llvm.InternalLinkage)
@@ -91,14 +91,14 @@ func (self *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 switch init_.(type) {
                 case ConstValue:
                     llvm_value = llvm.AddGlobal(
-                        self.module.Module, init_value.Type(), "")
+                        c.module.Module, init_value.Type(), "")
                     llvm_value.SetInitializer(init_value)
                     llvm_value.SetGlobalConstant(true)
                     llvm_value.SetLinkage(llvm.InternalLinkage)
                 case *LLVMValue:
-                    llvm_value = self.builder.CreateAlloca(
+                    llvm_value = c.builder.CreateAlloca(
                         init_value.Type(), "")
-                    self.builder.CreateStore(init_value, llvm_value)
+                    c.builder.CreateStore(init_value, llvm_value)
                 }
                 // FIXME don't assume string...
                 format += "%s"
@@ -118,11 +118,11 @@ func (self *compiler) VisitPrintln(expr *ast.CallExpr) Value {
         args = make([]llvm.Value, 1)
         format = "\n"
     }
-    args[0] = self.builder.CreateGlobalStringPtr(format, "")
+    args[0] = c.builder.CreateGlobalStringPtr(format, "")
 
-    printf := getprintf(self.module.Module)
-    return NewLLVMValue(self.builder,
-        self.builder.CreateCall(printf, args, ""), Int32Type)
+    printf := getprintf(c.module.Module)
+    return NewLLVMValue(c.builder,
+        c.builder.CreateCall(printf, args, ""), Int32Type)
 }
 
 // vim: set ft=go :

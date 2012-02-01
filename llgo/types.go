@@ -76,7 +76,7 @@ func (t *TypeInfo) FieldIndex(name string) (i int, exists bool) {
 }
 
 // Get a Type from an identifier.
-func (self *compiler) IdentGetType(ident *ast.Ident) Type {
+func (c *compiler) IdentGetType(ident *ast.Ident) Type {
     switch ident.Name {
         case "bool": return BoolType
         case "byte": return ByteType
@@ -99,17 +99,17 @@ func (self *compiler) IdentGetType(ident *ast.Ident) Type {
         case "complex64": return Complex64Type
         case "complex128": return Complex128Type
     }
-    return self.ObjGetType(ident.Obj)
+    return c.ObjGetType(ident.Obj)
 }
 
 // Get a Type from an ast object.
-func (self *compiler) ObjGetType(obj *ast.Object) Type {
+func (c *compiler) ObjGetType(obj *ast.Object) Type {
     if obj != nil {
         type_, istype := (obj.Data).(Type)
         if !istype {
             switch x := (obj.Decl).(type) {
             case *ast.TypeSpec:
-                self.VisitTypeSpec(x)
+                c.VisitTypeSpec(x)
                 type_, istype = (obj.Data).(Type)
             }
         }
@@ -118,21 +118,21 @@ func (self *compiler) ObjGetType(obj *ast.Object) Type {
     return nil
 }
 
-func (self *compiler) GetType(expr ast.Expr) Type {
+func (c *compiler) GetType(expr ast.Expr) Type {
     switch x := (expr).(type) {
     case *ast.Ident:
-        return self.IdentGetType(x)
+        return c.IdentGetType(x)
     case *ast.FuncType:
-        return self.VisitFuncType(x)
+        return c.VisitFuncType(x)
     case *ast.ArrayType:
-        elttype := self.GetType(x.Elt)
+        elttype := c.GetType(x.Elt)
         if x.Len == nil {
             return &Slice{Elt: elttype}
         } else {
             result := &Array{Elt: elttype}
             _, isellipsis := (x.Len).(*ast.Ellipsis)
             if !isellipsis {
-                lenvalue := self.VisitExpr(x.Len)
+                lenvalue := c.VisitExpr(x.Len)
                 constval, isconst := lenvalue.(ConstValue)
                 if !isconst {
                     panic("Array length must be a constant integer expression")
@@ -146,18 +146,18 @@ func (self *compiler) GetType(expr ast.Expr) Type {
             return result
         }
     case *ast.StructType:
-        return self.VisitStructType(x)
+        return c.VisitStructType(x)
     case *ast.InterfaceType:
-        return self.VisitInterfaceType(x)
+        return c.VisitInterfaceType(x)
     case *ast.StarExpr:
-        return &Pointer{Base: self.GetType(x.X)}
+        return &Pointer{Base: c.GetType(x.X)}
     default:
         panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
     }
     return nil
 }
 
-func (self *compiler) VisitFuncType(f *ast.FuncType) *Func {
+func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
     var fn_type Func
 
     if f.Params != nil && f.Params.List != nil {
@@ -167,7 +167,7 @@ func (self *compiler) VisitFuncType(f *ast.FuncType) *Func {
                 namecount = len(f.Params.List[i].Names)
             }
             args := make([]*ast.Object, namecount)
-            typ := self.GetType(f.Params.List[i].Type)
+            typ := c.GetType(f.Params.List[i].Type)
             for j := 0; j < namecount; j++ {
                 name := "_"
                 ident := f.Params.List[i].Names[j]
@@ -186,7 +186,7 @@ func (self *compiler) VisitFuncType(f *ast.FuncType) *Func {
                 namecount = len(f.Params.List[i].Names)
             }
             args := make([]*ast.Object, namecount)
-            typ := self.GetType(f.Params.List[i].Type)
+            typ := c.GetType(f.Params.List[i].Type)
             for j := 0; j < namecount; j++ {
                 name := "_"
                 ident := f.Params.List[i].Names[j]
@@ -200,13 +200,13 @@ func (self *compiler) VisitFuncType(f *ast.FuncType) *Func {
     return &fn_type
 }
 
-func (self *compiler) VisitStructType(s *ast.StructType) *Struct {
+func (c *compiler) VisitStructType(s *ast.StructType) *Struct {
     var typ Struct
     if s.Fields != nil && s.Fields.List != nil {
         var i int = 0
         for _, field := range s.Fields.List {
             // TODO handle field tag
-            fieldtype := self.GetType(field.Type)
+            fieldtype := c.GetType(field.Type)
             if field.Names != nil {
                 //fieldtypes := make([]*ast.Object, len(field.Names))
                 for _, name := range field.Names {
@@ -238,14 +238,14 @@ func (self *compiler) VisitStructType(s *ast.StructType) *Struct {
     return &typ
 }
 
-func (self *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {
+func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {
     var iface Interface
     if i.Methods != nil && i.Methods.List != nil {
         for _, field := range i.Methods.List {
             if field.Names == nil {
                 // If field.Names is nil, then we have an embedded interface.
                 fmt.Println("==nil")
-                embedded := self.GetType(field.Type)
+                embedded := c.GetType(field.Type)
 
                 embedded_iface, isiface := embedded.(*Interface)
                 if isiface {

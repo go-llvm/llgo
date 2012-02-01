@@ -160,7 +160,7 @@ func (f *Func) LLVMType() llvm.Type {
         isvararg := fn_type.IsVariadic
 
         // Add receiver as the first parameter type.
-        recv_type := self.GetType(f.Recv.List[0].Type)
+        recv_type := c.GetType(f.Recv.List[0].Type)
         if recv_type != nil {
             param_types = append(param_types, recv_type.LLVMType())
         }

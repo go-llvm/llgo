@@ -27,13 +27,13 @@ import (
     "github.com/axw/gollvm/llvm"
 )
 
-func (self *compiler) VisitNew(expr *ast.CallExpr) Value {
+func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
-    typ := self.GetType(expr.Args[0])
+    typ := c.GetType(expr.Args[0])
     llvm_typ := typ.LLVMType()
-    mem := self.builder.CreateMalloc(llvm_typ, "")
-    self.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
-    return NewLLVMValue(self.builder, mem, typ)
+    mem := c.builder.CreateMalloc(llvm_typ, "")
+    c.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
+    return NewLLVMValue(c.builder, mem, typ)
 }
 
 // vim: set ft=go :
