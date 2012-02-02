@@ -52,6 +52,7 @@ var (
 type Type interface {
 	isType()
     LLVMType() llvm.Type
+    String() string
 }
 
 // All concrete types embed ImplementsType which
@@ -71,11 +72,19 @@ type Bad struct {
 	Msg string // for better error reporting/debugging
 }
 
+func (b *Bad) String() string {
+    return fmt.Sprint("Bad(", b.Msg, ")")
+}
+
 // A Basic represents a (unnamed) basic type.
 type Basic struct {
 	ImplementsType
     Kind BasicTypeKind 
 	// TODO(gri) need a field specifying the exact basic type
+}
+
+func (b *Basic) String() string {
+    return fmt.Sprint("Basic(", b.Kind, ")")
 }
 
 func (b *Basic) LLVMType() llvm.Type {
@@ -104,10 +113,18 @@ type Array struct {
 	Elt Type
 }
 
+func (a *Array) String() string {
+    return fmt.Sprint("Array(", a.Len, ", ", a.Elt, ")")
+}
+
 // A Slice represents a slice type []Elt.
 type Slice struct {
 	ImplementsType
 	Elt Type
+}
+
+func (s *Slice) String() string {
+    return fmt.Sprint("Slice(", s.Elt, ")")
 }
 
 // A Struct represents a struct type struct{...}.
@@ -122,10 +139,22 @@ type Struct struct {
 	// - there is no scope for fast lookup (but the parser creates one)
 }
 
+func (s *Struct) String() string {
+    return fmt.Sprint("Struct(", s.Fields, ", ", s.Tags, ")")
+}
+
 // A Pointer represents a pointer type *Base.
 type Pointer struct {
 	ImplementsType
 	Base Type
+}
+
+func (p *Pointer) String() string {
+    return fmt.Sprint("Pointer(", p.Base, ")")
+}
+
+func (p *Pointer) LLVMType() llvm.Type {
+    return llvm.PointerType(p.Base.LLVMType(), 0)
 }
 
 // A Func represents a function type func(...) (...).
@@ -136,6 +165,11 @@ type Func struct {
 	Params     ObjList     // (incoming) parameters from left to right; or nil
 	Results    ObjList     // (outgoing) results from left to right; or nil
 	IsVariadic bool        // true if the last parameter's type is of the form ...T
+}
+
+func (f *Func) String() string {
+    return fmt.Sprintf("Func(%v, %v, %v, %v)", f.Recv,
+                       f.Params, f.Results, f.IsVariadic)
 }
 
 func (f *Func) LLVMType() llvm.Type {
@@ -183,10 +217,18 @@ type Interface struct {
 	Methods ObjList // interface methods sorted by name; or nil
 }
 
+func (i *Interface) String() string {
+    return fmt.Sprint("Interface(", i.Methods, ")")
+}
+
 // A Map represents a map type map[Key]Elt.
 type Map struct {
 	ImplementsType
 	Key, Elt Type
+}
+
+func (m *Map) String() string {
+    return fmt.Sprint("Map(", m.Key, ", ", m.Elt, ")")
 }
 
 // A Chan represents a channel type chan Elt, <-chan Elt, or chan<-Elt.
@@ -196,12 +238,20 @@ type Chan struct {
 	Elt Type
 }
 
+func (c *Chan) String() string {
+    return fmt.Sprint("Chan(", c.Dir, ", ", c.Elt, ")")
+}
+
 // A Name represents a named type as declared in a type declaration.
 type Name struct {
 	ImplementsType
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
 	// TODO(gri) need to remember fields and methods.
+}
+
+func (n *Name) String() string {
+    return fmt.Sprint("Name(", n.Underlying, ", ", n.Obj, ")")
 }
 
 // If typ is a pointer type, Deref returns the pointer's base type;

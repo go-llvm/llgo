@@ -48,14 +48,12 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
         args = make([]llvm.Value, len(expr.Args)+1)
         for i, expr := range expr.Args {
             value := c.VisitExpr(expr)
-            llvm_value := value.LLVMValue()
-
             // Is it a global variable or non-constant? Then we'll need to load
             // it if it's not a pointer to an array.
-            if isindirect(value) {
-                // TODO
-                //value = c.builder.CreateLoad(value, "")
+            if llvm_value, isllvm := value.(*LLVMValue); isllvm {
+                value = llvm_value.Deref()
             }
+            llvm_value := value.LLVMValue()
 
             if i > 0 {format += " "}
             switch typ := (value.Type()).(type) {

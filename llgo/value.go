@@ -56,9 +56,10 @@ type Value interface {
 }
 
 type LLVMValue struct {
-    builder llvm.Builder
-    value   llvm.Value
-    typ     Type
+    builder  llvm.Builder
+    value    llvm.Value
+    typ      Type
+    indirect bool
 }
 
 type ConstValue struct {
@@ -67,8 +68,8 @@ type ConstValue struct {
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
-func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) Value {
-    return &LLVMValue{b, v, t}
+func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) *LLVMValue {
+    return &LLVMValue{b, v, t, false}
 }
 
 // Create a new constant value from a literal with accompanying type, as
@@ -89,9 +90,18 @@ func NewConstValue(tok token.Token, lit string) ConstValue {
 // LLVMValue methods
 
 func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
-    // TODO load 
+    // Deref lhs, if it's indirect.
+    if lhs.indirect {
+        lhs = lhs.Deref()
+    }
+
     switch rhs := rhs_.(type) {
     case *LLVMValue:
+        // Deref rhs, if it's indirect.
+        if rhs.indirect {
+            rhs = rhs.Deref()
+        }
+
         b := lhs.builder
         var result llvm.Value
         switch op {
@@ -132,6 +142,9 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 }
 
 func (v *LLVMValue) Convert(typ Type) Value {
+    if v.typ == typ {
+        return v
+    }
 /*
     value_type := value.Type()
     switch value_type.TypeKind() {
@@ -161,6 +174,12 @@ func (v *LLVMValue) Type() Type {
     return v.typ
 }
 
+// Dereference an LLVMValue, producing a new LLVMValue.
+func (v *LLVMValue) Deref() *LLVMValue {
+    llvm_value := v.builder.CreateLoad(v.value, "")
+    return NewLLVMValue(v.builder, llvm_value, Deref(v.typ))
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // ConstValue methods.
 
@@ -181,7 +200,10 @@ func (v ConstValue) UnaryOp(op token.Token) Value {
 }
 
 func (v ConstValue) Convert(typ Type) Value {
-    return ConstValue{v.Const.Convert(&typ), typ.(*Basic)}
+    if v.typ != typ {
+        return ConstValue{v.Const.Convert(&typ), typ.(*Basic)}
+    }
+    return v
 }
 
 func (v ConstValue) LLVMValue() llvm.Value {

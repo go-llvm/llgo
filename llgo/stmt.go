@@ -91,9 +91,11 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
                 if stmt.Tok == token.DEFINE {
                     ptr := c.builder.CreateAlloca(
                         value.Type().LLVMType(), x.Name)
-                    //setindirect(ptr) TODO
                     c.builder.CreateStore(value.LLVMValue(), ptr)
-                    obj.Data = ptr
+                    llvm_value := NewLLVMValue(
+                        c.builder, ptr, &Pointer{Base: value.Type()})
+                    llvm_value.indirect = true
+                    obj.Data = llvm_value
                 } else {
                     ptr, _ := (obj.Data).(Value)
                     value = value.Convert(Deref(ptr.Type()))

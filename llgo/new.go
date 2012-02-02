@@ -28,12 +28,12 @@ import (
 )
 
 func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
-    if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
+    if len(expr.Args) > 1 {panic("Expecting only one argument to new")}
     typ := c.GetType(expr.Args[0])
     llvm_typ := typ.LLVMType()
     mem := c.builder.CreateMalloc(llvm_typ, "")
     c.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
-    return NewLLVMValue(c.builder, mem, typ)
+    return NewLLVMValue(c.builder, mem, &Pointer{Base: typ})
 }
 
 // vim: set ft=go :

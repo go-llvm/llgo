@@ -35,16 +35,6 @@ func isglobal(value Value) bool {
     return false
 }
 
-func isindirect(value Value) bool {
-    //return !value.Metadata(llvm.MDKindID("indirect")).IsNil()
-    return false
-}
-
-func setindirect(value Value) {
-    //value.SetMetadata(llvm.MDKindID("indirect"),
-    //                  llvm.ConstAllOnes(llvm.Int1Type()))
-}
-
 func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
     lhs := c.VisitExpr(expr.X)
     rhs := c.VisitExpr(expr.Y)
@@ -319,16 +309,15 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
     // Are we dereferencing a pointer that's on the stack? Then load the stack
     // value.
-    operand := c.VisitExpr(expr.X)
-    // TODO
-    //if isindirect(operand) {
-    //    operand = c.builder.CreateLoad(operand, "")
-    //}
+    operand := c.VisitExpr(expr.X).(*LLVMValue)
+    if operand.indirect {
+        operand = operand.Deref()
+    }
 
     // We don't want to immediately load the value, as we might be doing an
     // assignment rather than an evaluation. Instead, we return the pointer and
     // tell the caller to load it on demand.
-    setindirect(operand)
+    operand.indirect = true
     return operand
 }
 
