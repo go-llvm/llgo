@@ -134,7 +134,7 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
 */
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
-    var fn Value
+    var fn *LLVMValue
     switch x := (expr.Fun).(type) {
     case *ast.Ident:
         switch x.String() {
@@ -151,19 +151,19 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
                 }
             }
 
-            fn = c.Resolve(x.Obj)
+            fn = c.Resolve(x.Obj).(*LLVMValue)
             if fn == nil {
                 panic(fmt.Sprintf(
                     "No function found with name '%s'", x.String()))
             }
         }
     default:
-        fn = c.VisitExpr(expr.Fun)
+        fn = c.VisitExpr(expr.Fun).(*LLVMValue)
     }
 
-    //if isindirect(fn) {
-    //    fn = c.builder.CreateLoad(fn, "")
-    //}
+    if fn.indirect {
+        fn = fn.Deref()
+    }
 
     // Is it a method call? We'll extract the receiver from metadata here,
     // and add it in as the first argument later.
@@ -171,7 +171,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     receiver := llvm.Value{nil}
 
     // TODO handle varargs
-    fn_type := fn.Type().(*Func)
+    fn_type := Deref(fn.Type()).(*Func)
     var args []llvm.Value = nil
     if expr.Args != nil {
         arg_offset := 0
@@ -196,7 +196,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     var result_type Type
     switch len(fn_type.Results) {
         case 0:
-        case 1: result_type = c.ObjGetType(fn_type.Results[0])
+        case 1: result_type = fn_type.Results[0].Type.(Type)
         default:
             panic("Multiple results not handled yet")
     }

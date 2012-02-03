@@ -51,7 +51,9 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
             // Is it a global variable or non-constant? Then we'll need to load
             // it if it's not a pointer to an array.
             if llvm_value, isllvm := value.(*LLVMValue); isllvm {
-                value = llvm_value.Deref()
+                if llvm_value.indirect {
+                    value = llvm_value.Deref()
+                }
             }
             llvm_value := value.LLVMValue()
 

@@ -186,6 +186,39 @@ func (v *LLVMValue) Deref() *LLVMValue {
 func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
     switch rhs := rhs_.(type) {
     case *LLVMValue:
+        // Deref rhs, if it's indirect.
+        if rhs.indirect {
+            rhs = rhs.Deref()
+        }
+
+        // Cast untyped lhs to rhs type.
+        switch lhs.typ.Kind {
+        case UntypedInt: fallthrough
+        case UntypedFloat: fallthrough
+        case UntypedComplex:
+            lhs = lhs.Convert(rhs.Type()).(ConstValue)
+        }
+        lhs_value := lhs.LLVMValue()
+
+        b := rhs.builder
+        var result llvm.Value
+        switch op {
+        case token.MUL:
+            result = b.CreateMul(lhs_value, rhs.value, "")
+        case token.QUO:
+            result = b.CreateUDiv(lhs_value, rhs.value, "")
+        case token.ADD:
+            result = b.CreateAdd(lhs_value, rhs.value, "")
+        case token.SUB:
+            result = b.CreateSub(lhs_value, rhs.value, "")
+        case token.EQL:
+            result = b.CreateICmp(llvm.IntEQ, lhs_value, rhs.value, "")
+        case token.LSS:
+            result = b.CreateICmp(llvm.IntULT, lhs_value, rhs.value, "")
+        default:
+            panic("Unimplemented")
+        }
+        return NewLLVMValue(b, result, lhs.typ)
     case ConstValue:
         // TODO Check if either one is untyped, and convert to the other's
         // type.

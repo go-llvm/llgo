@@ -173,7 +173,6 @@ func (f *Func) String() string {
 }
 
 func (f *Func) LLVMType() llvm.Type {
-    return_type := llvm.VoidType()
     param_types := make([]llvm.Type, 0)
 
     // TODO add receiver parameter.
@@ -181,6 +180,14 @@ func (f *Func) LLVMType() llvm.Type {
         //param_type := param.Type.(Type)
         //param_types = append(param_types, param_type.LLVMType())
     //}
+
+    var return_type llvm.Type
+    switch len(f.Results) {
+    case 0: return_type = llvm.VoidType()
+    case 1: return_type = (f.Results[0].Type.(Type)).LLVMType()
+    default:
+        panic("unimplemented")
+    }
 
     return llvm.FunctionType(return_type, param_types, f.IsVariadic)
 
@@ -254,13 +261,9 @@ func (n *Name) String() string {
     return fmt.Sprint("Name(", n.Underlying, ", ", n.Obj, ")")
 }
 
-// If typ is a pointer type, Deref returns the pointer's base type;
-// otherwise it returns typ.
+// typ must be a pointer type; Deref returns the pointer's base type.
 func Deref(typ Type) Type {
-	if typ, ok := typ.(*Pointer); ok {
-		return typ.Base
-	}
-	return typ
+    return typ.(*Pointer).Base
 }
 
 // Underlying returns the underlying type of a type.

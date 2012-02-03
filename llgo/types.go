@@ -105,12 +105,12 @@ func (c *compiler) IdentGetType(ident *ast.Ident) Type {
 // Get a Type from an ast object.
 func (c *compiler) ObjGetType(obj *ast.Object) Type {
     if obj != nil {
-        type_, istype := (obj.Data).(Type)
+        type_, istype := (obj.Type).(Type)
         if !istype {
             switch x := (obj.Decl).(type) {
             case *ast.TypeSpec:
                 c.VisitTypeSpec(x)
-                type_, istype = (obj.Data).(Type)
+                type_, istype = (obj.Type).(Type)
             }
         }
         if istype {return type_}
@@ -123,7 +123,8 @@ func (c *compiler) GetType(expr ast.Expr) Type {
     case *ast.Ident:
         return c.IdentGetType(x)
     case *ast.FuncType:
-        return c.VisitFuncType(x)
+        fn_type := c.VisitFuncType(x)
+        return &Pointer{Base: fn_type}
     case *ast.ArrayType:
         elttype := c.GetType(x.Elt)
         if x.Len == nil {
@@ -160,12 +161,9 @@ func (c *compiler) GetType(expr ast.Expr) Type {
 func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
     var fn_type Func
 
-    if f.Params != nil && f.Params.List != nil {
+    if f.Params != nil {
         for i := 0; i < len(f.Params.List); i++ {
-            namecount := 1
-            if f.Params.List[i].Names != nil {
-                namecount = len(f.Params.List[i].Names)
-            }
+            namecount := len(f.Params.List[i].Names)
             args := make([]*ast.Object, namecount)
             typ := c.GetType(f.Params.List[i].Type)
             for j := 0; j < namecount; j++ {
@@ -179,24 +177,28 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
         }
     }
 
-    if f.Results != nil && f.Results.List != nil {
-        for i := 0; i < len(f.Params.List); i++ {
-            namecount := 1
-            if f.Params.List[i].Names != nil {
-                namecount = len(f.Params.List[i].Names)
+    if f.Results != nil {
+        for i := 0; i < len(f.Results.List); i++ {
+            namecount := len(f.Results.List[i].Names)
+            typ := c.GetType(f.Results.List[i].Type)
+            if namecount > 0 {
+                results := make([]*ast.Object, namecount)
+                for j := 0; j < namecount; j++ {
+                    name := "_"
+                    ident := f.Results.List[i].Names[j]
+                    if ident != nil {name = ident.String()}
+                    results[j] = ast.NewObj(ast.Var, name)
+                    results[j].Type = typ
+                }
+                fn_type.Results = append(fn_type.Results, results...)
+            } else {
+                result := ast.NewObj(ast.Var, "_")
+                result.Type = typ
+                fn_type.Results = append(fn_type.Results, result)
             }
-            args := make([]*ast.Object, namecount)
-            typ := c.GetType(f.Params.List[i].Type)
-            for j := 0; j < namecount; j++ {
-                name := "_"
-                ident := f.Params.List[i].Names[j]
-                if ident != nil {name = ident.String()}
-                args[j] = ast.NewObj(ast.Var, name)
-                args[j].Type = typ
-            }
-            fn_type.Results = append(fn_type.Params, args...)
         }
     }
+
     return &fn_type
 }
 

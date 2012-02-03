@@ -33,7 +33,18 @@ import (
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
-    fn_type := c.VisitFuncType(f.Type)
+    // Get the function type. The function type will be cached in f.Name.Obj,
+    // so check that first.
+    var fn_type Type
+    if f.Name.Obj != nil {
+        if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
+            return result
+        }
+        fn_type = c.ObjGetType(f.Name.Obj)
+    }
+    if fn_type == nil {
+        fn_type = c.VisitFuncType(f.Type)
+    }
     fn_name := f.Name.String()
 
     // Make "init" functions anonymous.
@@ -42,11 +53,16 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     if c.module.Name == "main" && fn_name == "main" {
         fn.SetLinkage(llvm.ExternalLinkage)
     }
+
+    // llvm.AddFunction returns a pointer-to-function, so change the
+    // result type to a Pointer.
+    fn_ptr_type := &Pointer{Base: fn_type}
+    result := NewLLVMValue(c.builder, fn, fn_ptr_type)
     if f.Name.Obj != nil {
-        f.Name.Obj.Data = fn
-        f.Name.Obj.Type = fn_type
+        f.Name.Obj.Data = result
+        f.Name.Obj.Type = fn_ptr_type
     }
-    return NewLLVMValue(c.builder, fn, fn_type)
+    return result
 }
 
 func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
@@ -54,7 +70,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     fn, _ := c.Lookup(name)
     if fn == nil {fn = c.VisitFuncProtoDecl(f)}
 
-    fn_type := fn.Type().(*Func)
+    fn_type := Deref(fn.Type()).(*Func)
     llvm_fn := fn.LLVMValue()
 
     // Bind receiver, arguments and return values to their identifiers/objects.
@@ -226,10 +242,10 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
 func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
     obj := spec.Name.Obj
-    type_, istype := (obj.Data).(Type)
+    type_, istype := (obj.Type).(Type)
     if !istype {
         type_ = c.GetType(spec.Type)
-        obj.Data = type_
+        obj.Type = type_
     }
 }
 
