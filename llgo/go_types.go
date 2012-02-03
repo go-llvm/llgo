@@ -117,6 +117,10 @@ func (a *Array) String() string {
     return fmt.Sprint("Array(", a.Len, ", ", a.Elt, ")")
 }
 
+func (a *Array) LLVMType() llvm.Type {
+    return llvm.ArrayType(a.Elt.LLVMType(), int(a.Len))
+}
+
 // A Slice represents a slice type []Elt.
 type Slice struct {
 	ImplementsType

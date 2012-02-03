@@ -95,6 +95,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         lhs = lhs.Deref()
     }
 
+    var result llvm.Value
+    b := lhs.builder
+
     switch rhs := rhs_.(type) {
     case *LLVMValue:
         // Deref rhs, if it's indirect.
@@ -102,8 +105,6 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
             rhs = rhs.Deref()
         }
 
-        b := lhs.builder
-        var result llvm.Value
         switch op {
         case token.MUL:
             result = b.CreateMul(lhs.value, rhs.value, "")
@@ -122,7 +123,32 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         }
         return NewLLVMValue(b, result, lhs.typ)
     case ConstValue:
-        // TODO
+        // Cast untyped rhs to lhs type.
+        switch rhs.typ.Kind {
+        case UntypedInt: fallthrough
+        case UntypedFloat: fallthrough
+        case UntypedComplex:
+            rhs = rhs.Convert(lhs.Type()).(ConstValue)
+        }
+        rhs_value := rhs.LLVMValue()
+
+        switch op {
+        case token.MUL:
+            result = b.CreateMul(lhs.value, rhs_value, "")
+        case token.QUO:
+            result = b.CreateUDiv(lhs.value, rhs_value, "")
+        case token.ADD:
+            result = b.CreateAdd(lhs.value, rhs_value, "")
+        case token.SUB:
+            result = b.CreateSub(lhs.value, rhs_value, "")
+        case token.EQL:
+            result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs_value, "")
+        case token.LSS:
+            result = b.CreateICmp(llvm.IntULT, lhs.value, rhs_value, "")
+        default:
+            panic("Unimplemented")
+        }
+        return NewLLVMValue(b, result, lhs.typ)
     }
     panic("unimplemented")
 }

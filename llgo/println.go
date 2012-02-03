@@ -108,7 +108,9 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 // TODO string should be a struct, with length & ptr. We'll
                 // probably encode the type as metadata.
                 format += "%s"
-            default: panic(fmt.Sprint("Unhandled type kind"))
+
+            default:
+                panic(fmt.Sprint("Unhandled type kind: ", typ))
             }
 
             args[i+1] = llvm_value

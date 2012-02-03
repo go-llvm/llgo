@@ -189,8 +189,10 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                         llvm_init = init_.Convert(value_type).LLVMValue()
                     }
                     c.builder.CreateStore(llvm_init, stack_value)
-                    //setindirect(value) TODO
-                    value = NewLLVMValue(c.builder, stack_value, value_type)
+                    value_type = &Pointer{Base: value_type}
+                    llvm_value := NewLLVMValue(c.builder, stack_value, value_type)
+                    llvm_value.indirect = true
+                    value = llvm_value
                 } else {
                     exported := name_.IsExported()
 

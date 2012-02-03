@@ -67,7 +67,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
             if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
                 key := c.VisitExpr(kv.Key)
                 i = -1
-                if const_key, isconst := key.(*ConstValue); isconst {
+                if const_key, isconst := key.(ConstValue); isconst {
                     i = int(const_key.Int64())
                 }
                 value = c.VisitExpr(kv.Value)
@@ -87,9 +87,10 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
         }
     }
 
-    switch typ_ := typ.(type) {
+    switch typ := typ.(type) {
     case *Array: {
-        elttype := typ_.Elt
+        typ.Len = uint64(len(values))
+        elttype := typ.Elt
         llvm_values := make([]llvm.Value, len(values))
         for i, value := range values {
             if value == nil {

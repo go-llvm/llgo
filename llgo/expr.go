@@ -211,8 +211,12 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     // TODO handle maps, strings, slices.
 
     index := c.VisitExpr(expr.Index)
-    // TODO
-    //if isindirect(index) {index = c.builder.CreateLoad(index, "")}
+    if llvm_value, ok := index.(*LLVMValue); ok {
+        if llvm_value.indirect {
+            index = llvm_value.Deref()
+        }
+    }
+
     isint := false
     if basic, isbasic := index.Type().(*Basic); isbasic {
         switch basic.Kind {
@@ -237,9 +241,13 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     //}
 
     var result_type Type
-    switch typ := value.Type().(type) {
-    case *Array: result_type = typ.Elt
-    case *Slice: result_type = typ.Elt
+    typ := value.Type()
+    if typ, ok := typ.(*Pointer); ok {
+        switch typ := Deref(typ).(type) {
+        case *Array: result_type = typ.Elt
+        case *Slice: result_type = typ.Elt
+        default: panic("unimplemented")
+        }
     }
 
     zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
