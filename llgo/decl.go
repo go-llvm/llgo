@@ -121,6 +121,77 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     return fn
 }
 
+func isArray(t Type) bool {
+    _, isarray := t.(*Array)
+    return isarray
+}
+
+// Create a constructor function which initialises a global.
+// TODO collapse all global inits into one init function?
+func (c *compiler) createGlobal(e ast.Expr, t Type, name string) (g *LLVMValue) {
+    if e == nil {
+        gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+        g = NewLLVMValue(c.builder, gv, &Pointer{Base: t})
+        g.indirect = !isArray(t)
+        return g
+    }
+
+    if block := c.builder.GetInsertBlock(); !block.IsNil() {
+        defer c.builder.SetInsertPointAtEnd(block)
+    }
+    fn_type := new(Func)
+    fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
+    entry := llvm.AddBasicBlock(fn, "entry")
+    c.builder.SetInsertPointAtEnd(entry)
+
+    // Visit the expression. Dereference if necessary, and generalise
+    // the type if one hasn't been specified.
+    init_ := c.VisitExpr(e)
+    isconst := false
+    if value, isllvm := init_.(*LLVMValue); isllvm {
+        if value.indirect {
+            init_ = value.Deref()
+        }
+    } else {
+        isconst = true
+    }
+    if t == nil {
+        t = init_.Type()
+    } else {
+        init_ = init_.Convert(t)
+    }
+
+    // If the result is a constant, discard the function before
+    // creating any llvm.Value's.
+    if isconst {
+        fn.EraseFromParentAsFunction()
+        fn = llvm.Value{nil}
+    }
+
+    // Set the initialiser. If it's a non-const value, then
+    // we'll have to do the assignment in a global constructor
+    // function.
+    gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+    g = NewLLVMValue(c.builder, gv, &Pointer{Base: t})
+    g.indirect = !isArray(t)
+    if isconst {
+        // Initialiser is constant; discard function and return
+        // global now.
+        gv.SetInitializer(init_.LLVMValue())
+    } else {
+        gv.SetInitializer(llvm.ConstNull(t.LLVMType()))
+        c.builder.CreateStore(init_.LLVMValue(), gv)
+    }
+
+    if !fn.IsNil() {
+        c.builder.CreateRetVoid()
+        // FIXME order global ctors
+        fn_value := NewLLVMValue(c.builder, fn, fn_type)
+        c.initfuncs = append(c.initfuncs, fn_value)
+    }
+    return g
+}
+
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
     var value_type Type
     if valspec.Type != nil {
@@ -147,96 +218,72 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 // Con objects with an iota have an embedded ValueSpec
                 // in the Decl field. We'll just pull it out and use it
                 // for evaluating the expression below.
-                valspec, _ = (name_.Obj.Decl).(*ast.ValueSpec)
+                valspec = (name_.Obj.Decl).(*ast.ValueSpec)
             }
         }
 
         // Expression may have side-effects, so compute it regardless of
         // whether it'll be assigned to a name.
-        var value Value
-        if valspec.Values != nil && i < len(valspec.Values) &&
-           valspec.Values[i] != nil {
-            value = c.VisitExpr(valspec.Values[i])
+        var expr ast.Expr
+        if i < len(valspec.Values) && valspec.Values[i] != nil {
+            expr = valspec.Values[i]
         }
 
+        // For constants, we just pass the ConstValue around. Otherwise, we
+        // will convert it to an LLVMValue.
+        var value Value
         name := name_.String()
-        if name != "_" {
-            // For constants, we just pass the ConstValue around. Otherwise, we
-            // will convert it to an LLVMValue.
-            if !isconst {
-                // TODO (from language spec)
-                // If the type is absent and the corresponding expression evaluates to
-                // an untyped constant, the type of the declared variable is bool, int,
-                // float64, or string respectively, depending on whether the value is
-                // a boolean, integer, floating-point, or string constant.
-                if value_type == nil {
-                    value_type = value.Type()
+        if !isconst {
+            ispackagelevel := len(c.functions) == 0
+            if !ispackagelevel {
+                // Visit the expression.
+                var init_ Value
+                if expr != nil {
+                    init_ = c.VisitExpr(expr)
+                    if value, isllvm := init_.(*LLVMValue); isllvm {
+                        if value.indirect {
+                            init_ = value.Deref()
+                        }
+                    }
+                    if value_type == nil {
+                        value_type = init_.Type()
+                    }
                 }
 
-                ispackagelevel := len(c.functions) == 0
-                if !ispackagelevel {
-                    // The variable should be allocated on the stack if it's
-                    // declared inside a function.
-                    init_ := value
-                    var llvm_init llvm.Value
-                    stack_value := c.builder.CreateAlloca(
-                        value_type.LLVMType(), name)
-                    if init_ == nil {
-                        // If no initialiser was specified, set it to the
-                        // zero value.
-                        llvm_init = llvm.ConstNull(value_type.LLVMType())
-                    } else {
-                        llvm_init = init_.Convert(value_type).LLVMValue()
-                    }
-                    c.builder.CreateStore(llvm_init, stack_value)
-                    value_type = &Pointer{Base: value_type}
-                    llvm_value := NewLLVMValue(c.builder, stack_value, value_type)
-                    llvm_value.indirect = true
-                    value = llvm_value
+                // The variable should be allocated on the stack if it's
+                // declared inside a function.
+                var llvm_init llvm.Value
+                stack_value := c.builder.CreateAlloca(
+                    value_type.LLVMType(), name)
+                if init_ == nil {
+                    // If no initialiser was specified, set it to the
+                    // zero value.
+                    llvm_init = llvm.ConstNull(value_type.LLVMType())
                 } else {
-                    exported := name_.IsExported()
-
-                    // If it's a non-string constant, assign it to .
-                    var constprim bool
-                    if _, isconstval := value.(ConstValue); isconstval {
-                        if basic, isbasic := (value.Type()).(*Basic); isbasic {
-                            constprim = basic.Kind != String
-                        }
-                    }
-
-                    if isconst && constprim && !exported {
-                        // Not exported, and it's a constant. Let's forego creating
-                        // the internal constant and just pass around the
-                        // llvm.Value.
-                        obj.Kind = ast.Con // Change to constant
-                        obj.Data = value.Convert(value_type)
-                    } else {
-                        init_ := value
-                        global_value := llvm.AddGlobal(
-                            c.module.Module, value_type.LLVMType(), name)
-                        if init_ != nil {
-                            init_ = init_.Convert(value_type)
-                            global_value.SetInitializer(init_.LLVMValue())
-                        }
-                        if isconst {
-                            global_value.SetGlobalConstant(true)
-                        }
-                        if !exported {
-                            global_value.SetLinkage(llvm.InternalLinkage)
-                        }
-
-                        value = NewLLVMValue(c.builder, global_value, value_type)
-                        obj.Data = value
-        
-                        // If it's not an array, we should mark the value as being
-                        // "indirect" (i.e. it must be loaded before use).
-                        // TODO
-                        //if value_type.TypeKind() != llvm.ArrayTypeKind {
-                        //    setindirect(value)
-                        //}
-                    }
+                    llvm_init = init_.Convert(value_type).LLVMValue()
+                }
+                c.builder.CreateStore(llvm_init, stack_value)
+                value_type = &Pointer{Base: value_type}
+                llvm_value := NewLLVMValue(c.builder, stack_value, value_type)
+                llvm_value.indirect = true
+                value = llvm_value
+            } else { // ispackagelevel
+                // Set the initialiser. If it's a non-const value, then
+                // we'll have to do the assignment in a global constructor
+                // function.
+                value = c.createGlobal(expr, value_type, name)
+                if !name_.IsExported() {
+                    value.LLVMValue().SetLinkage(llvm.InternalLinkage)
                 }
             }
+        } else { // isconst
+            value = c.VisitExpr(expr).(ConstValue)
+            if value_type != nil {
+                value = value.Convert(value_type)
+            }
+        }
+
+        if name != "_" {
             obj.Data = value
         }
     }

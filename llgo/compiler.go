@@ -23,7 +23,6 @@ SOFTWARE.
 package llgo
 
 import (
-    "fmt"
     "go/ast"
     "go/token"
     "os"
@@ -69,38 +68,31 @@ func (c *compiler) LookupObj(name string) *ast.Object {
 func (c *compiler) Resolve(obj *ast.Object) Value {
     if obj.Kind == ast.Pkg {return nil}
     value, isvalue := (obj.Data).(Value)
+    if isvalue {
+        return value
+    }
 
     switch obj.Kind {
     case ast.Con:
-        if !isvalue {
-            valspec := obj.Decl.(*ast.ValueSpec)
-            c.VisitValueSpec(valspec, true)
-            value, isvalue = (obj.Data).(Value)
-        }
+        valspec := obj.Decl.(*ast.ValueSpec)
+        c.VisitValueSpec(valspec, true)
+        value = (obj.Data).(Value)
     case ast.Fun:
-        if !isvalue {
-            funcdecl := obj.Decl.(*ast.FuncDecl)
-            value = c.VisitFuncProtoDecl(funcdecl)
-            obj.Data = value
-            isvalue = true
-        }
+        funcdecl := obj.Decl.(*ast.FuncDecl)
+        value = c.VisitFuncProtoDecl(funcdecl)
+        obj.Data = value
     case ast.Var:
-        if !isvalue {
-            switch x := (obj.Decl).(type) {
-            case *ast.ValueSpec:
-                c.VisitValueSpec(x, false)
-            case *ast.Field:
-                // No-op. Fields will be yielded for function arg/recv/ret.
-                // We update the .Data field of the object when we enter the
-                // function definition.
-            }
-            value, isvalue = (obj.Data).(Value)
+        switch x := (obj.Decl).(type) {
+        case *ast.ValueSpec:
+            c.VisitValueSpec(x, false)
+        case *ast.Field:
+            // No-op. Fields will be yielded for function arg/recv/ret.
+            // We update the .Data field of the object when we enter the
+            // function definition.
         }
+        value = (obj.Data).(Value)
     }
 
-    if !isvalue {
-        panic(fmt.Sprint("Expected Value, found ", obj.Data))
-    }
     return value
 }
 

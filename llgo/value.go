@@ -189,7 +189,7 @@ func (v *LLVMValue) Convert(typ Type) Value {
         }
     }
 */
-    panic("unimplemented")
+    panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", typ))
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
