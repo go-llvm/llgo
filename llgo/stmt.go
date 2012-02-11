@@ -184,16 +184,16 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     //stmt.Call *ast.CallExpr
     // TODO 
-    var fn Value
+    var fn *LLVMValue
     switch x := (stmt.Call.Fun).(type) {
     case *ast.Ident:
-        fn = c.Resolve(x.Obj)
+        fn = c.Resolve(x.Obj).(*LLVMValue)
         if fn == nil {
             panic(fmt.Sprintf(
                 "No function found with name '%s'", x.String()))
         }
     default:
-        fn = c.VisitExpr(stmt.Call.Fun)
+        fn = c.VisitExpr(stmt.Call.Fun).(*LLVMValue)
     }
 
     // Evaluate arguments, store in a structure on the stack.
@@ -202,7 +202,7 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     var args_size llvm.Value
     if stmt.Call.Args != nil {
         param_types := make([]llvm.Type, 0)
-        fn_type, _ := (fn.Type()).(*Func)
+        fn_type := Deref(fn.Type()).(*Func)
         for _, param := range fn_type.Params {
             typ := param.Type.(Type)
             param_types = append(param_types, typ.LLVMType())
@@ -211,17 +211,17 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
         args_mem = c.builder.CreateAlloca(args_struct_type, "")
         for i, expr := range stmt.Call.Args {
             value_i := c.VisitExpr(expr)
+            if llvm_value, isllvm := value_i.(*LLVMValue); isllvm {
+                if llvm_value.indirect {value_i = llvm_value.Deref()}
+            }
             value_i = value_i.Convert(fn_type.Params[i].Type.(Type))
             arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
                     llvm.ConstInt(llvm.Int32Type(), 0, false),
                     llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-            // TODO
-            //if isindirect(value_i) {
-            //    value_i = c.builder.CreateLoad(value_i, "")
-            //}
             c.builder.CreateStore(value_i.LLVMValue(), arg_i)
         }
         args_size = llvm.SizeOf(args_struct_type)
+        args_size = llvm.ConstTrunc(args_size, llvm.Int32Type())
     } else {
         args_struct_type = llvm.VoidType()
         args_mem = llvm.ConstNull(llvm.PointerType(args_struct_type, 0))

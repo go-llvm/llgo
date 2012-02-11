@@ -291,6 +291,8 @@ func (v ConstValue) LLVMValue() llvm.Value {
         // XXX rune
         // FIXME use int32/int64
         return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
+    case Int16:
+        return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
     case String:
         return llvm.ConstString((v.val).(string), true)
     }
