@@ -31,34 +31,23 @@ import (
 func (c *compiler) fixMethodDecls(file *ast.File) {
     if file.Decls == nil {return}
     for _, decl := range file.Decls {
-        if funcdecl, ok := decl.(*ast.FuncDecl); ok {
-            if funcdecl.Recv != nil && funcdecl.Recv.List != nil {
-                if len(funcdecl.Recv.List) != 1 {
-                    panic("Expected exactly one receiver")
-                }
-                field := funcdecl.Recv.List[0]
-                typ := c.GetType(field.Type)
+        if funcdecl, ok := decl.(*ast.FuncDecl); ok && funcdecl.Recv != nil {
+            field := funcdecl.Recv.List[0]
+            typ := c.GetType(field.Type)
 
-                // Receivers may be a pointer type, or a "base" type.
-                // TODO handle pointer base types (e.g. a declared type whose
-                // base type is a pointer).
-                typ = Deref(typ)
+            // The Obj field of the funcdecl wll be nil, so we'll have to
+            // create a new one.
+            funcdecl.Name.Obj = ast.NewObj(ast.Fun, funcdecl.Name.String())
+            funcdecl.Name.Obj.Decl = funcdecl
 
-                // Insert a reference to the FuncDecl's AST object.
-                typeinfo := c.typeinfo[typ]
-                if typeinfo == nil {
-                    typeinfo = &TypeInfo{}
-                    c.typeinfo[typ] = typeinfo
-                }
-                if typeinfo.Methods == nil {
-                    typeinfo.Methods = make(map[string]*ast.Object)
-                }
-
-                // The Obj field of the funcdecl wll be nil, so we'll have to
-                // create a new one.
-                funcdecl.Name.Obj = ast.NewObj(ast.Fun, funcdecl.Name.String())
-                funcdecl.Name.Obj.Decl = funcdecl
-                typeinfo.Methods[funcdecl.Name.String()] = funcdecl.Name.Obj
+            // Record the FuncDecl's AST object in the type's methodset.
+            if ptr, isptr := typ.(*Pointer); isptr {
+                typ := ptr.Base
+                typeinfo := c.types.lookup(typ)
+                typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj
+            } else {
+                typeinfo := c.types.lookup(typ)
+                typeinfo.methods[funcdecl.Name.String()] = funcdecl.Name.Obj
             }
         }
     }

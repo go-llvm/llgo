@@ -147,6 +147,15 @@ func (s *Struct) String() string {
     return fmt.Sprint("Struct(", s.Fields, ", ", s.Tags, ")")
 }
 
+func (s *Struct) LLVMType() llvm.Type {
+    elements := make([]llvm.Type, len(s.Fields))
+    for i, f := range s.Fields {
+        ft := f.Type.(Type)
+        elements[i] = ft.LLVMType()
+    }
+    return llvm.StructType(elements, false)
+}
+
 // A Pointer represents a pointer type *Base.
 type Pointer struct {
 	ImplementsType
@@ -179,11 +188,16 @@ func (f *Func) String() string {
 func (f *Func) LLVMType() llvm.Type {
     param_types := make([]llvm.Type, 0)
 
-    // TODO add receiver parameter.
-    //for _, param := range f.Params {
-        //param_type := param.Type.(Type)
-        //param_types = append(param_types, param_type.LLVMType())
-    //}
+    // Add receiver parameter.
+    if f.Recv != nil {
+        recv_type := f.Recv.Type.(Type)
+        param_types = append(param_types, recv_type.LLVMType())
+    }
+
+    for _, param := range f.Params {
+        param_type := param.Type.(Type)
+        param_types = append(param_types, param_type.LLVMType())
+    }
 
     var return_type llvm.Type
     switch len(f.Results) {
@@ -262,7 +276,12 @@ type Name struct {
 }
 
 func (n *Name) String() string {
-    return fmt.Sprint("Name(", n.Underlying, ", ", n.Obj, ")")
+    return fmt.Sprint("Name(", n.Obj.Name, ", ", n.Underlying, ")")
+    //return fmt.Sprint("Name(", n.Underlying, ", ", n.Obj, ")")
+}
+
+func (n *Name) LLVMType() llvm.Type {
+    return n.Underlying.LLVMType()
 }
 
 // typ must be a pointer type; Deref returns the pointer's base type.
@@ -294,6 +313,12 @@ func (list ObjList) Swap(i, j int)      { list[i], list[j] = list[j], list[i] }
 
 // Sort sorts an object list by object name.
 func (list ObjList) Sort() { sort.Sort(list) }
+
+func (list ObjList) String() string {
+    s := "["
+    for _, o := range list {s += fmt.Sprint(o)}
+    return s + "]"
+}
 
 // identicalTypes returns true if both lists a and b have the
 // same length and corresponding objects have identical types.

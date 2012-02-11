@@ -26,16 +26,26 @@ import (
     "big"
     "fmt"
     "go/ast"
+    "sort"
     "reflect"
 )
 
-// A struct for maintaining information about types. Types are persisted in the
-// LLVM bitcode, and store information about struct fields and methods.
-//
-// XXX persistence isn't implemented yet
 type TypeInfo struct {
-    Methods      map[string]*ast.Object
-    FieldIndexes map[string]int
+    methods map[string]*ast.Object
+    ptrmethods map[string]*ast.Object
+}
+
+type TypeMap map[Type]*TypeInfo
+
+func (m *TypeMap) lookup(t Type) *TypeInfo {
+    info := (*m)[t]
+    if info == nil {
+        info = new(TypeInfo)
+        info.methods = make(map[string]*ast.Object)
+        info.ptrmethods = make(map[string]*ast.Object)
+        (*m)[t] = info
+    }
+    return info
 }
 
 var (
@@ -59,21 +69,6 @@ var (
     ByteType Type = &Basic{Kind: Byte}
     BoolType Type = &Basic{Kind: Bool}
 )
-
-// Look up a method by name. If the func declaration for the method has not yet
-// been processed, then we'll look it up in the package scope wherein the type
-// was defined.
-func (t *TypeInfo) MethodByName(name string) *ast.Object {
-    if t.Methods != nil {
-        return t.Methods[name]
-    }
-    return nil
-}
-
-func (t *TypeInfo) FieldIndex(name string) (i int, exists bool) {
-    i, exists = t.FieldIndexes[name]
-    return
-}
 
 // Get a Type from an identifier.
 func (c *compiler) IdentGetType(ident *ast.Ident) Type {
@@ -167,10 +162,12 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
             args := make([]*ast.Object, namecount)
             typ := c.GetType(f.Params.List[i].Type)
             for j := 0; j < namecount; j++ {
-                name := "_"
                 ident := f.Params.List[i].Names[j]
-                if ident != nil {name = ident.String()}
-                args[j] = ast.NewObj(ast.Var, name)
+                if ident != nil {
+                    args[j] = ident.Obj
+                } else {
+                    args[j] = ast.NewObj(ast.Var, "_")
+                }
                 args[j].Type = typ
             }
             fn_type.Params = append(fn_type.Params, args...)
@@ -184,10 +181,12 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
             if namecount > 0 {
                 results := make([]*ast.Object, namecount)
                 for j := 0; j < namecount; j++ {
-                    name := "_"
                     ident := f.Results.List[i].Names[j]
-                    if ident != nil {name = ident.String()}
-                    results[j] = ast.NewObj(ast.Var, name)
+                    if ident != nil {
+                        results[j] = ident.Obj
+                    } else {
+                        results[j] = ast.NewObj(ast.Var, "_")
+                    }
                     results[j].Type = typ
                 }
                 fn_type.Results = append(fn_type.Results, results...)
@@ -203,41 +202,38 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
 }
 
 func (c *compiler) VisitStructType(s *ast.StructType) *Struct {
-    var typ Struct
+    var typ *Struct = new(Struct)
     if s.Fields != nil && s.Fields.List != nil {
+        tags := make(map[*ast.Object]string)
         var i int = 0
         for _, field := range s.Fields.List {
-            // TODO handle field tag
             fieldtype := c.GetType(field.Type)
             if field.Names != nil {
-                //fieldtypes := make([]*ast.Object, len(field.Names))
                 for _, name := range field.Names {
-                    obj := ast.NewObj(ast.Var, name.String())
-                    obj.Type = typ
+                    obj := name.Obj
+                    if obj == nil {obj = ast.NewObj(ast.Var, "_")}
+                    obj.Type = fieldtype
                     typ.Fields = append(typ.Fields, obj)
-                    if field.Tag != nil {
-                        // TODO unquote string?
-                        typ.Tags = append(typ.Tags, field.Tag.Value)
-                    } else {
-                        typ.Tags = append(typ.Tags, "")
-                    }
+                    if field.Tag != nil {tags[obj] = field.Tag.Value}
                 }
                 i += len(field.Names)
             } else {
                 obj := ast.NewObj(ast.Var, "_")
                 obj.Type = fieldtype
                 typ.Fields = append(typ.Fields, obj)
-                if field.Tag != nil {
-                    // TODO unquote string?
-                    typ.Tags = append(typ.Tags, field.Tag.Value)
-                } else {
-                    typ.Tags = append(typ.Tags, "")
-                }
+                if field.Tag != nil {tags[obj] = field.Tag.Value}
                 i++
             }
         }
+
+        sort.Sort(typ.Fields)
+        typ.Tags = make([]string, len(typ.Fields))
+        for i, field := range typ.Fields {
+            // TODO unquote string?
+            typ.Tags[i] = tags[field]
+        }
     }
-    return &typ
+    return typ
 }
 
 func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {

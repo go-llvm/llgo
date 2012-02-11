@@ -35,17 +35,31 @@ import (
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     // Get the function type. The function type will be cached in f.Name.Obj,
     // so check that first.
-    var fn_type Type
+    var fn_type *Func
     if f.Name.Obj != nil {
         if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
             return result
         }
-        fn_type = c.ObjGetType(f.Name.Obj)
+        type_ := c.ObjGetType(f.Name.Obj)
+        if type_ != nil {
+            fn_type = type_.(*Func)
+        }
     }
     if fn_type == nil {
         fn_type = c.VisitFuncType(f.Type)
     }
     fn_name := f.Name.String()
+
+    // Add receiver.
+    if f.Recv != nil {
+        ident := f.Recv.List[0].Names[0]
+        if ident != nil {
+            fn_type.Recv = ident.Obj
+        } else {
+            fn_type.Recv = ast.NewObj(ast.Var, "_")
+        }
+        fn_type.Recv.Type = c.GetType(f.Recv.List[0].Type)
+    }
 
     // Make "init" functions anonymous.
     if fn_name == "init" {fn_name = ""}
@@ -73,31 +87,37 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     fn_type := Deref(fn.Type()).(*Func)
     llvm_fn := fn.LLVMValue()
 
+    entry := llvm.AddBasicBlock(llvm_fn, "entry")
+    c.builder.SetInsertPointAtEnd(entry)
+
     // Bind receiver, arguments and return values to their identifiers/objects.
+    // We'll store each parameter on the stack so they're addressable.
     param_i := 0
     if f.Recv != nil {
         param_0 := llvm_fn.Param(0)
         recv_obj := fn_type.Recv
-        //recv_obj := f.Recv.List[0].Names[0].Obj
         recv_type := recv_obj.Type.(Type)
-        recv_obj.Data = NewLLVMValue(c.builder, param_0, recv_type)
+        stack_value := c.builder.CreateAlloca(recv_type.LLVMType(), recv_obj.Name)
+        c.builder.CreateStore(param_0, stack_value)
+        value := NewLLVMValue(c.builder, stack_value, &Pointer{Base: recv_type})
+        value.indirect = true
+        recv_obj.Data = value
         param_i++
     }
-    if param_i < len(fn_type.Params) {
-        for _, param := range fn_type.Params {
-            name := param.Name
-            param_type := param.Type.(Type)
-            value := llvm_fn.Param(param_i)
-            value.SetName(name)
-            if name != "_" {
-                param.Data = NewLLVMValue(c.builder, value, param_type)
-            }
-            param_i++
+    for _, param := range fn_type.Params {
+        name := param.Name
+        param_type := param.Type.(Type)
+        param_value := llvm_fn.Param(param_i)
+        if name != "_" {
+            stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
+            c.builder.CreateStore(param_value, stack_value)
+            value := NewLLVMValue(c.builder, stack_value,
+                                  &Pointer{Base:param_type})
+            value.indirect = true
+            param.Data = value
         }
+        param_i++
     }
-
-    entry := llvm.AddBasicBlock(llvm_fn, "entry")
-    c.builder.SetInsertPointAtEnd(entry)
 
     c.functions = append(c.functions, fn)
     if f.Body != nil {c.VisitBlockStmt(f.Body)}
@@ -294,7 +314,7 @@ func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
     type_, istype := (obj.Type).(Type)
     if !istype {
         type_ = c.GetType(spec.Type)
-        obj.Type = type_
+        obj.Type = &Name{Underlying: type_, Obj: obj}
     }
 }
 

@@ -48,7 +48,7 @@ type compiler struct {
     module     *Module
     functions  []Value //[]llvm.Value
     initfuncs  []Value //[]llvm.Value
-    typeinfo   map[interface{}]*TypeInfo
+    types      TypeMap
     imports    map[string]*ast.Object
     fileset    *token.FileSet
     filescope  *ast.Scope
@@ -121,7 +121,7 @@ func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
     compiler.filescope = file.Scope
     compiler.scope = file.Scope
     compiler.initfuncs = make([]Value, 0)
-    compiler.typeinfo = make(map[interface{}]*TypeInfo)
+    compiler.types = make(TypeMap)
     compiler.imports = make(map[string]*ast.Object)
 
     // Create a Builder, for building LLVM instructions.

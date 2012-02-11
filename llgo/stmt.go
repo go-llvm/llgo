@@ -81,7 +81,12 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
     values := make([]Value, len(stmt.Rhs))
-    for i, expr := range stmt.Rhs {values[i] = c.VisitExpr(expr)}
+    for i, expr := range stmt.Rhs {
+        values[i] = c.VisitExpr(expr)
+        if value_, isllvm := values[i].(*LLVMValue); isllvm {
+            if value_.indirect {values[i] = value_.Deref()}
+        }
+    }
     for i, expr := range stmt.Lhs {
         value := values[i]
         switch x := expr.(type) {

@@ -60,6 +60,8 @@ type LLVMValue struct {
     value    llvm.Value
     typ      Type
     indirect bool
+    address  *LLVMValue // Value that dereferenced to this value.
+    receiver *LLVMValue
 }
 
 type ConstValue struct {
@@ -69,7 +71,7 @@ type ConstValue struct {
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
 func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) *LLVMValue {
-    return &LLVMValue{b, v, t, false}
+    return &LLVMValue{b, v, t, false, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as
@@ -203,7 +205,9 @@ func (v *LLVMValue) Type() Type {
 // Dereference an LLVMValue, producing a new LLVMValue.
 func (v *LLVMValue) Deref() *LLVMValue {
     llvm_value := v.builder.CreateLoad(v.value, "")
-    return NewLLVMValue(v.builder, llvm_value, Deref(v.typ))
+    value := NewLLVMValue(v.builder, llvm_value, Deref(v.typ))
+    value.address = v
+    return value
 }
 
 ///////////////////////////////////////////////////////////////////////////////

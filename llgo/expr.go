@@ -27,6 +27,7 @@ import (
     "go/ast"
     //"go/token"
     "reflect"
+    "sort"
     "github.com/axw/gollvm/llvm"
 )
 
@@ -45,93 +46,6 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
     value := c.VisitExpr(expr.X)
     return value.UnaryOp(expr.Op)
 }
-
-/*
-func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) llvm.Value {
-    x := c.VisitExpr(expr.X)
-    y := c.VisitExpr(expr.Y)
-
-    // If either is a const and the other is not, then cast the constant to the
-    // other's type (to support untyped literals/expressions).
-    x_const, y_const := x.IsConstant(), y.IsConstant()
-    if x_const && !y_const {
-        if isglobal(x) {x = x.Initializer()}
-        if isindirect(y) {y = c.builder.CreateLoad(y, "")}
-        x = c.maybeCast(x, y.Type())
-    } else if !x_const && y_const {
-        if isglobal(y) {y = y.Initializer()}
-        if isindirect(x) {x = c.builder.CreateLoad(x, "")}
-        y = c.maybeCast(y, x.Type())
-    } else if x_const && y_const {
-        // If either constant is a global variable, 'dereference' it by taking
-        // its initializer, which will never change.
-        if isglobal(x) {x = x.Initializer()}
-        if isglobal(y) {y = y.Initializer()}
-        // XXX temporary fix; we should be using exp/types/Const.
-        y = c.maybeCast(y, x.Type())
-    } else {
-        if isindirect(x) {x = c.builder.CreateLoad(x, "")}
-        if isindirect(y) {y = c.builder.CreateLoad(y, "")}
-    }
-
-    // TODO check types/sign, use float operators if appropriate.
-    switch expr.Op {
-    case token.MUL:
-        if x_const && y_const {
-            return llvm.ConstMul(x, y)
-        } else {
-            return c.builder.CreateMul(x, y, "")
-        }
-    case token.QUO:
-        if x_const && y_const {
-            return llvm.ConstUDiv(x, y)
-        } else {
-            return c.builder.CreateUDiv(x, y, "")
-        }
-    case token.ADD:
-        if x_const && y_const {
-            return llvm.ConstAdd(x, y)
-        } else {
-            return c.builder.CreateAdd(x, y, "")
-        }
-    case token.SUB:
-        if x_const && y_const {
-            return llvm.ConstSub(x, y)
-        } else {
-            return c.builder.CreateSub(x, y, "")
-        }
-    case token.EQL:
-        if x_const && y_const {
-            return llvm.ConstICmp(llvm.IntEQ, x, y)
-        } else {
-            return c.builder.CreateICmp(llvm.IntEQ, x, y, "")
-        }
-    case token.LSS:
-        if x_const && y_const {
-            return llvm.ConstICmp(llvm.IntULT, x, y)
-        } else {
-            return c.builder.CreateICmp(llvm.IntULT, x, y, "")
-        }
-    }
-    panic(fmt.Sprint("Unhandled operator: ", expr.Op))
-}
-
-func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) llvm.Value {
-    value := c.VisitExpr(expr.X)
-    switch expr.Op {
-    case token.SUB: {
-        if !value.IsAConstant().IsNil() {
-            value = llvm.ConstNeg(value)
-        } else {
-            value = c.builder.CreateNeg(value, "")
-        }
-    }
-    case token.ADD: // No-op
-    default: panic("Unhandled operator: ")// + expr.Op)
-    }
-    return value
-}
-*/
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     var fn *LLVMValue
@@ -160,37 +74,26 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     default:
         fn = c.VisitExpr(expr.Fun).(*LLVMValue)
     }
-
-    if fn.indirect {
-        fn = fn.Deref()
-    }
-
-    // Is it a method call? We'll extract the receiver from metadata here,
-    // and add it in as the first argument later.
-    //receiver := fn.Metadata(llvm.MDKindID("receiver")) // TODO
-    receiver := llvm.Value{nil}
+    if fn.indirect {fn = fn.Deref()}
 
     // TODO handle varargs
     fn_type := Deref(fn.Type()).(*Func)
-    var args []llvm.Value = nil
-    if expr.Args != nil {
-        arg_offset := 0
-        if !receiver.IsNil() {
-            arg_offset++
-            args = make([]llvm.Value, len(expr.Args)+1)
-            args[0] = receiver
-        } else {
-            args = make([]llvm.Value, len(expr.Args))
-        }
-
-        param_types := fn_type.Params
+    args := make([]llvm.Value, 0)
+    if fn_type.Recv != nil {
+        // Don't dereference the receiver here. It'll have been worked out in
+        // the selector.
+        receiver := fn.receiver
+        args = append(args, receiver.LLVMValue())
+    }
+    if len(fn_type.Params) > 0 {
         for i, expr := range expr.Args {
             value := c.VisitExpr(expr)
-            param_type := param_types[arg_offset+i].Type.(Type)
-            args[arg_offset+i] = value.Convert(param_type).LLVMValue()
+            if value_, isllvm := value.(*LLVMValue); isllvm {
+                if value_.indirect {value = value_.Deref()}
+            }
+            param_type := fn_type.Params[i].Type.(Type)
+            args = append(args, value.Convert(param_type).LLVMValue())
         }
-    } else if !receiver.IsNil() {
-        args = []llvm.Value{receiver}
     }
 
     var result_type Type
@@ -277,41 +180,82 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     // Map name to an index.
     zero_value := llvm.ConstInt(llvm.Int32Type(), 0, false)
     indexes := make([]llvm.Value, 0)
-    indexes = append(indexes, zero_value)
 
-    // TODO
-/*
-    element_type := lhs.Type() //lhs.Type().ElementType()
-    if element_type.TypeKind() == llvm.PointerTypeKind {
+    // If it's an indirect value, for example, a stack-allocated copy of a
+    // parameter, take the base type and add a GEP index, but don't dereference
+    // the value.
+    indirect := false
+    typ := lhs.Type()
+    if lhs_, isllvm := lhs.(*LLVMValue); isllvm && lhs_.indirect {
+        typ = Deref(typ)
         indexes = append(indexes, zero_value)
-        element_type = element_type.ElementType()
+        indirect = true
     }
 
-    typeinfo := c.typeinfo[element_type.C]
-    index, ok := typeinfo.FieldIndex(expr.Sel.String())
-    if ok {
-        index_value := llvm.ConstInt(llvm.Int32Type(), uint64(index), false)
-        indexes = append(indexes, index_value)
-        if lhs.Type().TypeKind() == llvm.PointerTypeKind {
-            value := c.builder.CreateGEP(lhs, indexes, "")
-            setindirect(value)
+    var ptr_type Type
+    if _, isptr := typ.(*Pointer); isptr {
+        ptr_type = typ
+        typ = Deref(typ)
+        if indirect {
+            lhs = lhs.(*LLVMValue).Deref()
+            indirect = false
+        } else {
+            indexes = append(indexes, zero_value)
+        }
+    }
+
+    // If it's a struct, look to see if it has a field with the specified name.
+    name := expr.Sel.String()
+    underlying := typ.(*Name).Underlying
+    if styp, isstruct := underlying.(*Struct); isstruct {
+        i := sort.Search(len(styp.Fields), func(i int) bool {
+            return styp.Fields[i].Name >= name})
+        if i < len(styp.Fields) && styp.Fields[i].Name == name {
+            index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
+            indexes = append(indexes, index)
+            llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
+            elt_typ := styp.Fields[i].Type.(Type)
+            value := NewLLVMValue(
+                c.builder, llvm_value, &Pointer{Base: elt_typ})
+            value.indirect = true
             return value
         }
-        panic("Don't know how to extract from a register-based struct")
-    } else {
-        method_obj := typeinfo.MethodByName(expr.Sel.String())
-        if method_obj != nil {
-            method := c.Resolve(method_obj)
-            // TODO
-            //method.SetMetadata(llvm.MDKindID("receiver"), lhs)
-            return method
+    }
+
+    // Look up a method with receiver T.
+    typeinfo := c.types.lookup(typ)
+    method_obj := typeinfo.methods[name]
+    receiver := lhs.(*LLVMValue)
+    if indirect {receiver = receiver.Deref()}
+    if method_obj != nil {
+        method := c.Resolve(method_obj).(*LLVMValue)
+        if ptr_type != nil {
+            method.receiver = receiver.Deref()
         } else {
-            panic("Failed to locate field or method: " + expr.Sel.String())
+            method.receiver = receiver
+        }
+        return method
+    }
+
+    // From the language spec:
+    //     If x is addressable and &x's method set contains m,
+    //     x.m() is shorthand for (&x).m()
+    if ptr_type == nil && receiver.address != nil {
+        receiver = receiver.address
+        ptr_type = receiver.Type()
+    }
+
+    // Look up a method with receiver *T.
+    if ptr_type != nil {
+        method_obj = typeinfo.ptrmethods[name]
+        if method_obj != nil {
+            method := c.Resolve(method_obj).(*LLVMValue)
+            method.receiver = receiver
+            return method
         }
     }
-    //return llvm.Value{nil}
-*/
-    return nil
+
+    panic("Shouldn't reach here (looking for " + name + ")")
 }
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
