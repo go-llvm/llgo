@@ -176,8 +176,8 @@ func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
         global_ctors_var.SetLinkage(llvm.AppendingLinkage)
     }
 
-    // Create debug metadata. TODO
-    //compiler.createCompileUnitMetadata()
+    // Create debug metadata.
+    compiler.createMetadata()
 
     runtime.SetFinalizer(compiler.module, func(m *Module){m.Dispose()})
     return compiler.module, nil

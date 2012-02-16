@@ -1,0 +1,7 @@
+*.o
+*.so
+*.a
+*.[68]
+_obj
+bin
+cmd/llgo/llgo
