@@ -28,6 +28,7 @@ import (
     "os"
     "runtime"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 type Module struct {
@@ -74,9 +75,16 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 
     switch obj.Kind {
     case ast.Con:
-        valspec := obj.Decl.(*ast.ValueSpec)
-        c.VisitValueSpec(valspec, true)
-        value = (obj.Data).(Value)
+        if obj.Decl != nil {
+            valspec := obj.Decl.(*ast.ValueSpec)
+            c.VisitValueSpec(valspec, true)
+            value = (obj.Data).(Value)
+        } else {
+            value = &ConstValue{
+                *(obj.Data.(*types.Const)),
+                obj.Type.(*types.Basic)}
+            obj.Data = value
+        }
     case ast.Fun:
         var funcdecl *ast.FuncDecl
         if obj.Decl != nil {
