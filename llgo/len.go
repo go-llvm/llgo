@@ -28,24 +28,35 @@ import (
     "unsafe"
     "go/ast"
     "go/token"
+    "github.com/axw/llgo/types"
 )
 
 func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
     if len(expr.Args) > 1 {panic("Expecting only one argument to len")}
 
     value := c.VisitExpr(expr.Args[0])
+    if llvmvalue, isllvmvalue := value.(*LLVMValue); isllvmvalue {
+        if llvmvalue.indirect {value = llvmvalue.Deref()}
+    }
+
     switch typ := (value.Type()).(type) {
-    case *Pointer:
+    case *types.Pointer:
         // XXX Converting to a string to be converted back to an int is silly.
         // The values need an overhaul? Perhaps have types based on fundamental
         // types, with the additional methods to make them llgo.Value's.
-        if a, isarray := typ.Base.(*Array); isarray {
+        if a, isarray := typ.Base.(*types.Array); isarray {
             return NewConstValue(token.INT, strconv.Uitoa64(a.Len))
         }
         return NewConstValue(token.INT,
             strconv.Uitoa(uint(unsafe.Sizeof(uintptr(0)))))
-    case *Array:
-        // FIXME should be int (arch), not int32.
+
+    case *types.Slice:
+        ptr := value.(*LLVMValue).address
+        len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
+        len_value := c.builder.CreateLoad(len_field, "")
+        return NewLLVMValue(c.builder, len_value, types.Int32)
+
+    case *types.Array:
         return NewConstValue(token.INT, strconv.Uitoa64(typ.Len))
     }
     panic(fmt.Sprint("Unhandled value type: ", value.Type()))

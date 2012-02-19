@@ -25,9 +25,10 @@ package llgo
 import (
     "big"
     "fmt"
-    "go/ast"
-    "sort"
     "reflect"
+    "sort"
+    "go/ast"
+    "github.com/axw/llgo/types"
 )
 
 type TypeInfo struct {
@@ -35,9 +36,9 @@ type TypeInfo struct {
     ptrmethods map[string]*ast.Object
 }
 
-type TypeMap map[Type]*TypeInfo
+type TypeMap map[types.Type]*TypeInfo
 
-func (m *TypeMap) lookup(t Type) *TypeInfo {
+func (m *TypeMap) lookup(t types.Type) *TypeInfo {
     info := (*m)[t]
     if info == nil {
         info = new(TypeInfo)
@@ -48,84 +49,37 @@ func (m *TypeMap) lookup(t Type) *TypeInfo {
     return info
 }
 
-var (
-    UintType Type = &Basic{Kind: Uint}
-    Uint8Type Type = &Basic{Kind: Uint8}
-    Uint16Type Type = &Basic{Kind: Uint16}
-    Uint32Type Type = &Basic{Kind: Uint32}
-    Uint64Type Type = &Basic{Kind: Uint64}
-
-    IntType Type = &Basic{Kind: Int}
-    Int8Type Type = &Basic{Kind: Int8}
-    Int16Type Type = &Basic{Kind: Int16}
-    Int32Type Type = &Basic{Kind: Int32}
-    Int64Type Type = &Basic{Kind: Int64}
-
-    Float32Type Type = &Basic{Kind: Float32}
-    Float64Type Type = &Basic{Kind: Float64}
-    Complex64Type Type = &Basic{Kind: Complex64}
-    Complex128Type Type = &Basic{Kind: Complex128}
-
-    ByteType Type = &Basic{Kind: Byte}
-    BoolType Type = &Basic{Kind: Bool}
-)
-
-// Get a Type from an identifier.
-func (c *compiler) IdentGetType(ident *ast.Ident) Type {
-    switch ident.Name {
-        case "bool": return BoolType
-        case "byte": return ByteType
-
-        case "uint": return UintType
-        case "uint8": return Uint8Type
-        case "uint16": return Uint16Type
-        case "uint32": return Uint32Type
-        case "uint64": return Uint64Type
-
-        case "int": return IntType
-        case "int8": return Int8Type
-        case "int16": return Int16Type
-        case "int32": return Int32Type
-        case "int64": return Int64Type
-
-        case "float32": return Float32Type
-        case "float64": return Float64Type
-
-        case "complex64": return Complex64Type
-        case "complex128": return Complex128Type
-    }
-    return c.ObjGetType(ident.Obj)
-}
-
 // Get a Type from an ast object.
-func (c *compiler) ObjGetType(obj *ast.Object) Type {
+func (c *compiler) ObjGetType(obj *ast.Object) types.Type {
     if obj != nil {
-        type_, istype := (obj.Type).(Type)
-        if !istype {
-            switch x := (obj.Decl).(type) {
-            case *ast.TypeSpec:
-                c.VisitTypeSpec(x)
-                type_, istype = (obj.Type).(Type)
-            }
+        switch type_ := obj.Type.(type) {
+        case types.Type: return type_
         }
-        if istype {return type_}
+
+        switch x := (obj.Decl).(type) {
+        case *ast.TypeSpec:
+            c.VisitTypeSpec(x)
+            type_, _ := (obj.Type).(types.Type)
+            return type_
+        }
     }
     return nil
 }
 
-func (c *compiler) GetType(expr ast.Expr) Type {
+func (c *compiler) GetType(expr ast.Expr) types.Type {
     switch x := (expr).(type) {
     case *ast.Ident:
-        return c.IdentGetType(x)
+        obj := c.LookupObj(x.Name)
+        return c.ObjGetType(obj)
     case *ast.FuncType:
         fn_type := c.VisitFuncType(x)
-        return &Pointer{Base: fn_type}
+        return &types.Pointer{Base: fn_type}
     case *ast.ArrayType:
         elttype := c.GetType(x.Elt)
         if x.Len == nil {
-            return &Slice{Elt: elttype}
+            return &types.Slice{Elt: elttype}
         } else {
-            result := &Array{Elt: elttype}
+            result := &types.Array{Elt: elttype}
             _, isellipsis := (x.Len).(*ast.Ellipsis)
             if !isellipsis {
                 lenvalue := c.VisitExpr(x.Len)
@@ -133,7 +87,7 @@ func (c *compiler) GetType(expr ast.Expr) Type {
                 if !isconst {
                     panic("Array length must be a constant integer expression")
                 }
-                intval, isint := (constval.val).(*big.Int)
+                intval, isint := (constval.Val).(*big.Int)
                 if !isint {
                     panic("Array length must be a constant integer expression")
                 }
@@ -146,17 +100,23 @@ func (c *compiler) GetType(expr ast.Expr) Type {
     case *ast.InterfaceType:
         return c.VisitInterfaceType(x)
     case *ast.StarExpr:
-        return &Pointer{Base: c.GetType(x.X)}
+        return &types.Pointer{Base: c.GetType(x.X)}
+    case *ast.Ellipsis:
+        return &types.Slice{c.GetType(x.Elt)}
     default:
         panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
     }
     return nil
 }
 
-func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
-    var fn_type Func
+func (c *compiler) VisitFuncType(f *ast.FuncType) *types.Func {
+    var fn_type types.Func
 
-    if f.Params != nil {
+    if f.Params != nil && len(f.Params.List) > 0 {
+        final_param_type := f.Params.List[len(f.Params.List)-1].Type
+        if _, varargs := final_param_type.(*ast.Ellipsis); varargs {
+            fn_type.IsVariadic = true
+        }
         for i := 0; i < len(f.Params.List); i++ {
             namecount := len(f.Params.List[i].Names)
             args := make([]*ast.Object, namecount)
@@ -201,8 +161,8 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *Func {
     return &fn_type
 }
 
-func (c *compiler) VisitStructType(s *ast.StructType) *Struct {
-    var typ *Struct = new(Struct)
+func (c *compiler) VisitStructType(s *ast.StructType) *types.Struct {
+    var typ = new(types.Struct)
     if s.Fields != nil && s.Fields.List != nil {
         tags := make(map[*ast.Object]string)
         var i int = 0
@@ -236,8 +196,8 @@ func (c *compiler) VisitStructType(s *ast.StructType) *Struct {
     return typ
 }
 
-func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {
-    var iface Interface
+func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *types.Interface {
+    var iface types.Interface
     if i.Methods != nil && i.Methods.List != nil {
         for _, field := range i.Methods.List {
             if field.Names == nil {
@@ -245,7 +205,7 @@ func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *Interface {
                 fmt.Println("==nil")
                 embedded := c.GetType(field.Type)
 
-                embedded_iface, isiface := embedded.(*Interface)
+                embedded_iface, isiface := embedded.(*types.Interface)
                 if isiface {
                     iface.Methods = append(iface.Methods,
                                            embedded_iface.Methods...)

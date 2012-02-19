@@ -24,6 +24,7 @@ package llgo
 
 import (
     "go/ast"
+    "github.com/axw/llgo/types"
 )
 
 // fixMethodDecls will walk through a file and associate functions with their
@@ -41,7 +42,7 @@ func (c *compiler) fixMethodDecls(file *ast.File) {
             funcdecl.Name.Obj.Decl = funcdecl
 
             // Record the FuncDecl's AST object in the type's methodset.
-            if ptr, isptr := typ.(*Pointer); isptr {
+            if ptr, isptr := typ.(*types.Pointer); isptr {
                 typ := ptr.Base
                 typeinfo := c.types.lookup(typ)
                 typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj

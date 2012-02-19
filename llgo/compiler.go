@@ -49,7 +49,7 @@ type compiler struct {
     functions  []Value //[]llvm.Value
     initfuncs  []Value //[]llvm.Value
     types      TypeMap
-    imports    map[string]*ast.Object
+    pkg        *ast.Package
     fileset    *token.FileSet
     filescope  *ast.Scope
     scope      *ast.Scope
@@ -78,7 +78,14 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
         c.VisitValueSpec(valspec, true)
         value = (obj.Data).(Value)
     case ast.Fun:
-        funcdecl := obj.Decl.(*ast.FuncDecl)
+        var funcdecl *ast.FuncDecl
+        if obj.Decl != nil {
+            funcdecl = obj.Decl.(*ast.FuncDecl)
+        } else {
+            funcdecl = &ast.FuncDecl{
+                Name: &ast.Ident{Name: obj.Name, Obj: obj},
+            }
+        }
         value = c.VisitFuncProtoDecl(funcdecl)
         obj.Data = value
     case ast.Var:
@@ -115,14 +122,12 @@ func (c *compiler) PopScope() *ast.Scope {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
+func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err os.Error) {
     compiler := new(compiler)
     compiler.fileset = fset
-    compiler.filescope = file.Scope
-    compiler.scope = file.Scope
+    compiler.pkg = pkg
     compiler.initfuncs = make([]Value, 0)
     compiler.types = make(TypeMap)
-    compiler.imports = make(map[string]*ast.Object)
 
     // Create a Builder, for building LLVM instructions.
     compiler.builder = llvm.GlobalContext().NewBuilder()
@@ -131,7 +136,7 @@ func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
     // Create a Module, which contains the LLVM bitcode. Dispose it on panic,
     // otherwise we'll set a finalizer at the end. The caller may invoke
     // Dispose manually, which will render the finalizer a no-op.
-    modulename := file.Name.String()
+    modulename := pkg.Name
     compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
     defer func() {
         if e := recover(); e != nil {
@@ -140,12 +145,15 @@ func Compile(fset *token.FileSet, file *ast.File) (m *Module, err os.Error) {
         }
     }()
 
-    // Perform fixups.
-    compiler.fixConstDecls(file)
-    compiler.fixMethodDecls(file)
-
-    // Visit each of the top-level declarations.
-    for _, decl := range file.Decls {compiler.VisitDecl(decl);}
+    // Compile each file in the package.
+    for _, file := range pkg.Files {
+        file.Scope.Outer = pkg.Scope
+        compiler.filescope = file.Scope
+        compiler.scope = file.Scope
+        compiler.fixConstDecls(file)
+        compiler.fixMethodDecls(file)
+        for _, decl := range file.Decls {compiler.VisitDecl(decl);}
+    }
 
     // Create global constructors.
     //

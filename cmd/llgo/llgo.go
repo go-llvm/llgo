@@ -20,69 +20,127 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+// Portions (from gotype):
+//     Copyright 2011 The Go Authors. All rights reserved.
+//     Use of this source code is governed by a BSD-style
+//     license that can be found in the LICENSE file.
+
 package main
 
 import (
-    "fmt"
     "flag"
-    "go/parser"
-    "go/ast"
-    "go/token"
-    "go/types"
+    "fmt"
     "os"
+    "strings"
+    "go/ast"
+    "go/parser"
+    "go/scanner"
+    "go/token"
     "github.com/axw/gollvm/llvm"
     "github.com/axw/llgo"
+    "github.com/axw/llgo/types"
 )
 
 var dump *bool = flag.Bool(
                     "dump", false,
                     "Dump the AST to stderr instead of generating bitcode")
 
-func main() {
-    flag.Parse()
-    fset := token.NewFileSet()
+var exitCode = 0
 
-    filenames := flag.Args()
-    packages, err := parser.ParseFiles(fset, filenames, 0)
+func report(err os.Error) {
+    scanner.PrintError(os.Stderr, err)
+    exitCode = 2
+}
+
+func parseFile(fset *token.FileSet, filename string) *ast.File {
+    // parse entire file
+    mode := parser.DeclarationErrors
+    //if *allErrors {
+    //    mode |= parser.SpuriousErrors
+    //}
+    //if *printTrace {
+    //    mode |= parser.Trace
+    //}
+    file, err := parser.ParseFile(fset, filename, nil, mode)
     if err != nil {
-        fmt.Printf("ParseFiles failed: %s\n", err.String())
-        os.Exit(1)
+        report(err)
+        return nil
     }
+    return file
+}
 
-    // Create a new scope for each package.
-    for _, pkg := range packages {
-        pkg.Scope = ast.NewScope(types.Universe)
-        obj := ast.NewObj(ast.Pkg, pkg.Name)
-        obj.Data = pkg.Scope
+func parseFiles(fset *token.FileSet,
+                filenames []string) (files map[string]*ast.File) {
+    files = make(map[string]*ast.File)
+    for _, filename := range filenames {
+        if file := parseFile(fset, filename); file != nil {
+            if files[filename] != nil {
+                report(os.NewError(
+                    fmt.Sprintf("%q: duplicate file", filename)))
+                continue
+            }
+            files[filename] = file
+        }
     }
+    return
+}
 
-    // Type check and fill in the AST.
-    for _, pkg := range packages {
-        // TODO Imports? Or will 'Check' fill it in?
-        types.Check(fset, pkg)
-        //fmt.Println(pkg.Imports)
+func isGoFilename(filename string) bool {
+    // ignore non-Go files
+    return !strings.HasPrefix(filename, ".") &&
+            strings.HasSuffix(filename, ".go")
+}
+
+func processFiles(filenames []string) {
+    i := 0
+    for _, filename := range filenames {
+        switch _, err := os.Stat(filename); {
+        case err != nil:
+            report(err)
+        default:
+            filenames[i] = filename
+            i++
+        }
+    }
+    fset := token.NewFileSet()
+    processPackage(fset, parseFiles(fset, filenames[0:i]))
+}
+
+func processPackage(fset *token.FileSet, files map[string]*ast.File) {
+    // make a package (resolve all identifiers)
+    pkg, err := ast.NewPackage(fset, files, types.GcImporter, types.Universe)
+    if err != nil {
+        report(err)
+        return
+    }
+    _, err = types.Check(fset, pkg)
+    if err != nil {
+        report(err)
+        return
     }
 
     // Build LLVM module(s).
-    for _, pkg := range packages {
-        file := ast.MergePackageFiles(pkg, 0)
-        file.Scope = ast.NewScope(pkg.Scope)
-
-        module, err := llgo.Compile(fset, file)
-        if err == nil {
-            defer module.Dispose()
-            if *dump {
-                module.Dump()
-            } else {
-                err := llvm.WriteBitcodeToFile(module.Module, os.Stdout)
-                if err != nil {
-                    fmt.Println(err)
-                }
-            }
+    module, err := llgo.Compile(fset, pkg)
+    if err == nil {
+        defer module.Dispose()
+        if *dump {
+            module.Dump()
         } else {
-            fmt.Printf("llg.Compile(%v) failed: %v", file.Name, err)
+            err := llvm.WriteBitcodeToFile(module.Module, os.Stdout)
+            if err != nil {
+                fmt.Println(err)
+            }
         }
+    } else {
+        //fmt.Printf("llg.Compile(%v) failed: %v", file.Name, err)
+        report(err)
     }
+}
+
+func main() {
+    flag.Parse()
+    processFiles(flag.Args())
+    os.Exit(exitCode)
 }
 
 // vim: set ft=go :

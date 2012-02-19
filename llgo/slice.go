@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -23,18 +23,25 @@ SOFTWARE.
 package llgo
 
 import (
-    "go/ast"
+    //"go/ast"
     "github.com/axw/gollvm/llvm"
     "github.com/axw/llgo/types"
 )
 
-func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
-    if len(expr.Args) > 1 {panic("Expecting only one argument to new")}
-    typ := c.GetType(expr.Args[0])
-    llvm_typ := typ.LLVMType()
-    mem := c.builder.CreateMalloc(llvm_typ, "")
-    c.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
-    return NewLLVMValue(c.builder, mem, &types.Pointer{Base: typ})
+func (c *compiler) makeSlice(v []llvm.Value, typ *types.Slice) llvm.Value {
+    n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
+    mem := c.builder.CreateArrayMalloc(typ.Elt.LLVMType(), n, "")
+    for i, value := range v {
+        indices := []llvm.Value{
+            llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
+        ep := c.builder.CreateGEP(mem, indices, "")
+        c.builder.CreateStore(value, ep)
+    }
+    struct_ := c.builder.CreateAlloca(typ.LLVMType(), "")
+    c.builder.CreateStore(mem, c.builder.CreateStructGEP(struct_, 0, ""))
+    c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 1, ""))
+    c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 2, ""))
+    return c.builder.CreateLoad(struct_, "")
 }
 
 // vim: set ft=go :

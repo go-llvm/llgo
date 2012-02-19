@@ -23,11 +23,12 @@ SOFTWARE.
 package llgo
 
 import (
-    "go/token"
-    "github.com/axw/gollvm/llvm"
-    "math"
     "big"
     "fmt"
+    "math"
+    "go/token"
+    "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 var (
@@ -46,46 +47,46 @@ type Value interface {
 
     // Convert returns a new Value which has been converted to the specified
     // type.
-    Convert(typ Type) Value
+    Convert(typ types.Type) Value
 
     // LLVMValue returns an llvm.Value for this value.
     LLVMValue() llvm.Value
 
     // Type returns the Type of the value.
-    Type() Type
+    Type() types.Type
 }
 
 type LLVMValue struct {
     builder  llvm.Builder
     value    llvm.Value
-    typ      Type
+    typ      types.Type
     indirect bool
     address  *LLVMValue // Value that dereferenced to this value.
     receiver *LLVMValue
 }
 
 type ConstValue struct {
-    Const // from go_const.go (ripped from go/types)
-    typ *Basic
+    types.Const
+    typ *types.Basic
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
-func NewLLVMValue(b llvm.Builder, v llvm.Value, t Type) *LLVMValue {
+func NewLLVMValue(b llvm.Builder, v llvm.Value, t types.Type) *LLVMValue {
     return &LLVMValue{b, v, t, false, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
 func NewConstValue(tok token.Token, lit string) ConstValue {
-    var typ *Basic
+    var typ *types.Basic
     switch tok {
-    case token.INT:    typ = &Basic{Kind: UntypedInt}
-    case token.FLOAT:  typ = &Basic{Kind: UntypedFloat}
-    case token.IMAG:   typ = &Basic{Kind: UntypedComplex}
-    case token.CHAR:   typ = &Basic{Kind: Int} // XXX rune
-    case token.STRING: typ = &Basic{Kind: String}
+    case token.INT:    typ = &types.Basic{Kind: types.UntypedIntKind}
+    case token.FLOAT:  typ = &types.Basic{Kind: types.UntypedFloatKind}
+    case token.IMAG:   typ = &types.Basic{Kind: types.UntypedComplexKind}
+    case token.CHAR:   typ = &types.Basic{Kind: types.Int32Kind} // rune
+    case token.STRING: typ = &types.Basic{Kind: types.StringKind}
     }
-    return ConstValue{MakeConst(tok, lit), typ}
+    return ConstValue{*types.MakeConst(tok, lit), typ}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -120,6 +121,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
             result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs.value, "")
         case token.LSS:
             result = b.CreateICmp(llvm.IntULT, lhs.value, rhs.value, "")
+        case token.LEQ: // TODO signed/unsigned
+            result = b.CreateICmp(llvm.IntULE, lhs.value, rhs.value, "")
         default:
             panic("Unimplemented")
         }
@@ -127,9 +130,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
     case ConstValue:
         // Cast untyped rhs to lhs type.
         switch rhs.typ.Kind {
-        case UntypedInt: fallthrough
-        case UntypedFloat: fallthrough
-        case UntypedComplex:
+        case types.UntypedIntKind: fallthrough
+        case types.UntypedFloatKind: fallthrough
+        case types.UntypedComplexKind:
             rhs = rhs.Convert(lhs.Type()).(ConstValue)
         }
         rhs_value := rhs.LLVMValue()
@@ -147,6 +150,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
             result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs_value, "")
         case token.LSS:
             result = b.CreateICmp(llvm.IntULT, lhs.value, rhs_value, "")
+        case token.LEQ: // TODO signed/unsigned
+            result = b.CreateICmp(llvm.IntULE, lhs.value, rhs_value, "")
         default:
             panic("Unimplemented")
         }
@@ -169,7 +174,7 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
     return NewLLVMValue(b, result, v.typ)
 }
 
-func (v *LLVMValue) Convert(typ Type) Value {
+func (v *LLVMValue) Convert(typ types.Type) Value {
     if v.typ == typ {
         return v
     }
@@ -198,14 +203,14 @@ func (v *LLVMValue) LLVMValue() llvm.Value {
     return v.value
 }
 
-func (v *LLVMValue) Type() Type {
+func (v *LLVMValue) Type() types.Type {
     return v.typ
 }
 
 // Dereference an LLVMValue, producing a new LLVMValue.
 func (v *LLVMValue) Deref() *LLVMValue {
     llvm_value := v.builder.CreateLoad(v.value, "")
-    value := NewLLVMValue(v.builder, llvm_value, Deref(v.typ))
+    value := NewLLVMValue(v.builder, llvm_value, types.Deref(v.typ))
     value.address = v
     return value
 }
@@ -223,9 +228,9 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
         // Cast untyped lhs to rhs type.
         switch lhs.typ.Kind {
-        case UntypedInt: fallthrough
-        case UntypedFloat: fallthrough
-        case UntypedComplex:
+        case types.UntypedIntKind: fallthrough
+        case types.UntypedFloatKind: fallthrough
+        case types.UntypedComplexKind:
             lhs = lhs.Convert(rhs.Type()).(ConstValue)
         }
         lhs_value := lhs.LLVMValue()
@@ -253,18 +258,19 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
         // TODO Check if either one is untyped, and convert to the other's
         // type.
         typ := lhs.typ
-        return ConstValue{lhs.Const.BinaryOp(op, rhs.Const), typ}
+        return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), typ}
     }
     panic("unimplemented")
 }
 
 func (v ConstValue) UnaryOp(op token.Token) Value {
-    return ConstValue{v.Const.UnaryOp(op), v.typ}
+    return ConstValue{*v.Const.UnaryOp(op), v.typ}
 }
 
-func (v ConstValue) Convert(typ Type) Value {
-    if v.typ != typ {
-        return ConstValue{v.Const.Convert(&typ), typ.(*Basic)}
+func (v ConstValue) Convert(typ types.Type) Value {
+    if !types.Identical(v.typ, typ) {
+        if name, isname := typ.(*types.Name); isname {typ = name.Underlying}
+        return ConstValue{*v.Const.Convert(&typ), typ.(*types.Basic)}
     }
     return v
 }
@@ -277,38 +283,37 @@ func (v ConstValue) LLVMValue() llvm.Value {
     //   a boolean, integer, floating-point, or string constant.
 
     switch v.typ.Kind {
-    case UntypedInt:
+    case types.UntypedIntKind:
         // TODO 32/64bit
-        int_val := v.val.(*big.Int)
+        int_val := v.Val.(*big.Int)
         if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
             panic(fmt.Sprint("const ", int_val, " overflows int"))
         }
         return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
-    case UntypedFloat: fallthrough
-    case UntypedComplex:
+    case types.UntypedFloatKind: fallthrough
+    case types.UntypedComplexKind:
         panic("Attempting to take LLVM value of untyped constant")
-    case Int:
+    case types.Int32Kind, types.Uint32Kind:
         // XXX rune
-        // FIXME use int32/int64
         return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
-    case Int16:
+    case types.Int16Kind, types.Uint16Kind:
         return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
-    case String:
-        return llvm.ConstString((v.val).(string), true)
+    case types.StringKind:
+        return llvm.ConstString((v.Val).(string), true)
     }
     panic("Unhandled type")
 }
 
-func (v ConstValue) Type() Type {
+func (v ConstValue) Type() types.Type {
     // TODO convert untyped to typed?
     switch v.typ.Kind {
-    case UntypedInt: return IntType
+    case types.UntypedIntKind: return types.Int
     }
     return v.typ
 }
 
 func (v ConstValue) Int64() int64 {
-    int_val := v.val.(*big.Int)
+    int_val := v.Val.(*big.Int)
     return int_val.Int64()
 }
 

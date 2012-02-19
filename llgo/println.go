@@ -26,6 +26,7 @@ import (
     "fmt"
     "go/ast"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 func getprintf(module llvm.Module) llvm.Value {
@@ -55,15 +56,23 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
             }
             llvm_value := value.LLVMValue()
 
+            // If it's a named type, get the underlying type.
+            typ := value.Type()
+            if name, isname := typ.(*types.Name); isname {
+                typ = name.Underlying
+            }
+
             if i > 0 {format += " "}
-            switch typ := (value.Type()).(type) {
-            case *Basic:
+            switch typ := typ.(type) {
+            case *types.Basic:
                 switch typ.Kind {
-                case Int: format += "%d" // TODO 32/64
-                case Int16: format += "%hd"
-                case Int32: format += "%d"
-                case Int64: format += "%lld" // FIXME windows
-                case String:
+                case types.Uint16Kind: format += "%hu"
+                case types.Uint32Kind: format += "%u"
+                case types.Uint64Kind: format += "%llu" // FIXME windows
+                case types.Int16Kind: format += "%hd"
+                case types.Int32Kind: format += "%d"
+                case types.Int64Kind: format += "%lld" // FIXME windows
+                case types.StringKind:
                     // Hrm. This kinda sucks. What's the appropriate way to
                     // automatically convert constant strings to globals?
                     if !llvm_value.IsAConstant().IsNil() &&
@@ -79,8 +88,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 default: panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
                 }
 
-            //case *Slice: fallthrough
-            case *Slice, *Array:
+            case *types.Slice, *types.Array:
                 // If we see a constant array, we either:
                 //     Create an internal constant if it's a constant array, or
                 //     Create space on the stack and store it there.
@@ -101,7 +109,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 // FIXME don't assume string...
                 format += "%s"
 
-            case *Pointer:
+            case *types.Pointer:
                 // FIXME don't assume string...
                 // TODO string should be a struct, with length & ptr. We'll
                 // probably encode the type as metadata.
@@ -122,7 +130,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 
     printf := getprintf(c.module.Module)
     return NewLLVMValue(c.builder,
-        c.builder.CreateCall(printf, args, ""), Int32Type)
+        c.builder.CreateCall(printf, args, ""), types.Int32)
 }
 
 // vim: set ft=go :

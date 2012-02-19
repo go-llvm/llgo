@@ -28,6 +28,7 @@ import (
     "go/token"
     "reflect"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
@@ -98,12 +99,12 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
                         value.Type().LLVMType(), x.Name)
                     c.builder.CreateStore(value.LLVMValue(), ptr)
                     llvm_value := NewLLVMValue(
-                        c.builder, ptr, &Pointer{Base: value.Type()})
+                        c.builder, ptr, &types.Pointer{Base: value.Type()})
                     llvm_value.indirect = true
                     obj.Data = llvm_value
                 } else {
                     ptr, _ := (obj.Data).(Value)
-                    value = value.Convert(Deref(ptr.Type()))
+                    value = value.Convert(types.Deref(ptr.Type()))
                     c.builder.CreateStore(
                         value.LLVMValue(), ptr.LLVMValue())
                 }
@@ -111,7 +112,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
         }
         default:
             ptr := c.VisitExpr(expr)
-            value = value.Convert(Deref(ptr.Type()))
+            value = value.Convert(types.Deref(ptr.Type()))
             c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
         }
     }
@@ -202,9 +203,9 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
     var args_size llvm.Value
     if stmt.Call.Args != nil {
         param_types := make([]llvm.Type, 0)
-        fn_type := Deref(fn.Type()).(*Func)
+        fn_type := types.Deref(fn.Type()).(*types.Func)
         for _, param := range fn_type.Params {
-            typ := param.Type.(Type)
+            typ := param.Type.(types.Type)
             param_types = append(param_types, typ.LLVMType())
         }
         args_struct_type = llvm.StructType(param_types, false)
@@ -214,7 +215,7 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
             if llvm_value, isllvm := value_i.(*LLVMValue); isllvm {
                 if llvm_value.indirect {value_i = llvm_value.Deref()}
             }
-            value_i = value_i.Convert(fn_type.Params[i].Type.(Type))
+            value_i = value_i.Convert(fn_type.Params[i].Type.(types.Type))
             arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
                     llvm.ConstInt(llvm.Int32Type(), 0, false),
                     llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")

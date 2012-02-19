@@ -29,6 +29,7 @@ import (
     "reflect"
     "sort"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 func isglobal(value Value) bool {
@@ -77,7 +78,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     if fn.indirect {fn = fn.Deref()}
 
     // TODO handle varargs
-    fn_type := Deref(fn.Type()).(*Func)
+    fn_type := types.Deref(fn.Type()).(*types.Func)
     args := make([]llvm.Value, 0)
     if fn_type.Recv != nil {
         // Don't dereference the receiver here. It'll have been worked out in
@@ -85,28 +86,67 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
         receiver := fn.receiver
         args = append(args, receiver.LLVMValue())
     }
-    if len(fn_type.Params) > 0 {
-        for i, expr := range expr.Args {
-            value := c.VisitExpr(expr)
+    if nparams := len(fn_type.Params); nparams > 0 {
+        if fn_type.IsVariadic {nparams--}
+        for i := 0; i < nparams; i++ {
+            value := c.VisitExpr(expr.Args[i])
             if value_, isllvm := value.(*LLVMValue); isllvm {
                 if value_.indirect {value = value_.Deref()}
             }
-            param_type := fn_type.Params[i].Type.(Type)
+            param_type := fn_type.Params[i].Type.(types.Type)
             args = append(args, value.Convert(param_type).LLVMValue())
+        }
+        if fn_type.IsVariadic {
+            param_type := fn_type.Params[nparams].Type.(*types.Slice)
+            varargs := make([]llvm.Value, 0)
+            for i := nparams; i < len(expr.Args); i++ {
+                value := c.VisitExpr(expr.Args[i])
+                if value_, isllvm := value.(*LLVMValue); isllvm {
+                    if value_.indirect {value = value_.Deref()}
+                }
+                value = value.Convert(param_type.Elt)
+                varargs = append(varargs, value.LLVMValue())
+            }
+            slice_value := c.makeSlice(varargs, param_type)
+            args = append(args, slice_value)
         }
     }
 
-    var result_type Type
+    var result_type types.Type
     switch len(fn_type.Results) {
-        case 0:
-        case 1: result_type = fn_type.Results[0].Type.(Type)
-        default:
-            panic("Multiple results not handled yet")
+    case 0: // no-op
+    case 1: result_type = fn_type.Results[0].Type.(types.Type)
+    default:
+        fields := make([]*ast.Object, len(fn_type.Results))
+        for i, result := range fn_type.Results {fields[i] = result}
+        result_type = &types.Struct{Fields: fields}
     }
 
     return NewLLVMValue(c.builder,
         c.builder.CreateCall(fn.LLVMValue(), args, ""),
         result_type)
+}
+
+func isIntType(t types.Type) bool {
+    for {
+        switch x := t.(type) {
+        case *types.Name: t = x.Underlying
+        case *types.Basic:
+            switch x.Kind {
+            case types.Uint8Kind: fallthrough
+            case types.Uint16Kind: fallthrough
+            case types.Uint32Kind: fallthrough
+            case types.Uint64Kind: fallthrough
+            case types.Int8Kind: fallthrough
+            case types.Int16Kind: fallthrough
+            case types.Int32Kind: fallthrough
+            case types.Int64Kind: fallthrough
+            case types.UntypedIntKind: return true
+            }
+        default: return false
+        }
+    }
+    panic("unreachable")
 }
 
 func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
@@ -120,21 +160,9 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
         }
     }
 
-    isint := false
-    if basic, isbasic := index.Type().(*Basic); isbasic {
-        switch basic.Kind {
-        case Uint8: fallthrough
-        case Uint16: fallthrough
-        case Uint32: fallthrough
-        case Uint64: fallthrough
-        case Int8: fallthrough
-        case Int16: fallthrough
-        case Int32: fallthrough
-        case Int64: fallthrough
-        case UntypedInt: isint = true
-        }
+    if !isIntType(index.Type()) {
+        panic("Array index expression must evaluate to an integer")
     }
-    if !isint {panic("Array index expression must evaluate to an integer")}
 
     // Is it an array? Then let's get the address of the array so we can
     // get an element.
@@ -143,19 +171,27 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     //    value = value.Metadata(llvm.MDKindID("address"))
     //}
 
-    var result_type Type
+    gep_indices := []llvm.Value{}
+
+    var ptr llvm.Value
+    var result_type types.Type
     typ := value.Type()
-    if typ, ok := typ.(*Pointer); ok {
-        switch typ := Deref(typ).(type) {
-        case *Array: result_type = typ.Elt
-        case *Slice: result_type = typ.Elt
+    if typ, ok := typ.(*types.Pointer); ok {
+        switch typ := types.Deref(typ).(type) {
+        case *types.Array:
+            result_type = typ.Elt
+            ptr = value.LLVMValue()
+            gep_indices = append(gep_indices, llvm.ConstNull(llvm.Int32Type()))
+        case *types.Slice:
+            result_type = typ.Elt
+            ptr = c.builder.CreateStructGEP(value.LLVMValue(), 0, "")
+            ptr = c.builder.CreateLoad(ptr, "")
         default: panic("unimplemented")
         }
     }
 
-    zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
-    element := c.builder.CreateGEP(
-        value.LLVMValue(), []llvm.Value{zero, index.LLVMValue()}, "")
+    gep_indices = append(gep_indices, index.LLVMValue())
+    element := c.builder.CreateGEP(ptr, gep_indices, "")
     result := c.builder.CreateLoad(element, "")
     return NewLLVMValue(c.builder, result, result_type)
 }
@@ -187,15 +223,15 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     indirect := false
     typ := lhs.Type()
     if lhs_, isllvm := lhs.(*LLVMValue); isllvm && lhs_.indirect {
-        typ = Deref(typ)
+        typ = types.Deref(typ)
         indexes = append(indexes, zero_value)
         indirect = true
     }
 
-    var ptr_type Type
-    if _, isptr := typ.(*Pointer); isptr {
+    var ptr_type types.Type
+    if _, isptr := typ.(*types.Pointer); isptr {
         ptr_type = typ
-        typ = Deref(typ)
+        typ = types.Deref(typ)
         if indirect {
             lhs = lhs.(*LLVMValue).Deref()
             indirect = false
@@ -206,17 +242,17 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
     // If it's a struct, look to see if it has a field with the specified name.
     name := expr.Sel.String()
-    underlying := typ.(*Name).Underlying
-    if styp, isstruct := underlying.(*Struct); isstruct {
+    underlying := typ.(*types.Name).Underlying
+    if styp, isstruct := underlying.(*types.Struct); isstruct {
         i := sort.Search(len(styp.Fields), func(i int) bool {
             return styp.Fields[i].Name >= name})
         if i < len(styp.Fields) && styp.Fields[i].Name == name {
             index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
             indexes = append(indexes, index)
             llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
-            elt_typ := styp.Fields[i].Type.(Type)
+            elt_typ := styp.Fields[i].Type.(types.Type)
             value := NewLLVMValue(
-                c.builder, llvm_value, &Pointer{Base: elt_typ})
+                c.builder, llvm_value, &types.Pointer{Base: elt_typ})
             value.indirect = true
             return value
         }
@@ -284,6 +320,7 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
     case *ast.IndexExpr: return c.VisitIndexExpr(x)
     case *ast.SelectorExpr: return c.VisitSelectorExpr(x)
     case *ast.StarExpr: return c.VisitStarExpr(x)
+    case *ast.ParenExpr: return c.VisitExpr(x.X)
     case *ast.Ident: {
         if x.Obj == nil {x.Obj = c.LookupObj(x.Name)}
         return c.Resolve(x.Obj)

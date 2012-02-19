@@ -8,7 +8,7 @@
 // Package types declares the types used to represent Go types.
 //
 
-package llgo
+package types
 
 import (
     "fmt"
@@ -21,54 +21,34 @@ type BasicTypeKind int
 
 // Constants for basic types.
 const (
-    Uint8 BasicTypeKind = iota
-    Uint16
-    Uint32
-    Uint64
-    Int8
-    Int16
-    Int32
-    Int64
-    Float32
-    Float64
-    Complex64
-    Complex128
-    Byte
-    Uintptr
-    UntypedInt
-    UntypedFloat
-    UntypedComplex
-    String
-    Bool
-)
-
-// TODO have this depend on the architecture.
-var (
-    Uint = Uint32
-    Int = Int32
+    Uint8Kind BasicTypeKind = iota
+    Uint16Kind
+    Uint32Kind
+    Uint64Kind
+    Int8Kind
+    Int16Kind
+    Int32Kind
+    Int64Kind
+    Float32Kind
+    Float64Kind
+    Complex64Kind
+    Complex128Kind
+    UntypedIntKind
+    UntypedFloatKind
+    UntypedComplexKind
+    BoolKind
+    UintptrKind
+    StringKind
 )
 
 // All types implement the Type interface.
 type Type interface {
-	isType()
     LLVMType() llvm.Type
     String() string
 }
 
-// All concrete types embed ImplementsType which
-// ensures that all types implement the Type interface.
-type ImplementsType struct{}
-
-func (t *ImplementsType) isType() {}
-
-// TODO get rid of this, add it in each derived type.
-func (t *ImplementsType) LLVMType() llvm.Type {
-    return llvm.Type{nil}
-}
-
 // A Bad type is a non-nil placeholder type when we don't know a type.
 type Bad struct {
-	ImplementsType
 	Msg string // for better error reporting/debugging
 }
 
@@ -76,9 +56,12 @@ func (b *Bad) String() string {
     return fmt.Sprint("Bad(", b.Msg, ")")
 }
 
+func (b *Bad) LLVMType() llvm.Type {
+    return llvm.Type{nil}
+}
+
 // A Basic represents a (unnamed) basic type.
 type Basic struct {
-	ImplementsType
     Kind BasicTypeKind 
 	// TODO(gri) need a field specifying the exact basic type
 }
@@ -89,13 +72,13 @@ func (b *Basic) String() string {
 
 func (b *Basic) LLVMType() llvm.Type {
     switch b.Kind {
-    case Bool: return llvm.Int1Type()
-    case Byte, Int8, Uint8: return llvm.Int8Type()
-    case Int16, Uint16: return llvm.Int16Type()
-    case Uintptr, Int, Int32, Uint, Uint32: return llvm.Int32Type()
-    case Int64, Uint64: return llvm.Int64Type()
-    case Float32: return llvm.FloatType()
-    case Float64: return llvm.DoubleType()
+    case BoolKind: return llvm.Int1Type()
+    case Int8Kind, Uint8Kind: return llvm.Int8Type()
+    case Int16Kind, Uint16Kind: return llvm.Int16Type()
+    case UintptrKind, Int32Kind, Uint32Kind: return llvm.Int32Type()
+    case Int64Kind, Uint64Kind: return llvm.Int64Type()
+    case Float32Kind: return llvm.FloatType()
+    case Float64Kind: return llvm.DoubleType()
     //case Complex64: TODO
     //case Complex128:
     //case UntypedInt:
@@ -108,7 +91,6 @@ func (b *Basic) LLVMType() llvm.Type {
 
 // An Array represents an array type [Len]Elt.
 type Array struct {
-	ImplementsType
 	Len uint64
 	Elt Type
 }
@@ -123,8 +105,16 @@ func (a *Array) LLVMType() llvm.Type {
 
 // A Slice represents a slice type []Elt.
 type Slice struct {
-	ImplementsType
 	Elt Type
+}
+
+func (s *Slice) LLVMType() llvm.Type {
+    elements := []llvm.Type{
+        llvm.PointerType(s.Elt.LLVMType(), 0),
+        llvm.Int32Type(),
+        llvm.Int32Type(),
+    }
+    return llvm.StructType(elements, false)
 }
 
 func (s *Slice) String() string {
@@ -134,7 +124,6 @@ func (s *Slice) String() string {
 // A Struct represents a struct type struct{...}.
 // Anonymous fields are represented by objects with empty names.
 type Struct struct {
-	ImplementsType
 	Fields ObjList  // struct fields; or nil
 	Tags   []string // corresponding tags; or nil
 	// TODO(gri) This type needs some rethinking:
@@ -158,7 +147,6 @@ func (s *Struct) LLVMType() llvm.Type {
 
 // A Pointer represents a pointer type *Base.
 type Pointer struct {
-	ImplementsType
 	Base Type
 }
 
@@ -173,7 +161,6 @@ func (p *Pointer) LLVMType() llvm.Type {
 // A Func represents a function type func(...) (...).
 // Unnamed parameters are represented by objects with empty names.
 type Func struct {
-	ImplementsType
 	Recv       *ast.Object // nil if not a method
 	Params     ObjList     // (incoming) parameters from left to right; or nil
 	Results    ObjList     // (outgoing) results from left to right; or nil
@@ -204,10 +191,14 @@ func (f *Func) LLVMType() llvm.Type {
     case 0: return_type = llvm.VoidType()
     case 1: return_type = (f.Results[0].Type.(Type)).LLVMType()
     default:
-        panic("unimplemented")
+        elements := make([]llvm.Type, len(f.Results))
+        for i, result := range f.Results {
+            elements[i] = result.Type.(Type).LLVMType()
+        }
+        return_type = llvm.StructType(elements, false)
     }
 
-    return llvm.FunctionType(return_type, param_types, f.IsVariadic)
+    return llvm.FunctionType(return_type, param_types, false)
 
 /*
     if fn_name == "init" {
@@ -238,7 +229,6 @@ func (f *Func) LLVMType() llvm.Type {
 
 // An Interface represents an interface type interface{...}.
 type Interface struct {
-	ImplementsType
 	Methods ObjList // interface methods sorted by name; or nil
 }
 
@@ -246,9 +236,13 @@ func (i *Interface) String() string {
     return fmt.Sprint("Interface(", i.Methods, ")")
 }
 
+func (i *Interface) LLVMType() llvm.Type {
+    ptr_type := llvm.PointerType(llvm.Int8Type(), 0)
+    return llvm.ArrayType(ptr_type, 2)
+}
+
 // A Map represents a map type map[Key]Elt.
 type Map struct {
-	ImplementsType
 	Key, Elt Type
 }
 
@@ -256,9 +250,12 @@ func (m *Map) String() string {
     return fmt.Sprint("Map(", m.Key, ", ", m.Elt, ")")
 }
 
+func (m *Map) LLVMType() llvm.Type {
+    return llvm.Type{nil} // TODO
+}
+
 // A Chan represents a channel type chan Elt, <-chan Elt, or chan<-Elt.
 type Chan struct {
-	ImplementsType
 	Dir ast.ChanDir
 	Elt Type
 }
@@ -267,9 +264,12 @@ func (c *Chan) String() string {
     return fmt.Sprint("Chan(", c.Dir, ", ", c.Elt, ")")
 }
 
+func (c *Chan) LLVMType() llvm.Type {
+    return llvm.Type{nil} // TODO
+}
+
 // A Name represents a named type as declared in a type declaration.
 type Name struct {
-	ImplementsType
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
 	// TODO(gri) need to remember fields and methods.

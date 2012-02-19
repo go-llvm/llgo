@@ -26,6 +26,7 @@ import (
     "fmt"
     "go/ast"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
@@ -88,7 +89,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
     }
 
     switch typ := typ.(type) {
-    case *Array: {
+    case *types.Array: {
         typ.Len = uint64(len(values))
         elttype := typ.Elt
         llvm_values := make([]llvm.Value, len(values))

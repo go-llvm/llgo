@@ -26,23 +26,23 @@ import (
     "fmt"
     "go/ast"
     "go/token"
-    "go/types"
     "reflect"
     "strconv"
     "github.com/axw/gollvm/llvm"
+    "github.com/axw/llgo/types"
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     // Get the function type. The function type will be cached in f.Name.Obj,
     // so check that first.
-    var fn_type *Func
+    var fn_type *types.Func
     if f.Name.Obj != nil {
         if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
             return result
         }
         type_ := c.ObjGetType(f.Name.Obj)
         if type_ != nil {
-            fn_type = type_.(*Func)
+            fn_type = type_.(*types.Func)
         }
     }
     if fn_type == nil {
@@ -51,7 +51,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     fn_name := f.Name.String()
 
     // Add receiver.
-    if f.Recv != nil {
+    if fn_type.Recv == nil && f.Recv != nil {
         ident := f.Recv.List[0].Names[0]
         if ident != nil {
             fn_type.Recv = ident.Obj
@@ -70,7 +70,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 
     // llvm.AddFunction returns a pointer-to-function, so change the
     // result type to a Pointer.
-    fn_ptr_type := &Pointer{Base: fn_type}
+    fn_ptr_type := &types.Pointer{Base: fn_type}
     result := NewLLVMValue(c.builder, fn, fn_ptr_type)
     if f.Name.Obj != nil {
         f.Name.Obj.Data = result
@@ -84,7 +84,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     fn, _ := c.Lookup(name)
     if fn == nil {fn = c.VisitFuncProtoDecl(f)}
 
-    fn_type := Deref(fn.Type()).(*Func)
+    fn_type := types.Deref(fn.Type()).(*types.Func)
     llvm_fn := fn.LLVMValue()
 
     entry := llvm.AddBasicBlock(llvm_fn, "entry")
@@ -96,23 +96,25 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     if f.Recv != nil {
         param_0 := llvm_fn.Param(0)
         recv_obj := fn_type.Recv
-        recv_type := recv_obj.Type.(Type)
-        stack_value := c.builder.CreateAlloca(recv_type.LLVMType(), recv_obj.Name)
+        recv_type := recv_obj.Type.(types.Type)
+        stack_value := c.builder.CreateAlloca(
+            recv_type.LLVMType(), recv_obj.Name)
         c.builder.CreateStore(param_0, stack_value)
-        value := NewLLVMValue(c.builder, stack_value, &Pointer{Base: recv_type})
+        value := NewLLVMValue(
+            c.builder, stack_value, &types.Pointer{Base: recv_type})
         value.indirect = true
         recv_obj.Data = value
         param_i++
     }
     for _, param := range fn_type.Params {
         name := param.Name
-        param_type := param.Type.(Type)
+        param_type := param.Type.(types.Type)
         param_value := llvm_fn.Param(param_i)
         if name != "_" {
             stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
             c.builder.CreateStore(param_value, stack_value)
             value := NewLLVMValue(c.builder, stack_value,
-                                  &Pointer{Base:param_type})
+                                  &types.Pointer{Base:param_type})
             value.indirect = true
             param.Data = value
         }
@@ -141,17 +143,19 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     return fn
 }
 
-func isArray(t Type) bool {
-    _, isarray := t.(*Array)
+func isArray(t types.Type) bool {
+    _, isarray := t.(*types.Array)
     return isarray
 }
 
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
-func (c *compiler) createGlobal(e ast.Expr, t Type, name string) (g *LLVMValue) {
+func (c *compiler) createGlobal(e ast.Expr,
+                                t types.Type,
+                                name string) (g *LLVMValue) {
     if e == nil {
         gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-        g = NewLLVMValue(c.builder, gv, &Pointer{Base: t})
+        g = NewLLVMValue(c.builder, gv, &types.Pointer{Base: t})
         g.indirect = !isArray(t)
         return g
     }
@@ -159,7 +163,7 @@ func (c *compiler) createGlobal(e ast.Expr, t Type, name string) (g *LLVMValue) 
     if block := c.builder.GetInsertBlock(); !block.IsNil() {
         defer c.builder.SetInsertPointAtEnd(block)
     }
-    fn_type := new(Func)
+    fn_type := new(types.Func)
     fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
     entry := llvm.AddBasicBlock(fn, "entry")
     c.builder.SetInsertPointAtEnd(entry)
@@ -192,7 +196,7 @@ func (c *compiler) createGlobal(e ast.Expr, t Type, name string) (g *LLVMValue) 
     // we'll have to do the assignment in a global constructor
     // function.
     gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-    g = NewLLVMValue(c.builder, gv, &Pointer{Base: t})
+    g = NewLLVMValue(c.builder, gv, &types.Pointer{Base: t})
     g.indirect = !isArray(t)
     if isconst {
         // Initialiser is constant; discard function and return
@@ -213,7 +217,7 @@ func (c *compiler) createGlobal(e ast.Expr, t Type, name string) (g *LLVMValue) 
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-    var value_type Type
+    var value_type types.Type
     if valspec.Type != nil {
         value_type = c.GetType(valspec.Type)
     }
@@ -232,7 +236,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
         if isconst {
             if iota_, isint := (name_.Obj.Data).(int); isint {
                 iota_value := NewConstValue(token.INT, strconv.Itoa(iota_))
-                iota_value.typ.Kind = UntypedInt
+                iota_value.typ.Kind = types.UntypedIntKind
                 iota_obj.Data = iota_value
 
                 // Con objects with an iota have an embedded ValueSpec
@@ -283,7 +287,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                     llvm_init = init_.Convert(value_type).LLVMValue()
                 }
                 c.builder.CreateStore(llvm_init, stack_value)
-                value_type = &Pointer{Base: value_type}
+                value_type = &types.Pointer{Base: value_type}
                 llvm_value := NewLLVMValue(c.builder, stack_value, value_type)
                 llvm_value.indirect = true
                 value = llvm_value
@@ -311,24 +315,25 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
 func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
     obj := spec.Name.Obj
-    type_, istype := (obj.Type).(Type)
+    type_, istype := (obj.Type).(types.Type)
     if !istype {
         type_ = c.GetType(spec.Type)
-        obj.Type = &Name{Underlying: type_, Obj: obj}
+        obj.Type = &types.Name{Underlying: type_, Obj: obj}
     }
 }
 
 func (c *compiler) VisitImportSpec(spec *ast.ImportSpec) {
-    // TODO we will need to create our own Importer.
+/*
     path, err := strconv.Unquote(spec.Path.Value)
     if err != nil {panic(err)}
+    imported := c.pkg.Imports[path]
     pkg, err := types.GcImporter(c.imports, path)
     if err != nil {panic(err)}
 
     // TODO handle spec.Name (local package name), if not nil
-
     // Insert the package object into the scope.
     c.filescope.Outer.Insert(pkg)
+*/
 }
 
 func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
