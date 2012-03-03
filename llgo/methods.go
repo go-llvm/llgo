@@ -44,9 +44,15 @@ func (c *compiler) fixMethodDecls(file *ast.File) {
             // Record the FuncDecl's AST object in the type's methodset.
             if ptr, isptr := typ.(*types.Pointer); isptr {
                 typ := ptr.Base
+                if name, isname := typ.(*types.Name); isname {
+                    typ = name.Underlying
+                }
                 typeinfo := c.types.lookup(typ)
                 typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj
             } else {
+                if name, isname := typ.(*types.Name); isname {
+                    typ = name.Underlying
+                }
                 typeinfo := c.types.lookup(typ)
                 typeinfo.methods[funcdecl.Name.String()] = funcdecl.Name.Obj
             }

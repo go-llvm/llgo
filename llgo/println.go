@@ -129,8 +129,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
     args[0] = c.builder.CreateGlobalStringPtr(format, "")
 
     printf := getprintf(c.module.Module)
-    return NewLLVMValue(c.builder,
-        c.builder.CreateCall(printf, args, ""), types.Int32)
+    return NewLLVMValue(c, c.builder.CreateCall(printf, args, ""), types.Int32)
 }
 
 // vim: set ft=go :

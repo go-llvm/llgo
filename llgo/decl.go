@@ -62,16 +62,24 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     }
 
     // Make "init" functions anonymous.
-    if fn_name == "init" {fn_name = ""}
+    exported := ast.IsExported(fn_name)
+    if fn_name == "init" {
+        fn_name = ""
+    } else if c.module.Name == "main" && fn_name == "main" {
+        exported = true
+    } else {
+        pkgname := c.pkgmap[f.Name.Obj]
+        fn_name = pkgname + "." + fn_name
+    }
     fn := llvm.AddFunction(c.module.Module, fn_name, fn_type.LLVMType())
-    if c.module.Name == "main" && fn_name == "main" {
+    if exported {
         fn.SetLinkage(llvm.ExternalLinkage)
     }
 
     // llvm.AddFunction returns a pointer-to-function, so change the
     // result type to a Pointer.
     fn_ptr_type := &types.Pointer{Base: fn_type}
-    result := NewLLVMValue(c.builder, fn, fn_ptr_type)
+    result := NewLLVMValue(c, fn, fn_ptr_type)
     if f.Name.Obj != nil {
         f.Name.Obj.Data = result
         f.Name.Obj.Type = fn_ptr_type
@@ -100,8 +108,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
         stack_value := c.builder.CreateAlloca(
             recv_type.LLVMType(), recv_obj.Name)
         c.builder.CreateStore(param_0, stack_value)
-        value := NewLLVMValue(
-            c.builder, stack_value, &types.Pointer{Base: recv_type})
+        value := NewLLVMValue(c, stack_value, &types.Pointer{Base: recv_type})
         value.indirect = true
         recv_obj.Data = value
         param_i++
@@ -113,7 +120,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
         if name != "_" {
             stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
             c.builder.CreateStore(param_value, stack_value)
-            value := NewLLVMValue(c.builder, stack_value,
+            value := NewLLVMValue(c, stack_value,
                                   &types.Pointer{Base:param_type})
             value.indirect = true
             param.Data = value
@@ -155,7 +162,7 @@ func (c *compiler) createGlobal(e ast.Expr,
                                 name string) (g *LLVMValue) {
     if e == nil {
         gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-        g = NewLLVMValue(c.builder, gv, &types.Pointer{Base: t})
+        g = NewLLVMValue(c, gv, &types.Pointer{Base: t})
         g.indirect = !isArray(t)
         return g
     }
@@ -196,7 +203,7 @@ func (c *compiler) createGlobal(e ast.Expr,
     // we'll have to do the assignment in a global constructor
     // function.
     gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-    g = NewLLVMValue(c.builder, gv, &types.Pointer{Base: t})
+    g = NewLLVMValue(c, gv, &types.Pointer{Base: t})
     g.indirect = !isArray(t)
     if isconst {
         // Initialiser is constant; discard function and return
@@ -210,7 +217,7 @@ func (c *compiler) createGlobal(e ast.Expr,
     if !fn.IsNil() {
         c.builder.CreateRetVoid()
         // FIXME order global ctors
-        fn_value := NewLLVMValue(c.builder, fn, fn_type)
+        fn_value := NewLLVMValue(c, fn, fn_type)
         c.initfuncs = append(c.initfuncs, fn_value)
     }
     return g
@@ -288,7 +295,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 }
                 c.builder.CreateStore(llvm_init, stack_value)
                 value_type = &types.Pointer{Base: value_type}
-                llvm_value := NewLLVMValue(c.builder, stack_value, value_type)
+                llvm_value := NewLLVMValue(c, stack_value, value_type)
                 llvm_value.indirect = true
                 value = llvm_value
             } else { // ispackagelevel

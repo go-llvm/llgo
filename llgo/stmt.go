@@ -99,7 +99,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
                         value.Type().LLVMType(), x.Name)
                     c.builder.CreateStore(value.LLVMValue(), ptr)
                     llvm_value := NewLLVMValue(
-                        c.builder, ptr, &types.Pointer{Base: value.Type()})
+                        c, ptr, &types.Pointer{Base: value.Type()})
                     llvm_value.indirect = true
                     obj.Data = llvm_value
                 } else {

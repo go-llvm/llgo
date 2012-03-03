@@ -34,7 +34,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
     llvm_typ := typ.LLVMType()
     mem := c.builder.CreateMalloc(llvm_typ, "")
     c.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
-    return NewLLVMValue(c.builder, mem, &types.Pointer{Base: typ})
+    return NewLLVMValue(c, mem, &types.Pointer{Base: typ})
 }
 
 // vim: set ft=go :

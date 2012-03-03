@@ -47,13 +47,14 @@ func (m Module) Dispose() {
 type compiler struct {
     builder    llvm.Builder
     module     *Module
-    functions  []Value //[]llvm.Value
-    initfuncs  []Value //[]llvm.Value
+    functions  []Value
+    initfuncs  []Value
     types      TypeMap
     pkg        *ast.Package
     fileset    *token.FileSet
     filescope  *ast.Scope
     scope      *ast.Scope
+    pkgmap     map[*ast.Object]string
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -130,6 +131,23 @@ func (c *compiler) PopScope() *ast.Scope {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
+    pkgmap := make(map[*ast.Object]string)
+    for _, obj := range pkg.Scope.Objects {
+        pkgmap[obj] = pkg.Name
+    }
+    for _, pkgobj := range pkg.Imports {
+        pkgname := pkgobj.Name
+        scope := pkgobj.Data.(*ast.Scope)
+        for _, obj := range scope.Objects {
+            pkgmap[obj] = pkgname
+        }
+    }
+    return pkgmap
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err os.Error) {
     compiler := new(compiler)
     compiler.fileset = fset
@@ -152,6 +170,10 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err os.Error) {
             panic(e)
         }
     }()
+
+    // Create a mapping from objects back to packages, so we can create the
+    // appropriate symbol names.
+    compiler.pkgmap = createPackageMap(pkg)
 
     // Compile each file in the package.
     for _, file := range pkg.Files {

@@ -122,7 +122,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
         result_type = &types.Struct{Fields: fields}
     }
 
-    return NewLLVMValue(c.builder,
+    return NewLLVMValue(c,
         c.builder.CreateCall(fn.LLVMValue(), args, ""),
         result_type)
 }
@@ -193,7 +193,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     gep_indices = append(gep_indices, index.LLVMValue())
     element := c.builder.CreateGEP(ptr, gep_indices, "")
     result := c.builder.CreateLoad(element, "")
-    return NewLLVMValue(c.builder, result, result_type)
+    return NewLLVMValue(c, result, result_type)
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
@@ -243,7 +243,9 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
     // If it's a struct, look to see if it has a field with the specified name.
     name := expr.Sel.String()
     underlying := typ.(*types.Name).Underlying
-    if styp, isstruct := underlying.(*types.Struct); isstruct {
+    switch x := underlying.(type) {
+    case *types.Struct:
+        styp := x
         i := sort.Search(len(styp.Fields), func(i int) bool {
             return styp.Fields[i].Name >= name})
         if i < len(styp.Fields) && styp.Fields[i].Name == name {
@@ -251,10 +253,30 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
             indexes = append(indexes, index)
             llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
             elt_typ := styp.Fields[i].Type.(types.Type)
-            value := NewLLVMValue(
-                c.builder, llvm_value, &types.Pointer{Base: elt_typ})
+            value := NewLLVMValue(c, llvm_value, &types.Pointer{Base: elt_typ})
             value.indirect = true
             return value
+        }
+    case *types.Interface:
+        iface := x
+        i := sort.Search(len(iface.Methods), func(i int) bool {
+            return iface.Methods[i].Name >= name})
+        if i < len(iface.Methods) && iface.Methods[i].Name == name {
+            struct_value := lhs.LLVMValue()
+            receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
+            fn_value := c.builder.CreateStructGEP(struct_value, i+1, "")
+            receiver_type := &types.Pointer{Base: types.Int8}
+            method_type := *c.ObjGetType(iface.Methods[i]).(*types.Func)
+            method_type.Recv = ast.NewObj(ast.Var, "")
+            method_type.Recv.Type = receiver_type
+            method_ptr_type := &types.Pointer{Base: &method_type}
+            method := NewLLVMValue(c,
+                c.builder.CreateBitCast(
+                    c.builder.CreateLoad(fn_value, ""),
+                    method_ptr_type.LLVMType(), ""), method_ptr_type)
+            method.receiver = NewLLVMValue(c,
+                c.builder.CreateLoad(receiver_value, ""), receiver_type)
+            return method
         }
     }
 

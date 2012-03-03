@@ -238,7 +238,13 @@ func (i *Interface) String() string {
 
 func (i *Interface) LLVMType() llvm.Type {
     ptr_type := llvm.PointerType(llvm.Int8Type(), 0)
-    return llvm.ArrayType(ptr_type, 2)
+    elements := make([]llvm.Type, 1 + len(i.Methods))
+    elements[0] = ptr_type // value
+    for n, m := range i.Methods {
+        fnptr := Pointer{Base: m.Type.(Type)}
+        elements[n+1] = fnptr.LLVMType()
+    }
+    return llvm.StructType(elements, false)
 }
 
 // A Map represents a map type map[Key]Elt.

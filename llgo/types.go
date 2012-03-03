@@ -39,6 +39,7 @@ type TypeInfo struct {
 type TypeMap map[types.Type]*TypeInfo
 
 func (m *TypeMap) lookup(t types.Type) *TypeInfo {
+    if name, isname := t.(*types.Name); isname {t = name.Underlying}
     info := (*m)[t]
     if info == nil {
         info = new(TypeInfo)

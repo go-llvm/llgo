@@ -54,7 +54,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
         ptr := value.(*LLVMValue).address
         len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
         len_value := c.builder.CreateLoad(len_field, "")
-        return NewLLVMValue(c.builder, len_value, types.Int32)
+        return NewLLVMValue(c, len_value, types.Int32)
 
     case *types.Array:
         return NewConstValue(token.INT, strconv.Uitoa64(typ.Len))

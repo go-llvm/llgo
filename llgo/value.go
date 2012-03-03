@@ -57,7 +57,7 @@ type Value interface {
 }
 
 type LLVMValue struct {
-    builder  llvm.Builder
+    compiler *compiler
     value    llvm.Value
     typ      types.Type
     indirect bool
@@ -71,8 +71,8 @@ type ConstValue struct {
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
-func NewLLVMValue(b llvm.Builder, v llvm.Value, t types.Type) *LLVMValue {
-    return &LLVMValue{b, v, t, false, nil, nil}
+func NewLLVMValue(c *compiler, v llvm.Value, t types.Type) *LLVMValue {
+    return &LLVMValue{c, v, t, false, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as
@@ -99,7 +99,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
     }
 
     var result llvm.Value
-    b := lhs.builder
+    b := lhs.compiler.builder
 
     switch rhs := rhs_.(type) {
     case *LLVMValue:
@@ -126,7 +126,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(b, result, lhs.typ)
+        return NewLLVMValue(lhs.compiler, result, lhs.typ)
     case ConstValue:
         // Cast untyped rhs to lhs type.
         switch rhs.typ.Kind {
@@ -155,29 +155,93 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(b, result, lhs.typ)
+        return NewLLVMValue(lhs.compiler, result, lhs.typ)
     }
     panic("unimplemented")
 }
 
 func (v *LLVMValue) UnaryOp(op token.Token) Value {
-    b := v.builder
-    var result llvm.Value
+    b := v.compiler.builder
     switch op {
     case token.SUB:
-        result = b.CreateNeg(v.value, "")
+        if v.indirect {
+            v2 := v.Deref()
+            return NewLLVMValue(v.compiler, b.CreateNeg(v2.value, ""), v2.typ)
+        }
+        return NewLLVMValue(v.compiler, b.CreateNeg(v.value, ""), v.typ)
     case token.ADD:
-        result = v.value // No-op
+        return v // No-op
+    case token.AND:
+        if v.indirect {
+            return NewLLVMValue(v.compiler, v.value, v.typ)
+        }
+        return NewLLVMValue(v.compiler, v.address.LLVMValue(),
+                            &types.Pointer{Base: v.typ})
     default:
         panic("Unhandled operator: ")// + expr.Op)
     }
-    return NewLLVMValue(b, result, v.typ)
+    panic("unreachable")
 }
 
 func (v *LLVMValue) Convert(typ types.Type) Value {
-    if v.typ == typ {
+    if types.Identical(v.typ, typ) {
         return v
     }
+
+    if name, isname := typ.(*types.Name); isname {
+        typ = name.Underlying
+    }
+
+    srctyp := v.typ
+    if name, isname := srctyp.(*types.Name); isname {
+        srctyp = name.Underlying
+    }
+
+    // Converting to an interface type.
+    if interface_, isinterface := typ.(*types.Interface); isinterface {
+        if s, fromstruct := srctyp.(*types.Struct); fromstruct {
+            //i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+
+            // TODO check whether the functions in the struct take value or
+            // pointer receivers.
+
+            iface_elements := make([]llvm.Value, 1+len(interface_.Methods))
+
+            iface_struct_type := interface_.LLVMType()
+            element_types := iface_struct_type.StructElementTypes()
+            for i, _ := range iface_elements {
+                iface_elements[i] = llvm.ConstNull(element_types[i])
+            }
+            iface_struct := llvm.ConstStruct(iface_elements, false)
+
+            builder := v.compiler.builder
+            iface_struct = builder.CreateInsertValue(iface_struct,
+                builder.CreateBitCast(builder.CreateMalloc(
+                    srctyp.LLVMType(), ""), element_types[0], ""), 0, "")
+
+            typeinfo := v.compiler.types.lookup(s)
+            for i, m := range interface_.Methods {
+                method_obj := typeinfo.methods[m.Name]
+                if method_obj == nil {
+                    method_obj = typeinfo.ptrmethods[m.Name]
+                }
+                method := v.compiler.Resolve(method_obj).(*LLVMValue)
+                iface_struct = builder.CreateInsertValue(iface_struct,
+                    builder.CreateBitCast(
+                        method.LLVMValue(), element_types[i+1], ""), i+1, "")
+            }
+
+            return NewLLVMValue(v.compiler, iface_struct, interface_)
+
+            //iface_struct := v.compiler.builder.CreateMalloc(
+            //    iface_struct_type, "")
+            //return NewLLVMValue(v.compiler, iface_struct,
+            //                    &types.Pointer{Base: interface_})
+        }
+        // TODO handle other interface conversions (e.g. one interface to
+        // another).
+    }
+
 /*
     value_type := value.Type()
     switch value_type.TypeKind() {
@@ -189,10 +253,10 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
             switch {
             case delta == 0: return value
             // TODO handle signed/unsigned (SExt/ZExt)
-            case delta < 0: return c.builder.CreateZExt(value, totype, "")
-            case delta > 0: return c.builder.CreateTrunc(value, totype, "")
+            case delta < 0: return c.compiler.builder.CreateZExt(value, totype, "")
+            case delta > 0: return c.compiler.builder.CreateTrunc(value, totype, "")
             }
-            return LLVMValue{lhs.builder, value}
+            return LLVMValue{lhs.compiler.builder, value}
         }
     }
 */
@@ -209,8 +273,8 @@ func (v *LLVMValue) Type() types.Type {
 
 // Dereference an LLVMValue, producing a new LLVMValue.
 func (v *LLVMValue) Deref() *LLVMValue {
-    llvm_value := v.builder.CreateLoad(v.value, "")
-    value := NewLLVMValue(v.builder, llvm_value, types.Deref(v.typ))
+    llvm_value := v.compiler.builder.CreateLoad(v.value, "")
+    value := NewLLVMValue(v.compiler, llvm_value, types.Deref(v.typ))
     value.address = v
     return value
 }
@@ -235,7 +299,7 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
         }
         lhs_value := lhs.LLVMValue()
 
-        b := rhs.builder
+        b := rhs.compiler.builder
         var result llvm.Value
         switch op {
         case token.MUL:
@@ -253,7 +317,7 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(b, result, lhs.typ)
+        return NewLLVMValue(rhs.compiler, result, lhs.typ)
     case ConstValue:
         // TODO Check if either one is untyped, and convert to the other's
         // type.
