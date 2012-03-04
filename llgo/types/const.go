@@ -9,7 +9,7 @@
 package types
 
 import (
-	"big"
+	"math/big"
 	"go/token"
 	"strconv"
 )
@@ -133,6 +133,7 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 // otherwise the result is invalid.
 func (x *Const) Convert(typ *Type) *Const {
 	// TODO(gri) implement this
+/*
 	switch x := x.Val.(type) {
 	case bool:
 	case *big.Int:
@@ -141,6 +142,7 @@ func (x *Const) Convert(typ *Type) *Const {
 	case string:
 	}
     //panic("unimplemented")
+*/
 	return x
 }
 

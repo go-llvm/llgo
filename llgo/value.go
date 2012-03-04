@@ -23,9 +23,9 @@ SOFTWARE.
 package llgo
 
 import (
-    "big"
     "fmt"
     "math"
+    "math/big"
     "go/token"
     "github.com/axw/gollvm/llvm"
     "github.com/axw/llgo/types"

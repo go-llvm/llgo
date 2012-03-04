@@ -23,7 +23,7 @@ SOFTWARE.
 package llgo
 
 import (
-    "big"
+    "math/big"
     "fmt"
     "reflect"
     "sort"

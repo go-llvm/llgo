@@ -28,6 +28,7 @@ SOFTWARE.
 package main
 
 import (
+    "errors"
     "flag"
     "fmt"
     "os"
@@ -47,7 +48,7 @@ var dump *bool = flag.Bool(
 
 var exitCode = 0
 
-func report(err os.Error) {
+func report(err error) {
     scanner.PrintError(os.Stderr, err)
     exitCode = 2
 }
@@ -75,8 +76,7 @@ func parseFiles(fset *token.FileSet,
     for _, filename := range filenames {
         if file := parseFile(fset, filename); file != nil {
             if files[filename] != nil {
-                report(os.NewError(
-                    fmt.Sprintf("%q: duplicate file", filename)))
+                report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
                 continue
             }
             files[filename] = file

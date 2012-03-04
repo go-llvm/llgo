@@ -25,7 +25,6 @@ package llgo
 import (
     "go/ast"
     "go/token"
-    "os"
     "runtime"
     "github.com/axw/gollvm/llvm"
     "github.com/axw/llgo/types"
@@ -148,7 +147,7 @@ func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err os.Error) {
+func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
     compiler := new(compiler)
     compiler.fileset = fset
     compiler.pkg = pkg
