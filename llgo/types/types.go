@@ -36,8 +36,10 @@ const (
     UntypedIntKind
     UntypedFloatKind
     UntypedComplexKind
+    ByteKind
     BoolKind
     UintptrKind
+    RuneKind
     StringKind
 )
 
@@ -73,7 +75,7 @@ func (b *Basic) String() string {
 func (b *Basic) LLVMType() llvm.Type {
     switch b.Kind {
     case BoolKind: return llvm.Int1Type()
-    case Int8Kind, Uint8Kind: return llvm.Int8Type()
+    case ByteKind, Int8Kind, Uint8Kind: return llvm.Int8Type()
     case Int16Kind, Uint16Kind: return llvm.Int16Type()
     case UintptrKind, Int32Kind, Uint32Kind: return llvm.Int32Type()
     case Int64Kind, Uint64Kind: return llvm.Int64Type()
@@ -84,7 +86,11 @@ func (b *Basic) LLVMType() llvm.Type {
     //case UntypedInt:
     //case UntypedFloat:
     //case UntypedComplex:
-    //case String: TODO
+    case StringKind:
+        i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+        elements := []llvm.Type{i8ptr, llvm.Int32Type()}
+        return llvm.StructType(elements, false)
+    case RuneKind: return Int.LLVMType()
     }
     panic(fmt.Sprint("unhandled kind: ", b.Kind))
 }
@@ -181,8 +187,11 @@ func (f *Func) LLVMType() llvm.Type {
         param_types = append(param_types, recv_type.LLVMType())
     }
 
-    for _, param := range f.Params {
+    for i, param := range f.Params {
         param_type := param.Type.(Type)
+        if f.IsVariadic && i == len(f.Params)-1 {
+            param_type = &Slice{Elt: param_type}
+        }
         param_types = append(param_types, param_type.LLVMType())
     }
 

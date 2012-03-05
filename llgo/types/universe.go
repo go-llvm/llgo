@@ -60,6 +60,7 @@ var (
     Byte,
 	Bool,
     Uintptr,
+    Rune,
 	String *Name
 )
 
@@ -82,11 +83,26 @@ func init() {
     Byte = defType("byte", Uint8Kind)
 	Bool = defType("bool", BoolKind)
     Uintptr = defType("uintptr", UintptrKind)
+    Rune = defType("rune", RuneKind)
     String = defType("string", StringKind)
 
-    // TODO have this depend on 32/64-bit mode.
-    Uint = defType("uint", Uint32Kind)
-    Int = defType("int", Int32Kind)
+    // type error interface {Error() string}
+	obj := define(ast.Typ, "error")
+    errorMethod := ast.NewObj(ast.Fun, "Error")
+    errorMethod.Type = &Func{Results: ObjList([]*ast.Object{String.Obj})}
+	Error := &Name{Underlying: &Interface{
+        Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
+	obj.Type = Error
+
+    // TODO
+    is32bit := true
+    if is32bit {
+        Uint = defType("uint", Uint32Kind)
+        Int = defType("int", Int32Kind)
+    } else {
+        Uint = defType("uint", Uint64Kind)
+        Int = defType("int", Int64Kind)
+    }
 
 	defConst("true")
 	defConst("false")

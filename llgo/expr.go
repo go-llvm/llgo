@@ -77,7 +77,6 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
     }
     if fn.indirect {fn = fn.Deref()}
 
-    // TODO handle varargs
     fn_type := types.Deref(fn.Type()).(*types.Func)
     args := make([]llvm.Value, 0)
     if fn_type.Recv != nil {
@@ -97,14 +96,14 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
             args = append(args, value.Convert(param_type).LLVMValue())
         }
         if fn_type.IsVariadic {
-            param_type := fn_type.Params[nparams].Type.(*types.Slice)
+            param_type := fn_type.Params[nparams].Type.(types.Type)
             varargs := make([]llvm.Value, 0)
             for i := nparams; i < len(expr.Args); i++ {
                 value := c.VisitExpr(expr.Args[i])
                 if value_, isllvm := value.(*LLVMValue); isllvm {
                     if value_.indirect {value = value_.Deref()}
                 }
-                value = value.Convert(param_type.Elt)
+                value = value.Convert(param_type)
                 varargs = append(varargs, value.LLVMValue())
             }
             slice_value := c.makeSlice(varargs, param_type)

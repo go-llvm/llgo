@@ -103,7 +103,7 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
     case *ast.StarExpr:
         return &types.Pointer{Base: c.GetType(x.X)}
     case *ast.Ellipsis:
-        return &types.Slice{c.GetType(x.Elt)}
+        return c.GetType(x.Elt)
     default:
         panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
     }

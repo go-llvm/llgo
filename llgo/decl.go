@@ -101,6 +101,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     // Bind receiver, arguments and return values to their identifiers/objects.
     // We'll store each parameter on the stack so they're addressable.
     param_i := 0
+    param_count := llvm_fn.ParamsCount()
     if f.Recv != nil {
         param_0 := llvm_fn.Param(0)
         recv_obj := fn_type.Recv
@@ -115,9 +116,13 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
     }
     for _, param := range fn_type.Params {
         name := param.Name
-        param_type := param.Type.(types.Type)
-        param_value := llvm_fn.Param(param_i)
         if name != "_" {
+            param_type := param.Type.(types.Type)
+            if fn_type.IsVariadic && param_i == param_count-1 {
+                param_type = &types.Slice{Elt: param_type}
+            }
+
+            param_value := llvm_fn.Param(param_i)
             stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
             c.builder.CreateStore(param_value, stack_value)
             value := NewLLVMValue(c, stack_value,
