@@ -32,14 +32,14 @@ func defType(name string, kind BasicTypeKind) *Name {
 	return typ
 }
 
-func defConst(name string) {
+func defConst(name string) *ast.Object {
 	obj := define(ast.Con, name)
-	_ = obj // TODO(gri) fill in other properties
+	return obj // TODO(gri) fill in other properties
 }
 
-func defFun(name string) {
+func defFun(name string) *ast.Object {
 	obj := define(ast.Fun, name)
-	_ = obj // TODO(gri) fill in other properties
+	return obj // TODO(gri) fill in other properties
 }
 
 var (
@@ -104,8 +104,9 @@ func init() {
         Int = defType("int", Int64Kind)
     }
 
-	defConst("true")
-	defConst("false")
+	defConst("true").Data = &Const{true}
+	defConst("false").Data = &Const{false}
+
 	defConst("iota")
 	defConst("nil")
 
@@ -114,6 +115,7 @@ func init() {
 	defFun("close")
 	defFun("complex")
 	defFun("copy")
+    defFun("delete")
 	defFun("imag")
 	defFun("len")
 	defFun("make")

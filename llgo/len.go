@@ -45,19 +45,19 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
         // The values need an overhaul? Perhaps have types based on fundamental
         // types, with the additional methods to make them llgo.Value's.
         if a, isarray := typ.Base.(*types.Array); isarray {
-            return NewConstValue(token.INT, strconv.FormatUint(a.Len, 10))
+            return c.NewConstValue(token.INT, strconv.FormatUint(a.Len, 10))
         }
-        return NewConstValue(token.INT,
+        return c.NewConstValue(token.INT,
             strconv.FormatUint(uint64(unsafe.Sizeof(uintptr(0))), 10))
 
     case *types.Slice:
         ptr := value.(*LLVMValue).address
         len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
         len_value := c.builder.CreateLoad(len_field, "")
-        return NewLLVMValue(c, len_value, types.Int32)
+        return c.NewLLVMValue(len_value, types.Int32)
 
     case *types.Array:
-        return NewConstValue(token.INT, strconv.FormatUint(typ.Len, 10))
+        return c.NewConstValue(token.INT, strconv.FormatUint(typ.Len, 10))
     }
     panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }

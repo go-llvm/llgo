@@ -43,10 +43,9 @@ func getprintf(module llvm.Module) llvm.Value {
 
 func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
     var args []llvm.Value = nil
-    var format string
     if expr.Args != nil {
-        format = ""
-        args = make([]llvm.Value, len(expr.Args)+1)
+        format := ""
+        args = make([]llvm.Value, 0, len(expr.Args)+1)
         for i, expr := range expr.Args {
             value := c.VisitExpr(expr)
             // Is it a global variable or non-constant? Then we'll need to load
@@ -73,18 +72,11 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 case types.Int32Kind: format += "%d"
                 case types.Int64Kind: format += "%lld" // FIXME windows
                 case types.StringKind:
-                    // Hrm. This kinda sucks. What's the appropriate way to
-                    // automatically convert constant strings to globals?
-                    if !llvm_value.IsAConstant().IsNil() &&
-                       llvm_value.IsAGlobalValue().IsNil() {
-                        g := llvm.AddGlobal(
-                            c.module.Module, llvm_value.Type(), "")
-                        g.SetInitializer(llvm_value)
-                        g.SetGlobalConstant(true)
-                        g.SetLinkage(llvm.InternalLinkage)
-                        llvm_value = g
-                    }
-                    format += "%s"
+                    ptrval := c.builder.CreateExtractValue(llvm_value, 0, "")
+                    lenval := c.builder.CreateExtractValue(llvm_value, 1, "")
+                    llvm_value = ptrval
+                    args = append(args, lenval)
+                    format += "%*s"
                 default: panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
                 }
 
@@ -119,17 +111,17 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
                 panic(fmt.Sprint("Unhandled type kind: ", typ))
             }
 
-            args[i+1] = llvm_value
+            args = append(args, llvm_value)
         }
         format += "\n"
+        formatval := c.builder.CreateGlobalStringPtr(format, "")
+        args = append([]llvm.Value{formatval}, args...)
     } else {
-        args = make([]llvm.Value, 1)
-        format = "\n"
+        args = []llvm.Value{c.builder.CreateGlobalStringPtr("\n", "")}
     }
-    args[0] = c.builder.CreateGlobalStringPtr(format, "")
 
     printf := getprintf(c.module.Module)
-    return NewLLVMValue(c, c.builder.CreateCall(printf, args, ""), types.Int32)
+    return c.NewLLVMValue(c.builder.CreateCall(printf, args, ""), types.Int32)
 }
 
 // vim: set ft=go :

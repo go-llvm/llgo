@@ -98,8 +98,8 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
                     ptr := c.builder.CreateAlloca(
                         value.Type().LLVMType(), x.Name)
                     c.builder.CreateStore(value.LLVMValue(), ptr)
-                    llvm_value := NewLLVMValue(
-                        c, ptr, &types.Pointer{Base: value.Type()})
+                    llvm_value := c.NewLLVMValue(
+                        ptr, &types.Pointer{Base: value.Type()})
                     llvm_value.indirect = true
                     obj.Data = llvm_value
                 } else {

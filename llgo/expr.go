@@ -25,7 +25,6 @@ package llgo
 import (
     "fmt"
     "go/ast"
-    //"go/token"
     "reflect"
     "sort"
     "github.com/axw/gollvm/llvm"
@@ -57,10 +56,10 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
         case "len": return c.VisitLen(expr)
         case "new": return c.VisitNew(expr)
         default:
-            // Is it a type? Then this is a conversion (e.g. int(123))
-            if expr.Args != nil && len(expr.Args) == 1 {
+            // Is it a named type? Then this is a conversion (e.g. int(123))
+            if len(expr.Args) == 1 {
                 typ := c.GetType(x)
-                if typ != nil {
+                if _, ok := typ.(*types.Name); ok {
                     value := c.VisitExpr(expr.Args[0])
                     return value.Convert(typ)
                 }
@@ -121,7 +120,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
         result_type = &types.Struct{Fields: fields}
     }
 
-    return NewLLVMValue(c,
+    return c.NewLLVMValue(
         c.builder.CreateCall(fn.LLVMValue(), args, ""),
         result_type)
 }
@@ -192,7 +191,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
     gep_indices = append(gep_indices, index.LLVMValue())
     element := c.builder.CreateGEP(ptr, gep_indices, "")
     result := c.builder.CreateLoad(element, "")
-    return NewLLVMValue(c, result, result_type)
+    return c.NewLLVMValue(result, result_type)
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
@@ -252,7 +251,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
             indexes = append(indexes, index)
             llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
             elt_typ := styp.Fields[i].Type.(types.Type)
-            value := NewLLVMValue(c, llvm_value, &types.Pointer{Base: elt_typ})
+            value := c.NewLLVMValue(llvm_value, &types.Pointer{Base: elt_typ})
             value.indirect = true
             return value
         }
@@ -269,11 +268,11 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
             method_type.Recv = ast.NewObj(ast.Var, "")
             method_type.Recv.Type = receiver_type
             method_ptr_type := &types.Pointer{Base: &method_type}
-            method := NewLLVMValue(c,
+            method := c.NewLLVMValue(
                 c.builder.CreateBitCast(
                     c.builder.CreateLoad(fn_value, ""),
                     method_ptr_type.LLVMType(), ""), method_ptr_type)
-            method.receiver = NewLLVMValue(c,
+            method.receiver = c.NewLLVMValue(
                 c.builder.CreateLoad(receiver_value, ""), receiver_type)
             return method
         }

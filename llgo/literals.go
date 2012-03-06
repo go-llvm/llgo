@@ -30,7 +30,7 @@ import (
 )
 
 func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
-    return NewConstValue(lit.Kind, lit.Value)
+    return c.NewConstValue(lit.Kind, lit.Value)
 }
 
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
@@ -42,7 +42,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
     entry := llvm.AddBasicBlock(fn, "entry")
     c.builder.SetInsertPointAtEnd(entry)
 
-    fn_value := NewLLVMValue(c, fn, fn_type)
+    fn_value := c.NewLLVMValue(fn, fn_type)
     c.functions = append(c.functions, fn_value)
     c.VisitBlockStmt(lit.Body)
     if fn_type.Results == nil {
@@ -100,7 +100,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
                 llvm_values[i] = value.Convert(elttype).LLVMValue()
             }
         }
-        return NewLLVMValue(c,
+        return c.NewLLVMValue(
             llvm.ConstArray(elttype.LLVMType(), llvm_values), typ)
     }
     }

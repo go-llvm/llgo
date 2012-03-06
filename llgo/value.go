@@ -67,17 +67,18 @@ type LLVMValue struct {
 
 type ConstValue struct {
     types.Const
-    typ *types.Basic
+    compiler *compiler
+    typ      *types.Basic
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
-func NewLLVMValue(c *compiler, v llvm.Value, t types.Type) *LLVMValue {
+func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
     return &LLVMValue{c, v, t, false, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
-func NewConstValue(tok token.Token, lit string) ConstValue {
+func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
     var typ *types.Basic
     switch tok {
     case token.INT:    typ = &types.Basic{Kind: types.UntypedIntKind}
@@ -86,7 +87,7 @@ func NewConstValue(tok token.Token, lit string) ConstValue {
     case token.CHAR:   typ = &types.Basic{Kind: types.Int32Kind} // rune
     case token.STRING: typ = &types.Basic{Kind: types.StringKind}
     }
-    return ConstValue{*types.MakeConst(tok, lit), typ}
+    return ConstValue{*types.MakeConst(tok, lit), c, typ}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -126,7 +127,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(lhs.compiler, result, lhs.typ)
+        return lhs.compiler.NewLLVMValue(result, lhs.typ)
     case ConstValue:
         // Cast untyped rhs to lhs type.
         switch rhs.typ.Kind {
@@ -155,7 +156,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(lhs.compiler, result, lhs.typ)
+        return lhs.compiler.NewLLVMValue(result, lhs.typ)
     }
     panic("unimplemented")
 }
@@ -166,17 +167,17 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
     case token.SUB:
         if v.indirect {
             v2 := v.Deref()
-            return NewLLVMValue(v.compiler, b.CreateNeg(v2.value, ""), v2.typ)
+            return v.compiler.NewLLVMValue(b.CreateNeg(v2.value, ""), v2.typ)
         }
-        return NewLLVMValue(v.compiler, b.CreateNeg(v.value, ""), v.typ)
+        return v.compiler.NewLLVMValue(b.CreateNeg(v.value, ""), v.typ)
     case token.ADD:
         return v // No-op
     case token.AND:
         if v.indirect {
-            return NewLLVMValue(v.compiler, v.value, v.typ)
+            return v.compiler.NewLLVMValue(v.value, v.typ)
         }
-        return NewLLVMValue(v.compiler, v.address.LLVMValue(),
-                            &types.Pointer{Base: v.typ})
+        return v.compiler.NewLLVMValue(v.address.LLVMValue(),
+                                       &types.Pointer{Base: v.typ})
     default:
         panic("Unhandled operator: ")// + expr.Op)
     }
@@ -231,7 +232,7 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
                         method.LLVMValue(), element_types[i+1], ""), i+1, "")
             }
 
-            return NewLLVMValue(v.compiler, iface_struct, interface_)
+            return v.compiler.NewLLVMValue(iface_struct, interface_)
 
             //iface_struct := v.compiler.builder.CreateMalloc(
             //    iface_struct_type, "")
@@ -274,7 +275,7 @@ func (v *LLVMValue) Type() types.Type {
 // Dereference an LLVMValue, producing a new LLVMValue.
 func (v *LLVMValue) Deref() *LLVMValue {
     llvm_value := v.compiler.builder.CreateLoad(v.value, "")
-    value := NewLLVMValue(v.compiler, llvm_value, types.Deref(v.typ))
+    value := v.compiler.NewLLVMValue(llvm_value, types.Deref(v.typ))
     value.address = v
     return value
 }
@@ -317,24 +318,26 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
         default:
             panic("Unimplemented")
         }
-        return NewLLVMValue(rhs.compiler, result, lhs.typ)
+        return rhs.compiler.NewLLVMValue(result, lhs.typ)
     case ConstValue:
         // TODO Check if either one is untyped, and convert to the other's
         // type.
+        c := lhs.compiler
         typ := lhs.typ
-        return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), typ}
+        return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ}
     }
     panic("unimplemented")
 }
 
 func (v ConstValue) UnaryOp(op token.Token) Value {
-    return ConstValue{*v.Const.UnaryOp(op), v.typ}
+    return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ}
 }
 
 func (v ConstValue) Convert(typ types.Type) Value {
     if !types.Identical(v.typ, typ) {
         if name, isname := typ.(*types.Name); isname {typ = name.Underlying}
-        return ConstValue{*v.Const.Convert(&typ), typ.(*types.Basic)}
+        compiler := v.compiler
+        return ConstValue{*v.Const.Convert(&typ), compiler, typ.(*types.Basic)}
     }
     return v
 }
@@ -363,7 +366,15 @@ func (v ConstValue) LLVMValue() llvm.Value {
     case types.Int16Kind, types.Uint16Kind:
         return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
     case types.StringKind:
-        return llvm.ConstString((v.Val).(string), true)
+        strval := (v.Val).(string)
+        ptr := v.compiler.builder.CreateGlobalStringPtr(strval, "")
+        len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(strval)), false)
+        return llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
+    case types.BoolKind:
+        if v := v.Val.(bool); v {
+            return llvm.ConstAllOnes(llvm.Int1Type())
+        }
+        return llvm.ConstNull(llvm.Int1Type())
     }
     panic("Unhandled type")
 }

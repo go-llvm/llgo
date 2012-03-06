@@ -25,6 +25,7 @@ package llgo
 import (
     "fmt"
     "go/ast"
+    "go/scanner"
     "go/token"
     "reflect"
     "strconv"
@@ -79,7 +80,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
     // llvm.AddFunction returns a pointer-to-function, so change the
     // result type to a Pointer.
     fn_ptr_type := &types.Pointer{Base: fn_type}
-    result := NewLLVMValue(c, fn, fn_ptr_type)
+    result := c.NewLLVMValue(fn, fn_ptr_type)
     if f.Name.Obj != nil {
         f.Name.Obj.Data = result
         f.Name.Obj.Type = fn_ptr_type
@@ -109,7 +110,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
         stack_value := c.builder.CreateAlloca(
             recv_type.LLVMType(), recv_obj.Name)
         c.builder.CreateStore(param_0, stack_value)
-        value := NewLLVMValue(c, stack_value, &types.Pointer{Base: recv_type})
+        value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
         value.indirect = true
         recv_obj.Data = value
         param_i++
@@ -125,7 +126,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
             param_value := llvm_fn.Param(param_i)
             stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
             c.builder.CreateStore(param_value, stack_value)
-            value := NewLLVMValue(c, stack_value,
+            value := c.NewLLVMValue(stack_value,
                                   &types.Pointer{Base:param_type})
             value.indirect = true
             param.Data = value
@@ -167,7 +168,7 @@ func (c *compiler) createGlobal(e ast.Expr,
                                 name string) (g *LLVMValue) {
     if e == nil {
         gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-        g = NewLLVMValue(c, gv, &types.Pointer{Base: t})
+        g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
         g.indirect = !isArray(t)
         return g
     }
@@ -208,7 +209,7 @@ func (c *compiler) createGlobal(e ast.Expr,
     // we'll have to do the assignment in a global constructor
     // function.
     gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-    g = NewLLVMValue(c, gv, &types.Pointer{Base: t})
+    g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
     g.indirect = !isArray(t)
     if isconst {
         // Initialiser is constant; discard function and return
@@ -222,7 +223,7 @@ func (c *compiler) createGlobal(e ast.Expr,
     if !fn.IsNil() {
         c.builder.CreateRetVoid()
         // FIXME order global ctors
-        fn_value := NewLLVMValue(c, fn, fn_type)
+        fn_value := c.NewLLVMValue(fn, fn_type)
         c.initfuncs = append(c.initfuncs, fn_value)
     }
     return g
@@ -247,7 +248,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
         // Set iota if necessary.
         if isconst {
             if iota_, isint := (name_.Obj.Data).(int); isint {
-                iota_value := NewConstValue(token.INT, strconv.Itoa(iota_))
+                iota_value := c.NewConstValue(token.INT, strconv.Itoa(iota_))
                 iota_value.typ.Kind = types.UntypedIntKind
                 iota_obj.Data = iota_value
 
@@ -300,7 +301,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
                 }
                 c.builder.CreateStore(llvm_init, stack_value)
                 value_type = &types.Pointer{Base: value_type}
-                llvm_value := NewLLVMValue(c, stack_value, value_type)
+                llvm_value := c.NewLLVMValue(stack_value, value_type)
                 llvm_value.indirect = true
                 value = llvm_value
             } else { // ispackagelevel
@@ -374,6 +375,16 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 }
 
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
+    // This is temporary. We'll return errors later, rather than panicking.
+    //fmt.Println(c.fileset.Position(decl.Pos()))
+    defer func() {
+        if e := recover(); e != nil {
+            elist := new(scanner.ErrorList)
+            elist.Add(c.fileset.Position(decl.Pos()), fmt.Sprint(e))
+            panic(elist)
+        }
+    }()
+
     switch x := decl.(type) {
     case *ast.FuncDecl: return c.VisitFuncDecl(x)
     case *ast.GenDecl: {

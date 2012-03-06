@@ -80,9 +80,12 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
             c.VisitValueSpec(valspec, true)
             value = (obj.Data).(Value)
         } else {
-            value = &ConstValue{
-                *(obj.Data.(*types.Const)),
-                obj.Type.(*types.Basic)}
+            var typ *types.Basic
+            switch x := obj.Type.(type) {
+            case *types.Basic: typ = x
+            case *types.Name: typ = x.Underlying.(*types.Basic)
+            }
+            value = &ConstValue{*(obj.Data.(*types.Const)), c, typ}
             obj.Data = value
         }
     case ast.Fun:
@@ -167,6 +170,7 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
         if e := recover(); e != nil {
             compiler.module.Dispose()
             panic(e)
+            //err = e.(error)
         }
     }()
 
