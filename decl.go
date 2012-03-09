@@ -23,379 +23,386 @@ SOFTWARE.
 package llgo
 
 import (
-    "fmt"
-    "go/ast"
-    "go/scanner"
-    "go/token"
-    "reflect"
-    "strconv"
-    "github.com/axw/gollvm/llvm"
-    "github.com/axw/llgo/types"
+	"fmt"
+	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo/types"
+	"go/ast"
+	"go/scanner"
+	"go/token"
+	"reflect"
+	"strconv"
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
-    // Get the function type. The function type will be cached in f.Name.Obj,
-    // so check that first.
-    var fn_type *types.Func
-    if f.Name.Obj != nil {
-        if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
-            return result
-        }
-        type_ := c.ObjGetType(f.Name.Obj)
-        if type_ != nil {
-            fn_type = type_.(*types.Func)
-        }
-    }
-    if fn_type == nil {
-        fn_type = c.VisitFuncType(f.Type)
-    }
-    fn_name := f.Name.String()
+	// Get the function type. The function type will be cached in f.Name.Obj,
+	// so check that first.
+	var fn_type *types.Func
+	if f.Name.Obj != nil {
+		if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
+			return result
+		}
+		type_ := c.ObjGetType(f.Name.Obj)
+		if type_ != nil {
+			fn_type = type_.(*types.Func)
+		}
+	}
+	if fn_type == nil {
+		fn_type = c.VisitFuncType(f.Type)
+	}
+	fn_name := f.Name.String()
 
-    // Add receiver.
-    if fn_type.Recv == nil && f.Recv != nil {
-        ident := f.Recv.List[0].Names[0]
-        if ident != nil {
-            fn_type.Recv = ident.Obj
-        } else {
-            fn_type.Recv = ast.NewObj(ast.Var, "_")
-        }
-        fn_type.Recv.Type = c.GetType(f.Recv.List[0].Type)
-    }
+	// Add receiver.
+	if fn_type.Recv == nil && f.Recv != nil {
+		ident := f.Recv.List[0].Names[0]
+		if ident != nil {
+			fn_type.Recv = ident.Obj
+		} else {
+			fn_type.Recv = ast.NewObj(ast.Var, "_")
+		}
+		fn_type.Recv.Type = c.GetType(f.Recv.List[0].Type)
+	}
 
-    // Make "init" functions anonymous.
-    exported := ast.IsExported(fn_name)
-    if fn_name == "init" {
-        fn_name = ""
-    } else if c.module.Name == "main" && fn_name == "main" {
-        exported = true
-    } else {
-        pkgname := c.pkgmap[f.Name.Obj]
-        fn_name = pkgname + "." + fn_name
-    }
-    fn := llvm.AddFunction(c.module.Module, fn_name, fn_type.LLVMType())
-    if exported {
-        fn.SetLinkage(llvm.ExternalLinkage)
-    }
+	// Make "init" functions anonymous.
+	exported := ast.IsExported(fn_name)
+	if fn_name == "init" {
+		fn_name = ""
+	} else if c.module.Name == "main" && fn_name == "main" {
+		exported = true
+	} else {
+		pkgname := c.pkgmap[f.Name.Obj]
+		fn_name = pkgname + "." + fn_name
+	}
+	fn := llvm.AddFunction(c.module.Module, fn_name, fn_type.LLVMType())
+	if exported {
+		fn.SetLinkage(llvm.ExternalLinkage)
+	}
 
-    // llvm.AddFunction returns a pointer-to-function, so change the
-    // result type to a Pointer.
-    fn_ptr_type := &types.Pointer{Base: fn_type}
-    result := c.NewLLVMValue(fn, fn_ptr_type)
-    if f.Name.Obj != nil {
-        f.Name.Obj.Data = result
-        f.Name.Obj.Type = fn_ptr_type
-    }
-    return result
+	// llvm.AddFunction returns a pointer-to-function, so change the
+	// result type to a Pointer.
+	fn_ptr_type := &types.Pointer{Base: fn_type}
+	result := c.NewLLVMValue(fn, fn_ptr_type)
+	if f.Name.Obj != nil {
+		f.Name.Obj.Data = result
+		f.Name.Obj.Type = fn_ptr_type
+	}
+	return result
 }
 
 func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
-    name := f.Name.String()
-    fn, _ := c.Lookup(name)
-    if fn == nil {fn = c.VisitFuncProtoDecl(f)}
+	name := f.Name.String()
+	fn, _ := c.Lookup(name)
+	if fn == nil {
+		fn = c.VisitFuncProtoDecl(f)
+	}
 
-    fn_type := types.Deref(fn.Type()).(*types.Func)
-    llvm_fn := fn.LLVMValue()
+	fn_type := types.Deref(fn.Type()).(*types.Func)
+	llvm_fn := fn.LLVMValue()
 
-    entry := llvm.AddBasicBlock(llvm_fn, "entry")
-    c.builder.SetInsertPointAtEnd(entry)
+	entry := llvm.AddBasicBlock(llvm_fn, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
 
-    // Bind receiver, arguments and return values to their identifiers/objects.
-    // We'll store each parameter on the stack so they're addressable.
-    param_i := 0
-    param_count := llvm_fn.ParamsCount()
-    if f.Recv != nil {
-        param_0 := llvm_fn.Param(0)
-        recv_obj := fn_type.Recv
-        recv_type := recv_obj.Type.(types.Type)
-        stack_value := c.builder.CreateAlloca(
-            recv_type.LLVMType(), recv_obj.Name)
-        c.builder.CreateStore(param_0, stack_value)
-        value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
-        value.indirect = true
-        recv_obj.Data = value
-        param_i++
-    }
-    for _, param := range fn_type.Params {
-        name := param.Name
-        if name != "_" {
-            param_type := param.Type.(types.Type)
-            if fn_type.IsVariadic && param_i == param_count-1 {
-                param_type = &types.Slice{Elt: param_type}
-            }
+	// Bind receiver, arguments and return values to their identifiers/objects.
+	// We'll store each parameter on the stack so they're addressable.
+	param_i := 0
+	param_count := llvm_fn.ParamsCount()
+	if f.Recv != nil {
+		param_0 := llvm_fn.Param(0)
+		recv_obj := fn_type.Recv
+		recv_type := recv_obj.Type.(types.Type)
+		stack_value := c.builder.CreateAlloca(
+			recv_type.LLVMType(), recv_obj.Name)
+		c.builder.CreateStore(param_0, stack_value)
+		value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
+		value.indirect = true
+		recv_obj.Data = value
+		param_i++
+	}
+	for _, param := range fn_type.Params {
+		name := param.Name
+		if name != "_" {
+			param_type := param.Type.(types.Type)
+			if fn_type.IsVariadic && param_i == param_count-1 {
+				param_type = &types.Slice{Elt: param_type}
+			}
 
-            param_value := llvm_fn.Param(param_i)
-            stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
-            c.builder.CreateStore(param_value, stack_value)
-            value := c.NewLLVMValue(stack_value,
-                                  &types.Pointer{Base:param_type})
-            value.indirect = true
-            param.Data = value
-        }
-        param_i++
-    }
+			param_value := llvm_fn.Param(param_i)
+			stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
+			c.builder.CreateStore(param_value, stack_value)
+			value := c.NewLLVMValue(stack_value,
+				&types.Pointer{Base: param_type})
+			value.indirect = true
+			param.Data = value
+		}
+		param_i++
+	}
 
-    c.functions = append(c.functions, fn)
-    if f.Body != nil {c.VisitBlockStmt(f.Body)}
-    c.functions = c.functions[0:len(c.functions)-1]
+	c.functions = append(c.functions, fn)
+	if f.Body != nil {
+		c.VisitBlockStmt(f.Body)
+	}
+	c.functions = c.functions[0 : len(c.functions)-1]
 
-    last_block := llvm_fn.LastBasicBlock()
-    lasti := last_block.LastInstruction()
-    if lasti.IsNil() || lasti.InstructionOpcode() != llvm.Ret {
-        // Assume nil return type, AST should be checked first.
-        c.builder.CreateRetVoid()
-    }
+	last_block := llvm_fn.LastBasicBlock()
+	lasti := last_block.LastInstruction()
+	if lasti.IsNil() || lasti.InstructionOpcode() != llvm.Ret {
+		// Assume nil return type, AST should be checked first.
+		c.builder.CreateRetVoid()
+	}
 
-    // Is it an 'init' function? Then record it.
-    if name == "init" {
-        c.initfuncs = append(c.initfuncs, fn)
-    } else {
-        //if obj != nil {
-        //    obj.Data = fn
-        //}
-    }
-    return fn
+	// Is it an 'init' function? Then record it.
+	if name == "init" {
+		c.initfuncs = append(c.initfuncs, fn)
+	} else {
+		//if obj != nil {
+		//    obj.Data = fn
+		//}
+	}
+	return fn
 }
 
 func isArray(t types.Type) bool {
-    _, isarray := t.(*types.Array)
-    return isarray
+	_, isarray := t.(*types.Array)
+	return isarray
 }
 
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
 func (c *compiler) createGlobal(e ast.Expr,
-                                t types.Type,
-                                name string) (g *LLVMValue) {
-    if e == nil {
-        gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-        g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-        g.indirect = !isArray(t)
-        return g
-    }
+	t types.Type,
+	name string) (g *LLVMValue) {
+	if e == nil {
+		gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
+		g.indirect = !isArray(t)
+		return g
+	}
 
-    if block := c.builder.GetInsertBlock(); !block.IsNil() {
-        defer c.builder.SetInsertPointAtEnd(block)
-    }
-    fn_type := new(types.Func)
-    fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
-    entry := llvm.AddBasicBlock(fn, "entry")
-    c.builder.SetInsertPointAtEnd(entry)
+	if block := c.builder.GetInsertBlock(); !block.IsNil() {
+		defer c.builder.SetInsertPointAtEnd(block)
+	}
+	fn_type := new(types.Func)
+	fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
+	entry := llvm.AddBasicBlock(fn, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
 
-    // Visit the expression. Dereference if necessary, and generalise
-    // the type if one hasn't been specified.
-    init_ := c.VisitExpr(e)
-    isconst := false
-    if value, isllvm := init_.(*LLVMValue); isllvm {
-        if value.indirect {
-            init_ = value.Deref()
-        }
-    } else {
-        isconst = true
-    }
-    if t == nil {
-        t = init_.Type()
-    } else {
-        init_ = init_.Convert(t)
-    }
+	// Visit the expression. Dereference if necessary, and generalise
+	// the type if one hasn't been specified.
+	init_ := c.VisitExpr(e)
+	isconst := false
+	if value, isllvm := init_.(*LLVMValue); isllvm {
+		if value.indirect {
+			init_ = value.Deref()
+		}
+	} else {
+		isconst = true
+	}
+	if t == nil {
+		t = init_.Type()
+	} else {
+		init_ = init_.Convert(t)
+	}
 
-    // If the result is a constant, discard the function before
-    // creating any llvm.Value's.
-    if isconst {
-        fn.EraseFromParentAsFunction()
-        fn = llvm.Value{nil}
-    }
+	// If the result is a constant, discard the function before
+	// creating any llvm.Value's.
+	if isconst {
+		fn.EraseFromParentAsFunction()
+		fn = llvm.Value{nil}
+	}
 
-    // Set the initialiser. If it's a non-const value, then
-    // we'll have to do the assignment in a global constructor
-    // function.
-    gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
-    g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-    g.indirect = !isArray(t)
-    if isconst {
-        // Initialiser is constant; discard function and return
-        // global now.
-        gv.SetInitializer(init_.LLVMValue())
-    } else {
-        gv.SetInitializer(llvm.ConstNull(t.LLVMType()))
-        c.builder.CreateStore(init_.LLVMValue(), gv)
-    }
+	// Set the initialiser. If it's a non-const value, then
+	// we'll have to do the assignment in a global constructor
+	// function.
+	gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
+	g.indirect = !isArray(t)
+	if isconst {
+		// Initialiser is constant; discard function and return
+		// global now.
+		gv.SetInitializer(init_.LLVMValue())
+	} else {
+		gv.SetInitializer(llvm.ConstNull(t.LLVMType()))
+		c.builder.CreateStore(init_.LLVMValue(), gv)
+	}
 
-    if !fn.IsNil() {
-        c.builder.CreateRetVoid()
-        // FIXME order global ctors
-        fn_value := c.NewLLVMValue(fn, fn_type)
-        c.initfuncs = append(c.initfuncs, fn_value)
-    }
-    return g
+	if !fn.IsNil() {
+		c.builder.CreateRetVoid()
+		// FIXME order global ctors
+		fn_value := c.NewLLVMValue(fn, fn_type)
+		c.initfuncs = append(c.initfuncs, fn_value)
+	}
+	return g
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-    var value_type types.Type
-    if valspec.Type != nil {
-        value_type = c.GetType(valspec.Type)
-    }
+	var value_type types.Type
+	if valspec.Type != nil {
+		value_type = c.GetType(valspec.Type)
+	}
 
-    var iota_obj *ast.Object = types.Universe.Lookup("iota")
-    defer func(data interface{}) {
-        iota_obj.Data = data
-    }(iota_obj.Data)
+	var iota_obj *ast.Object = types.Universe.Lookup("iota")
+	defer func(data interface{}) {
+		iota_obj.Data = data
+	}(iota_obj.Data)
 
-    for i, name_ := range valspec.Names {
-        // We may resolve constants in the process of resolving others.
-        obj := name_.Obj
-        if _, isvalue := (obj.Data).(Value); isvalue {continue}
+	for i, name_ := range valspec.Names {
+		// We may resolve constants in the process of resolving others.
+		obj := name_.Obj
+		if _, isvalue := (obj.Data).(Value); isvalue {
+			continue
+		}
 
-        // Set iota if necessary.
-        if isconst {
-            if iota_, isint := (name_.Obj.Data).(int); isint {
-                iota_value := c.NewConstValue(token.INT, strconv.Itoa(iota_))
-                iota_value.typ.Kind = types.UntypedIntKind
-                iota_obj.Data = iota_value
+		// Set iota if necessary.
+		if isconst {
+			if iota_, isint := (name_.Obj.Data).(int); isint {
+				iota_value := c.NewConstValue(token.INT, strconv.Itoa(iota_))
+				iota_value.typ.Kind = types.UntypedIntKind
+				iota_obj.Data = iota_value
 
-                // Con objects with an iota have an embedded ValueSpec
-                // in the Decl field. We'll just pull it out and use it
-                // for evaluating the expression below.
-                valspec = (name_.Obj.Decl).(*ast.ValueSpec)
-            }
-        }
+				// Con objects with an iota have an embedded ValueSpec
+				// in the Decl field. We'll just pull it out and use it
+				// for evaluating the expression below.
+				valspec = (name_.Obj.Decl).(*ast.ValueSpec)
+			}
+		}
 
-        // Expression may have side-effects, so compute it regardless of
-        // whether it'll be assigned to a name.
-        var expr ast.Expr
-        if i < len(valspec.Values) && valspec.Values[i] != nil {
-            expr = valspec.Values[i]
-        }
+		// Expression may have side-effects, so compute it regardless of
+		// whether it'll be assigned to a name.
+		var expr ast.Expr
+		if i < len(valspec.Values) && valspec.Values[i] != nil {
+			expr = valspec.Values[i]
+		}
 
-        // For constants, we just pass the ConstValue around. Otherwise, we
-        // will convert it to an LLVMValue.
-        var value Value
-        name := name_.String()
-        if !isconst {
-            ispackagelevel := len(c.functions) == 0
-            if !ispackagelevel {
-                // Visit the expression.
-                var init_ Value
-                if expr != nil {
-                    init_ = c.VisitExpr(expr)
-                    if value, isllvm := init_.(*LLVMValue); isllvm {
-                        if value.indirect {
-                            init_ = value.Deref()
-                        }
-                    }
-                    if value_type == nil {
-                        value_type = init_.Type()
-                    }
-                }
+		// For constants, we just pass the ConstValue around. Otherwise, we
+		// will convert it to an LLVMValue.
+		var value Value
+		name := name_.String()
+		if !isconst {
+			ispackagelevel := len(c.functions) == 0
+			if !ispackagelevel {
+				// Visit the expression.
+				var init_ Value
+				if expr != nil {
+					init_ = c.VisitExpr(expr)
+					if value, isllvm := init_.(*LLVMValue); isllvm {
+						if value.indirect {
+							init_ = value.Deref()
+						}
+					}
+					if value_type == nil {
+						value_type = init_.Type()
+					}
+				}
 
-                // The variable should be allocated on the stack if it's
-                // declared inside a function.
-                var llvm_init llvm.Value
-                stack_value := c.builder.CreateAlloca(
-                    value_type.LLVMType(), name)
-                if init_ == nil {
-                    // If no initialiser was specified, set it to the
-                    // zero value.
-                    llvm_init = llvm.ConstNull(value_type.LLVMType())
-                } else {
-                    llvm_init = init_.Convert(value_type).LLVMValue()
-                }
-                c.builder.CreateStore(llvm_init, stack_value)
-                value_type = &types.Pointer{Base: value_type}
-                llvm_value := c.NewLLVMValue(stack_value, value_type)
-                llvm_value.indirect = true
-                value = llvm_value
-            } else { // ispackagelevel
-                // Set the initialiser. If it's a non-const value, then
-                // we'll have to do the assignment in a global constructor
-                // function.
-                value = c.createGlobal(expr, value_type, name)
-                if !name_.IsExported() {
-                    value.LLVMValue().SetLinkage(llvm.InternalLinkage)
-                }
-            }
-        } else { // isconst
-            value = c.VisitExpr(expr).(ConstValue)
-            if value_type != nil {
-                value = value.Convert(value_type)
-            }
-        }
+				// The variable should be allocated on the stack if it's
+				// declared inside a function.
+				var llvm_init llvm.Value
+				stack_value := c.builder.CreateAlloca(
+					value_type.LLVMType(), name)
+				if init_ == nil {
+					// If no initialiser was specified, set it to the
+					// zero value.
+					llvm_init = llvm.ConstNull(value_type.LLVMType())
+				} else {
+					llvm_init = init_.Convert(value_type).LLVMValue()
+				}
+				c.builder.CreateStore(llvm_init, stack_value)
+				value_type = &types.Pointer{Base: value_type}
+				llvm_value := c.NewLLVMValue(stack_value, value_type)
+				llvm_value.indirect = true
+				value = llvm_value
+			} else { // ispackagelevel
+				// Set the initialiser. If it's a non-const value, then
+				// we'll have to do the assignment in a global constructor
+				// function.
+				value = c.createGlobal(expr, value_type, name)
+				if !name_.IsExported() {
+					value.LLVMValue().SetLinkage(llvm.InternalLinkage)
+				}
+			}
+		} else { // isconst
+			value = c.VisitExpr(expr).(ConstValue)
+			if value_type != nil {
+				value = value.Convert(value_type)
+			}
+		}
 
-        if name != "_" {
-            obj.Data = value
-        }
-    }
+		if name != "_" {
+			obj.Data = value
+		}
+	}
 }
 
 func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
-    obj := spec.Name.Obj
-    type_, istype := (obj.Type).(types.Type)
-    if !istype {
-        type_ = c.GetType(spec.Type)
-        obj.Type = &types.Name{Underlying: type_, Obj: obj}
-    }
+	obj := spec.Name.Obj
+	type_, istype := (obj.Type).(types.Type)
+	if !istype {
+		type_ = c.GetType(spec.Type)
+		obj.Type = &types.Name{Underlying: type_, Obj: obj}
+	}
 }
 
 func (c *compiler) VisitImportSpec(spec *ast.ImportSpec) {
-/*
-    path, err := strconv.Unquote(spec.Path.Value)
-    if err != nil {panic(err)}
-    imported := c.pkg.Imports[path]
-    pkg, err := types.GcImporter(c.imports, path)
-    if err != nil {panic(err)}
+	/*
+	   path, err := strconv.Unquote(spec.Path.Value)
+	   if err != nil {panic(err)}
+	   imported := c.pkg.Imports[path]
+	   pkg, err := types.GcImporter(c.imports, path)
+	   if err != nil {panic(err)}
 
-    // TODO handle spec.Name (local package name), if not nil
-    // Insert the package object into the scope.
-    c.filescope.Outer.Insert(pkg)
-*/
+	   // TODO handle spec.Name (local package name), if not nil
+	   // Insert the package object into the scope.
+	   c.filescope.Outer.Insert(pkg)
+	*/
 }
 
 func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
-    switch decl.Tok {
-    case token.IMPORT:
-        for _, spec := range decl.Specs {
-            importspec, _ := spec.(*ast.ImportSpec)
-            c.VisitImportSpec(importspec)
-        }
-    case token.TYPE:
-        for _, spec := range decl.Specs {
-            typespec, _ := spec.(*ast.TypeSpec)
-            c.VisitTypeSpec(typespec)
-        }
-    case token.CONST:
-        for _, spec := range decl.Specs {
-            valspec, _ := spec.(*ast.ValueSpec)
-            c.VisitValueSpec(valspec, true)
-        }
-    case token.VAR:
-        for _, spec := range decl.Specs {
-            valspec, _ := spec.(*ast.ValueSpec)
-            c.VisitValueSpec(valspec, false)
-        }
-    }
+	switch decl.Tok {
+	case token.IMPORT:
+		for _, spec := range decl.Specs {
+			importspec, _ := spec.(*ast.ImportSpec)
+			c.VisitImportSpec(importspec)
+		}
+	case token.TYPE:
+		for _, spec := range decl.Specs {
+			typespec, _ := spec.(*ast.TypeSpec)
+			c.VisitTypeSpec(typespec)
+		}
+	case token.CONST:
+		for _, spec := range decl.Specs {
+			valspec, _ := spec.(*ast.ValueSpec)
+			c.VisitValueSpec(valspec, true)
+		}
+	case token.VAR:
+		for _, spec := range decl.Specs {
+			valspec, _ := spec.(*ast.ValueSpec)
+			c.VisitValueSpec(valspec, false)
+		}
+	}
 }
 
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
-    // This is temporary. We'll return errors later, rather than panicking.
-    //fmt.Println(c.fileset.Position(decl.Pos()))
-    defer func() {
-        if e := recover(); e != nil {
-            elist := new(scanner.ErrorList)
-            elist.Add(c.fileset.Position(decl.Pos()), fmt.Sprint(e))
-            panic(elist)
-        }
-    }()
+	// This is temporary. We'll return errors later, rather than panicking.
+	//fmt.Println(c.fileset.Position(decl.Pos()))
+	defer func() {
+		if e := recover(); e != nil {
+			elist := new(scanner.ErrorList)
+			elist.Add(c.fileset.Position(decl.Pos()), fmt.Sprint(e))
+			panic(elist)
+		}
+	}()
 
-    switch x := decl.(type) {
-    case *ast.FuncDecl: return c.VisitFuncDecl(x)
-    case *ast.GenDecl: {
-        c.VisitGenDecl(x)
-        return nil
-    }
-    }
-    panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",
-                      reflect.TypeOf(decl),
-                      c.fileset.Position(decl.Pos())))
+	switch x := decl.(type) {
+	case *ast.FuncDecl:
+		return c.VisitFuncDecl(x)
+	case *ast.GenDecl:
+		{
+			c.VisitGenDecl(x)
+			return nil
+		}
+	}
+	panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",
+		reflect.TypeOf(decl),
+		c.fileset.Position(decl.Pos())))
 }
 
 // vim: set ft=go :
-

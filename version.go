@@ -23,9 +23,8 @@ SOFTWARE.
 package llgo
 
 const (
-    LLGOVersion = "0.1"
-    LLGORuntimeVersion = 0
+	LLGOVersion        = "0.1"
+	LLGORuntimeVersion = 0
 )
 
 // vim: set ft=go :
-

@@ -349,10 +349,10 @@ func (p *gcParser) parseField() (fld *ast.Object, tag string) {
 	ftyp := p.parseType()
 	if name == "" {
 		// anonymous field - ftyp must be T or *T and T must be a type name
-        ptrtyp := ftyp
-        if _, ok := ptrtyp.(*Pointer); ok {
-            ptrtyp = Deref(ptrtyp)
-        }
+		ptrtyp := ftyp
+		if _, ok := ptrtyp.(*Pointer); ok {
+			ptrtyp = Deref(ptrtyp)
+		}
 		if _, ok := ptrtyp.(*Name); !ok {
 			p.errorf("anonymous field expected")
 		}

@@ -23,27 +23,26 @@ SOFTWARE.
 package llgo
 
 import (
-    //"go/ast"
-    "github.com/axw/gollvm/llvm"
-    "github.com/axw/llgo/types"
+	//"go/ast"
+	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo/types"
 )
 
 func (c *compiler) makeSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
-    n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
-    mem := c.builder.CreateArrayMalloc(elttyp.LLVMType(), n, "")
-    for i, value := range v {
-        indices := []llvm.Value{
-            llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
-        ep := c.builder.CreateGEP(mem, indices, "")
-        c.builder.CreateStore(value, ep)
-    }
-    slicetyp := types.Slice{Elt: elttyp}
-    struct_ := c.builder.CreateAlloca(slicetyp.LLVMType(), "")
-    c.builder.CreateStore(mem, c.builder.CreateStructGEP(struct_, 0, ""))
-    c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 1, ""))
-    c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 2, ""))
-    return c.builder.CreateLoad(struct_, "")
+	n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
+	mem := c.builder.CreateArrayMalloc(elttyp.LLVMType(), n, "")
+	for i, value := range v {
+		indices := []llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
+		ep := c.builder.CreateGEP(mem, indices, "")
+		c.builder.CreateStore(value, ep)
+	}
+	slicetyp := types.Slice{Elt: elttyp}
+	struct_ := c.builder.CreateAlloca(slicetyp.LLVMType(), "")
+	c.builder.CreateStore(mem, c.builder.CreateStructGEP(struct_, 0, ""))
+	c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 1, ""))
+	c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 2, ""))
+	return c.builder.CreateLoad(struct_, "")
 }
 
 // vim: set ft=go :
-

@@ -23,42 +23,43 @@ SOFTWARE.
 package llgo
 
 import (
-    "go/ast"
-    "github.com/axw/llgo/types"
+	"github.com/axw/llgo/types"
+	"go/ast"
 )
 
 // fixMethodDecls will walk through a file and associate functions with their
 // receiver type.
 func (c *compiler) fixMethodDecls(file *ast.File) {
-    if file.Decls == nil {return}
-    for _, decl := range file.Decls {
-        if funcdecl, ok := decl.(*ast.FuncDecl); ok && funcdecl.Recv != nil {
-            field := funcdecl.Recv.List[0]
-            typ := c.GetType(field.Type)
+	if file.Decls == nil {
+		return
+	}
+	for _, decl := range file.Decls {
+		if funcdecl, ok := decl.(*ast.FuncDecl); ok && funcdecl.Recv != nil {
+			field := funcdecl.Recv.List[0]
+			typ := c.GetType(field.Type)
 
-            // The Obj field of the funcdecl wll be nil, so we'll have to
-            // create a new one.
-            funcdecl.Name.Obj = ast.NewObj(ast.Fun, funcdecl.Name.String())
-            funcdecl.Name.Obj.Decl = funcdecl
+			// The Obj field of the funcdecl wll be nil, so we'll have to
+			// create a new one.
+			funcdecl.Name.Obj = ast.NewObj(ast.Fun, funcdecl.Name.String())
+			funcdecl.Name.Obj.Decl = funcdecl
 
-            // Record the FuncDecl's AST object in the type's methodset.
-            if ptr, isptr := typ.(*types.Pointer); isptr {
-                typ := ptr.Base
-                if name, isname := typ.(*types.Name); isname {
-                    typ = name.Underlying
-                }
-                typeinfo := c.types.lookup(typ)
-                typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj
-            } else {
-                if name, isname := typ.(*types.Name); isname {
-                    typ = name.Underlying
-                }
-                typeinfo := c.types.lookup(typ)
-                typeinfo.methods[funcdecl.Name.String()] = funcdecl.Name.Obj
-            }
-        }
-    }
+			// Record the FuncDecl's AST object in the type's methodset.
+			if ptr, isptr := typ.(*types.Pointer); isptr {
+				typ := ptr.Base
+				if name, isname := typ.(*types.Name); isname {
+					typ = name.Underlying
+				}
+				typeinfo := c.types.lookup(typ)
+				typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj
+			} else {
+				if name, isname := typ.(*types.Name); isname {
+					typ = name.Underlying
+				}
+				typeinfo := c.types.lookup(typ)
+				typeinfo.methods[funcdecl.Name.String()] = funcdecl.Name.Obj
+			}
+		}
+	}
 }
 
 // vim: set ft=go :
-

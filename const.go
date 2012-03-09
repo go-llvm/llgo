@@ -23,32 +23,35 @@ SOFTWARE.
 package llgo
 
 import (
-    "go/ast"
-    "go/token"
+	"go/ast"
+	"go/token"
 )
 
 // fixConstDecls will walk through a file and update ConstDecl's so that each
 // ValueSpec has a valid Values Expr-list.
 func (c *compiler) fixConstDecls(file *ast.File) {
-    if file.Decls == nil {return}
-    for _, decl := range file.Decls {
-        if gendecl, ok := decl.(*ast.GenDecl); ok {
-            if gendecl.Tok == token.CONST {
-                var expr_valspec *ast.ValueSpec
-                for _, spec := range gendecl.Specs {
-                    valspec, ok := spec.(*ast.ValueSpec)
-                    if !ok {panic("Expected *ValueSpec")}
-                    if valspec.Values != nil && len(valspec.Values) > 0 {
-                        expr_valspec = valspec
-                    } else {
-                        valspec.Type = expr_valspec.Type
-                        valspec.Values = expr_valspec.Values
-                    }
-                }
-            }
-        }
-    }
+	if file.Decls == nil {
+		return
+	}
+	for _, decl := range file.Decls {
+		if gendecl, ok := decl.(*ast.GenDecl); ok {
+			if gendecl.Tok == token.CONST {
+				var expr_valspec *ast.ValueSpec
+				for _, spec := range gendecl.Specs {
+					valspec, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						panic("Expected *ValueSpec")
+					}
+					if valspec.Values != nil && len(valspec.Values) > 0 {
+						expr_valspec = valspec
+					} else {
+						valspec.Type = expr_valspec.Type
+						valspec.Values = expr_valspec.Values
+					}
+				}
+			}
+		}
+	}
 }
 
 // vim: set ft=go :
-

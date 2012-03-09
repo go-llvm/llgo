@@ -9,8 +9,8 @@
 package types
 
 import (
-	"math/big"
 	"go/token"
+	"math/big"
 	"strconv"
 )
 
@@ -75,8 +75,8 @@ func MakeConst(tok token.Token, lit string) *Const {
 
 // MakeZero returns the zero constant for the given type.
 func MakeZero(typ *Type) *Const {
-    // TODO(gri) fix this
-    return &Const{0}
+	// TODO(gri) fix this
+	return &Const{0}
 }
 
 // Match attempts to match the internal constant representations of x and y.
@@ -133,16 +133,16 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 // otherwise the result is invalid.
 func (x *Const) Convert(typ *Type) *Const {
 	// TODO(gri) implement this
-/*
-	switch x := x.Val.(type) {
-	case bool:
-	case *big.Int:
-	case *big.Rat:
-	case cmplx:
-	case string:
-	}
-    //panic("unimplemented")
-*/
+	/*
+		switch x := x.Val.(type) {
+		case bool:
+		case *big.Int:
+		case *big.Rat:
+		case cmplx:
+		case string:
+		}
+	    //panic("unimplemented")
+	*/
 	return x
 }
 
@@ -156,7 +156,7 @@ func (x *Const) String() string {
 	case *big.Int:
 		return x.String()
 	case *big.Rat:
-        // 10 digits of precision after decimal point seems fine
+		// 10 digits of precision after decimal point seems fine
 		return x.FloatString(10)
 	case cmplx:
 		// TODO(gri) don't print 0 components
@@ -187,36 +187,41 @@ func (x *Const) UnaryOp(op token.Token) *Const {
 func unaryBoolOp(x bool, op token.Token) interface{} {
 	switch op {
 	case token.NOT:
-        return !x
-    }
-    panic("unreachable")
+		return !x
+	}
+	panic("unreachable")
 }
 
 func unaryIntOp(x *big.Int, op token.Token) interface{} {
-    var z big.Int
-    switch op {
-    case token.ADD: return z.Set(x)
-    case token.SUB: return z.Neg(x)
-    case token.XOR: return z.Not(x)
-    }
-    panic("unreachable")
+	var z big.Int
+	switch op {
+	case token.ADD:
+		return z.Set(x)
+	case token.SUB:
+		return z.Neg(x)
+	case token.XOR:
+		return z.Not(x)
+	}
+	panic("unreachable")
 }
 
 func unaryFloatOp(x *big.Rat, op token.Token) interface{} {
-    var z big.Rat
-    switch op {
-    case token.ADD: return z.Set(x)
-    case token.SUB: return z.Neg(x)
-    }
-    panic("unreachable")
+	var z big.Rat
+	switch op {
+	case token.ADD:
+		return z.Set(x)
+	case token.SUB:
+		return z.Neg(x)
+	}
+	panic("unreachable")
 }
 
 func unaryCmplxOp(x cmplx, op token.Token) interface{} {
-    switch op {
-    case token.ADD:
-    case token.SUB:
-    }
-    panic("unimplemented")
+	switch op {
+	case token.ADD:
+	case token.SUB:
+	}
+	panic("unimplemented")
 }
 
 func (x *Const) BinaryOp(op token.Token, y *Const) *Const {
@@ -270,14 +275,18 @@ func binaryIntOp(x *big.Int, op token.Token, y *big.Int) interface{} {
 	case token.AND_NOT:
 		return z.AndNot(x, y)
 	case token.SHL:
-        // The shift length must be uint, or untyped int and
-        // convertible to uint.
-        // TODO 32/64bit
-        if y.BitLen() > 32 {panic("Excessive shift length")}
-        return z.Lsh(x, uint(y.Int64()))
+		// The shift length must be uint, or untyped int and
+		// convertible to uint.
+		// TODO 32/64bit
+		if y.BitLen() > 32 {
+			panic("Excessive shift length")
+		}
+		return z.Lsh(x, uint(y.Int64()))
 	case token.SHR:
-        if y.BitLen() > 32 {panic("Excessive shift length")}
-        return z.Rsh(x, uint(y.Int64()))
+		if y.BitLen() > 32 {
+			panic("Excessive shift length")
+		}
+		return z.Rsh(x, uint(y.Int64()))
 	case token.EQL:
 		return x.Cmp(y) == 0
 	case token.NEQ:

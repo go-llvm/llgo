@@ -43,66 +43,66 @@ func defFun(name string) *ast.Object {
 }
 
 var (
-    Uint,
-    Uint8,
-    Uint16,
-    Uint32,
-    Uint64,
-    Int,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Float32,
+	Uint,
+	Uint8,
+	Uint16,
+	Uint32,
+	Uint64,
+	Int,
+	Int8,
+	Int16,
+	Int32,
+	Int64,
+	Float32,
 	Float64,
-    Complex64,
-    Complex128,
-    Byte,
+	Complex64,
+	Complex128,
+	Byte,
 	Bool,
-    Uintptr,
-    Rune,
+	Uintptr,
+	Rune,
 	String *Name
 )
 
 func init() {
 	scope = ast.NewScope(nil)
-    Universe = scope
+	Universe = scope
 
-    Uint8 = defType("uint8", Uint8Kind)
-    Uint16 = defType("uint16", Uint16Kind)
-    Uint32 = defType("uint32", Uint32Kind)
-    Uint64 = defType("uint64", Uint64Kind)
-    Int8 = defType("int8", Int8Kind)
-    Int16 = defType("int16", Int16Kind)
-    Int32 = defType("int32", Int32Kind)
-    Int64 = defType("int64", Int64Kind)
-    Float32 = defType("float32", Float32Kind)
-    Float64 = defType("float64", Float64Kind)
-    Complex64 = defType("complex64", Complex64Kind)
-    Complex128 = defType("complex128", Complex128Kind)
-    Byte = defType("byte", Uint8Kind)
+	Uint8 = defType("uint8", Uint8Kind)
+	Uint16 = defType("uint16", Uint16Kind)
+	Uint32 = defType("uint32", Uint32Kind)
+	Uint64 = defType("uint64", Uint64Kind)
+	Int8 = defType("int8", Int8Kind)
+	Int16 = defType("int16", Int16Kind)
+	Int32 = defType("int32", Int32Kind)
+	Int64 = defType("int64", Int64Kind)
+	Float32 = defType("float32", Float32Kind)
+	Float64 = defType("float64", Float64Kind)
+	Complex64 = defType("complex64", Complex64Kind)
+	Complex128 = defType("complex128", Complex128Kind)
+	Byte = defType("byte", Uint8Kind)
 	Bool = defType("bool", BoolKind)
-    Uintptr = defType("uintptr", UintptrKind)
-    Rune = defType("rune", RuneKind)
-    String = defType("string", StringKind)
+	Uintptr = defType("uintptr", UintptrKind)
+	Rune = defType("rune", RuneKind)
+	String = defType("string", StringKind)
 
-    // type error interface {Error() string}
+	// type error interface {Error() string}
 	obj := define(ast.Typ, "error")
-    errorMethod := ast.NewObj(ast.Fun, "Error")
-    errorMethod.Type = &Func{Results: ObjList([]*ast.Object{String.Obj})}
+	errorMethod := ast.NewObj(ast.Fun, "Error")
+	errorMethod.Type = &Func{Results: ObjList([]*ast.Object{String.Obj})}
 	Error := &Name{Underlying: &Interface{
-        Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
+		Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
 	obj.Type = Error
 
-    // TODO
-    is32bit := true
-    if is32bit {
-        Uint = defType("uint", Uint32Kind)
-        Int = defType("int", Int32Kind)
-    } else {
-        Uint = defType("uint", Uint64Kind)
-        Int = defType("int", Int64Kind)
-    }
+	// TODO
+	is32bit := true
+	if is32bit {
+		Uint = defType("uint", Uint32Kind)
+		Int = defType("int", Int32Kind)
+	} else {
+		Uint = defType("uint", Uint64Kind)
+		Int = defType("int", Int64Kind)
+	}
 
 	defConst("true").Data = &Const{true}
 	defConst("false").Data = &Const{false}
@@ -115,7 +115,7 @@ func init() {
 	defFun("close")
 	defFun("complex")
 	defFun("copy")
-    defFun("delete")
+	defFun("delete")
 	defFun("imag")
 	defFun("len")
 	defFun("make")
@@ -143,4 +143,3 @@ func init() {
 }
 
 // vim: set ft=go :
-
