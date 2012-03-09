@@ -132,6 +132,7 @@ func (s *Slice) String() string {
 type Struct struct {
 	Fields ObjList  // struct fields; or nil
 	Tags   []string // corresponding tags; or nil
+    typ    llvm.Type
 	// TODO(gri) This type needs some rethinking:
 	// - at the moment anonymous fields are marked with "" object names,
 	//   and their names have to be reconstructed
@@ -143,12 +144,17 @@ func (s *Struct) String() string {
 }
 
 func (s *Struct) LLVMType() llvm.Type {
-    elements := make([]llvm.Type, len(s.Fields))
-    for i, f := range s.Fields {
-        ft := f.Type.(Type)
-        elements[i] = ft.LLVMType()
+    if s.typ.IsNil() {
+        s.typ = llvm.GlobalContext().StructCreateNamed("")
+        elements := make([]llvm.Type, len(s.Fields))
+        for i, f := range s.Fields {
+            ft := f.Type.(Type)
+            elements[i] = ft.LLVMType()
+        }
+        //return llvm.StructType(elements, false)
+        s.typ.StructSetBody(elements, false)
     }
-    return llvm.StructType(elements, false)
+    return s.typ
 }
 
 // A Pointer represents a pointer type *Base.
