@@ -304,11 +304,17 @@ type Name struct {
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
 	// TODO(gri) need to remember fields and methods.
+	visited bool
 }
 
 func (n *Name) String() string {
-	return fmt.Sprint("Name(", n.Obj.Name, ", ", n.Underlying, ")")
-	//return fmt.Sprint("Name(", n.Underlying, ", ", n.Obj, ")")
+	if !n.visited {
+		n.visited = true
+		res := fmt.Sprint("Name(", n.Obj.Name, ", ", n.Underlying, ")")
+		n.visited = false
+		return res
+	}
+	return fmt.Sprint("Name(", n.Obj.Name, ", ...)")
 }
 
 func (n *Name) LLVMType() llvm.Type {
