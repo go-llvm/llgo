@@ -24,6 +24,7 @@ package llgo
 
 import (
 	"fmt"
+	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
@@ -43,16 +44,23 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		}
 	}
 
-	switch typ := (value.Type()).(type) {
+	typ := value.Type()
+	if name, ok := typ.(*types.Name); ok {
+		typ = name.Underlying
+	}
+
+	switch typ := typ.(type) {
 	case *types.Pointer:
-		// XXX Converting to a string to be converted back to an int is silly.
-		// The values need an overhaul? Perhaps have types based on fundamental
-		// types, with the additional methods to make them llgo.Value's.
+		// XXX Converting to a string to be converted back to an int is
+		// silly. The values need an overhaul? Perhaps have types based
+		// on fundamental types, with the additional methods to make
+		// them llgo.Value's.
 		if a, isarray := typ.Base.(*types.Array); isarray {
-			return c.NewConstValue(token.INT, strconv.FormatUint(a.Len, 10))
+			return c.NewConstValue(token.INT,
+				strconv.FormatUint(a.Len, 10))
 		}
-		return c.NewConstValue(token.INT,
-			strconv.FormatUint(uint64(unsafe.Sizeof(uintptr(0))), 10))
+		v := strconv.FormatUint(uint64(unsafe.Sizeof(uintptr(0))), 10)
+		return c.NewConstValue(token.INT, v)
 
 	case *types.Slice:
 		ptr := value.(*LLVMValue).address
@@ -61,7 +69,18 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		return c.NewLLVMValue(len_value, types.Int32)
 
 	case *types.Array:
-		return c.NewConstValue(token.INT, strconv.FormatUint(typ.Len, 10))
+		v := strconv.FormatUint(typ.Len, 10)
+		return c.NewConstValue(token.INT, v)
+
+	case *types.Struct:
+		sz := llvm.SizeOf(typ.LLVMType())
+		// FIXME
+		// SizeOf returns a Constant, but not a ConstantInt, so we
+		// can't call ZExtValue on it. Not sure how best to tackle
+		// this, so for now returning this as a non-const value.
+		//return c.NewConstValue(token.INT, string(sz.ZExtValue()))
+		return c.NewLLVMValue(sz, types.Int32)
+
 	}
 	panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }
