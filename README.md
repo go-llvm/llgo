@@ -9,17 +9,19 @@ at [http://blog.awilkins.id.au](http//blog.awilkins.id.au).
 
 # Installation
 
-The recommended way to install llgo is to use goinstall. You'll need to set a
+The recommended way to install llgo is to use ```go get```. You'll need to set a
 couple of environment variables first:
 
     export CGO_CFLAGS=`llvm-config --cflags`
     export CGO_LDFLAGS="`llvm-config --ldflags` -Wl,-L`llvm-config --libdir` -lLLVM-`llvm-config --version`"
-    goinstall github.com/axw/llgo
+    go get github.com/axw/llgo
 
 # Running
 
 Currently there is just a compiler which produces LLVM bitcode, and there is no
 integration with gomake/goinstall/cgo, etc. To compile a Go source file, simply
-run ```llgo <file.go>```, which will emit LLVM bitcode to stdout.
+run ```llgo <file.go>```, which will emit LLVM bitcode to stdout. To produce
+human-readable LLVM assembly code, supply an additional ```-dump``` command
+line argument before ```<file.go>```.
     
 
