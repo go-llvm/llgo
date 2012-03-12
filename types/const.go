@@ -134,14 +134,14 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 func (x *Const) Convert(typ *Type) *Const {
 	// TODO(gri) implement this
 	/*
-		switch x := x.Val.(type) {
-		case bool:
-		case *big.Int:
-		case *big.Rat:
-		case cmplx:
-		case string:
-		}
-	    //panic("unimplemented")
+			switch x := x.Val.(type) {
+			case bool:
+			case *big.Int:
+			case *big.Rat:
+			case cmplx:
+			case string:
+			}
+		    //panic("unimplemented")
 	*/
 	return x
 }

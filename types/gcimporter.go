@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-    "strings"
+	"strings"
 	"text/scanner"
 )
 
@@ -40,14 +40,14 @@ func findPkg(path string) (filename, id string) {
 	switch path[0] {
 	default:
 		// "x" -> "$GOPATH/pkg/$GOOS_$GOARCH/x.ext", "x"
-        bp, _ := build.Import(path, "", build.FindOnly)
-        if bp.PkgObj == "" {
-            return
-        }
-        noext = bp.PkgObj
-        if strings.HasSuffix(noext, ".a") {
-            noext = noext[:len(noext)-2]
-        }
+		bp, _ := build.Import(path, "", build.FindOnly)
+		if bp.PkgObj == "" {
+			return
+		}
+		noext = bp.PkgObj
+		if strings.HasSuffix(noext, ".a") {
+			noext = noext[:len(noext)-2]
+		}
 
 	case '.':
 		// "./x" -> "/this/directory/x.ext", "/this/directory/x"
@@ -478,8 +478,8 @@ func (p *gcParser) parseMethodOrEmbedSpec() *ast.Object {
 	if p.tok == '(' {
 		f := p.parseSignature()
 		obj := ast.NewObj(ast.Fun, name)
-        obj.Type = f
-        return obj
+		obj.Type = f
+		return obj
 	}
 	// TODO lookup name and return that type
 	return ast.NewObj(ast.Typ, "_")
@@ -853,3 +853,5 @@ func (p *gcParser) parseExport() *ast.Object {
 
 	return pkg
 }
+
+// vim: set ft=go :
