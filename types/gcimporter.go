@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+    "strings"
 	"text/scanner"
 )
 
@@ -39,11 +40,14 @@ func findPkg(path string) (filename, id string) {
 	switch path[0] {
 	default:
 		// "x" -> "$GOPATH/pkg/$GOOS_$GOARCH/x.ext", "x"
-		tree, pkg, err := build.FindTree(path)
-		if err != nil {
-			return
-		}
-		noext = filepath.Join(tree.PkgDir(), pkg)
+        bp, _ := build.Import(path, "", build.FindOnly)
+        if bp.PkgObj == "" {
+            return
+        }
+        noext = bp.PkgObj
+        if strings.HasSuffix(noext, ".a") {
+            noext = noext[:len(noext)-2]
+        }
 
 	case '.':
 		// "./x" -> "/this/directory/x.ext", "/this/directory/x"
@@ -470,11 +474,12 @@ func (p *gcParser) parseSignature() *Func {
 // MethodOrEmbedSpec = Name [ Signature ] .
 //
 func (p *gcParser) parseMethodOrEmbedSpec() *ast.Object {
-	p.parseName()
+	name := p.parseName()
 	if p.tok == '(' {
-		p.parseSignature()
-		// TODO(gri) compute method object
-		return ast.NewObj(ast.Fun, "_")
+		f := p.parseSignature()
+		obj := ast.NewObj(ast.Fun, name)
+        obj.Type = f
+        return obj
 	}
 	// TODO lookup name and return that type
 	return ast.NewObj(ast.Typ, "_")
