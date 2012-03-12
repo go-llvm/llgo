@@ -16,6 +16,10 @@ couple of environment variables first:
     export CGO_LDFLAGS="`llvm-config --ldflags` -Wl,-L`llvm-config --libdir` -lLLVM-`llvm-config --version`"
     go get github.com/axw/llgo
 
+You must have LLVM 3.1+ in your path. At the time of writing, LLVM 3.1 has not
+yet been released, so you must build it from the
+[LLVM SVN repository](http://llvm.org/docs/GettingStarted.html#checkout).
+
 # Running
 
 Currently there is just a compiler which produces LLVM bitcode, and there is no
