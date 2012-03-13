@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
+	"go/ast"
 	"go/token"
 	"math"
 	"math/big"
@@ -207,11 +208,18 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 
 	// Converting to an interface type.
 	if interface_, isinterface := typ.(*types.Interface); isinterface {
-		if s, fromstruct := srctyp.(*types.Struct); fromstruct {
-			//i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+		isptr := false
+		if p, fromptr := srctyp.(*types.Pointer); fromptr {
+			isptr = true
+			srctyp = p.Base
+			if name, isname := srctyp.(*types.Name); isname {
+				srctyp = name.Underlying
+			}
+		}
 
-			// TODO check whether the functions in the struct take value or
-			// pointer receivers.
+		if s, fromstruct := srctyp.(*types.Struct); fromstruct {
+			// TODO check whether the functions in the struct take
+			// value or pointer receivers.
 
 			iface_elements := make([]llvm.Value, 1+len(interface_.Methods))
 
@@ -223,15 +231,22 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 			iface_struct := llvm.ConstStruct(iface_elements, false)
 
 			builder := v.compiler.builder
-			iface_struct = builder.CreateInsertValue(iface_struct,
-				builder.CreateBitCast(builder.CreateMalloc(
-					srctyp.LLVMType(), ""), element_types[0], ""), 0, "")
+			var ptr llvm.Value
+			if isptr {
+				ptr = v.LLVMValue()
+			} else {
+				ptr = builder.CreateMalloc(srctyp.LLVMType(), "")
+			}
+			ptr = builder.CreateBitCast(ptr, element_types[0], "")
+			iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
 
 			typeinfo := v.compiler.types.lookup(s)
 			for i, m := range interface_.Methods {
-				method_obj := typeinfo.methods[m.Name]
-				if method_obj == nil {
+				var method_obj *ast.Object
+				if isptr {
 					method_obj = typeinfo.ptrmethods[m.Name]
+				} else {
+					method_obj = typeinfo.methods[m.Name]
 				}
 				method := v.compiler.Resolve(method_obj).(*LLVMValue)
 				iface_struct = builder.CreateInsertValue(iface_struct,
