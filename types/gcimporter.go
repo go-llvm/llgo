@@ -252,10 +252,19 @@ func (p *gcParser) parsePkgId() *ast.Object {
 
 	pkg := p.imports[id]
 	if pkg == nil {
+		/*
 		scope = ast.NewScope(nil)
 		pkg = ast.NewObj(ast.Pkg, "")
 		pkg.Data = scope
 		p.imports[id] = pkg
+		*/
+		// FIXME Ideally this should only be done if the main program refers
+		// to the package. If it doesn't, this is an unnecessary performance
+		// hit.
+		pkg, err = GcImporter(p.imports, id)
+		if err != nil {
+			p.error(err)
+		}
 	}
 
 	return pkg
@@ -783,13 +792,25 @@ func (p *gcParser) parseFuncDecl() {
 func (p *gcParser) parseMethodDecl() {
 	// "func" already consumed
 	p.expect('(')
-	p.parseParameter() // receiver
+	recv, _ := p.parseParameter() // receiver
 	p.expect(')')
-	p.parseName() // unexported method names in imports are qualified with their package.
-	p.parseSignature()
+	name := p.parseName() // unexported method names in imports are qualified with their package.
+	fn := ast.NewObj(ast.Fun, name)
+	fn_type := p.parseSignature()
+	fn_type.Recv = recv
+	fn.Type = fn_type
+
+	var recv_type *Name
+	if ptr, isptr := recv.Type.(*Pointer); isptr {
+		recv_type = ptr.Base.(*Name)
+	} else {
+		recv_type = recv.Type.(*Name)
+	}
+	recv_type.Methods = append(recv_type.Methods, fn)
 	if p.tok == '{' {
 		p.parseFuncBody()
 	}
+	recv_type.Methods.Sort()
 }
 
 // Decl = [ ImportDecl | ConstDecl | TypeDecl | VarDecl | FuncDecl | MethodDecl ] "\n" .

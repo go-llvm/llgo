@@ -133,10 +133,13 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 					msg := c.errorf(ident.Pos(), "%s is not a package", obj.Name)
 					return &Bad{Msg: msg}
 				}
+				pkgscope := obj.Data.(*ast.Scope)
+				t.Sel.Obj = pkgscope.Lookup(t.Sel.Name)
+				return c.makeType(t.Sel, cycleOk)
 				// TODO(gri) we have a package name but don't
 				// have the mapping from package name to package
 				// scope anymore (created in ast.NewPackage).
-				return &Bad{} // for now
+				//return &Bad{} // for now
 			}
 		}
 		// TODO(gri) can this really happen (the parser should have excluded this)?
@@ -224,3 +227,6 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	c.errors.RemoveMultiples()
 	return c.types, c.errors.Err()
 }
+
+// vim: set ft=go :
+

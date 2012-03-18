@@ -31,27 +31,6 @@ import (
 	"sort"
 )
 
-type TypeInfo struct {
-	methods    map[string]*ast.Object
-	ptrmethods map[string]*ast.Object
-}
-
-type TypeMap map[types.Type]*TypeInfo
-
-func (m *TypeMap) lookup(t types.Type) *TypeInfo {
-	if name, isname := t.(*types.Name); isname {
-		t = name.Underlying
-	}
-	info := (*m)[t]
-	if info == nil {
-		info = new(TypeInfo)
-		info.methods = make(map[string]*ast.Object)
-		info.ptrmethods = make(map[string]*ast.Object)
-		(*m)[t] = info
-	}
-	return info
-}
-
 // Get a Type from an ast object.
 func (c *compiler) ObjGetType(obj *ast.Object) types.Type {
 	if obj != nil {

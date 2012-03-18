@@ -26,10 +26,10 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
-	"go/ast"
 	"go/token"
 	"math"
 	"math/big"
+	"sort"
 )
 
 var (
@@ -201,8 +201,10 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 		typ = name.Underlying
 	}
 
+	var srcname *types.Name
 	srctyp := v.typ
 	if name, isname := srctyp.(*types.Name); isname {
+		srcname = name
 		srctyp = name.Underlying
 	}
 
@@ -213,11 +215,13 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 			isptr = true
 			srctyp = p.Base
 			if name, isname := srctyp.(*types.Name); isname {
+				srcname = name
 				srctyp = name.Underlying
 			}
 		}
 
-		if s, fromstruct := srctyp.(*types.Struct); fromstruct {
+		if _, fromstruct := srctyp.(*types.Struct);
+		   srcname != nil && fromstruct {
 			// TODO check whether the functions in the struct take
 			// value or pointer receivers.
 
@@ -240,18 +244,26 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 			ptr = builder.CreateBitCast(ptr, element_types[0], "")
 			iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
 
-			typeinfo := v.compiler.types.lookup(s)
+			// Look up the method by name.
+			methods := srcname.Methods
 			for i, m := range interface_.Methods {
-				var method_obj *ast.Object
-				if isptr {
-					method_obj = typeinfo.ptrmethods[m.Name]
-				} else {
-					method_obj = typeinfo.methods[m.Name]
+				// TODO make this loop linear by iterating through the
+				// interface methods and type methods together.
+				mi := sort.Search(len(methods), func(i int) bool {
+					return methods[i].Name >= m.Name
+				})
+				if mi >= len(methods) || methods[mi].Name != m.Name {
+						panic("Failed to locate method: " + m.Name)
 				}
+				method_obj := methods[mi]
 				method := v.compiler.Resolve(method_obj).(*LLVMValue)
-				iface_struct = builder.CreateInsertValue(iface_struct,
-					builder.CreateBitCast(
-						method.LLVMValue(), element_types[i+1], ""), i+1, "")
+				llvm_value := method.LLVMValue()
+				llvm_value = builder.CreateBitCast(
+						llvm_value,
+						element_types[i+1], "")
+				iface_struct = builder.CreateInsertValue(
+						iface_struct, llvm_value,
+						i+1, "")
 			}
 
 			return v.compiler.NewLLVMValue(iface_struct, interface_)

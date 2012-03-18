@@ -48,7 +48,6 @@ type compiler struct {
 	module    *Module
 	functions []Value
 	initfuncs []Value
-	types     TypeMap
 	pkg       *ast.Package
 	fileset   *token.FileSet
 	filescope *ast.Scope
@@ -94,6 +93,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			value = &ConstValue{*(obj.Data.(*types.Const)), c, typ}
 			obj.Data = value
 		}
+
 	case ast.Fun:
 		var funcdecl *ast.FuncDecl
 		if obj.Decl != nil {
@@ -105,15 +105,28 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 		}
 		value = c.VisitFuncProtoDecl(funcdecl)
 		obj.Data = value
+
 	case ast.Var:
 		switch x := (obj.Decl).(type) {
 		case *ast.ValueSpec:
 			c.VisitValueSpec(x, false)
 		case *ast.Field:
-			// No-op. Fields will be yielded for function arg/recv/ret.
-			// We update the .Data field of the object when we enter the
-			// function definition.
+			// No-op. Fields will be yielded for function
+			// arg/recv/ret. We update the .Data field of the
+			// object when we enter the function definition.
 		}
+
+		// If it's an external variable, we'll need to create a global
+		// value reference here.
+		if obj.Data == nil {
+			module := c.module.Module
+			t := obj.Type.(types.Type)
+			name := c.pkgmap[obj] + "." + obj.Name
+			g := llvm.AddGlobal(module, t.LLVMType(), name)
+			g.SetLinkage(llvm.AvailableExternallyLinkage)
+			obj.Data = c.NewLLVMValue(g, t)
+		}
+
 		value = (obj.Data).(Value)
 	}
 
@@ -163,7 +176,6 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 	compiler.fileset = fset
 	compiler.pkg = pkg
 	compiler.initfuncs = make([]Value, 0)
-	compiler.types = make(TypeMap)
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = llvm.GlobalContext().NewBuilder()

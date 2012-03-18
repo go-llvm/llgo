@@ -223,8 +223,8 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	if lhs == nil {
-		// The only time we should get a nil result is if the object is a
-		// package.
+		// The only time we should get a nil result is if the object is
+		// a package.
 		pkgident := (expr.X).(*ast.Ident)
 		pkgscope := (pkgident.Obj.Data).(*ast.Scope)
 		obj := pkgscope.Lookup(expr.Sel.String())
@@ -307,38 +307,39 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Look up a method with receiver T.
-	typeinfo := c.types.lookup(typ)
-	method_obj := typeinfo.methods[name]
-	receiver := lhs.(*LLVMValue)
-	if indirect {
-		receiver = receiver.Deref()
-	}
-	if method_obj != nil {
+	namedtype := typ.(*types.Name)
+	i := sort.Search(len(namedtype.Methods), func(i int) bool {
+		return namedtype.Methods[i].Name >= name
+	})
+	if i < len(namedtype.Methods) && namedtype.Methods[i].Name == name {
+		method_obj := namedtype.Methods[i]
+		receiver := lhs.(*LLVMValue)
+		if indirect {
+			receiver = receiver.Deref()
+		}
+
+		// Check if it's a pointer-receiver method.
+		method_type := method_obj.Type.(*types.Pointer).Base.(*types.Func)
+		recv_type := method_type.Recv.Type.(types.Type)
+		is_ptr_method := !types.Identical(recv_type, typ)
+
 		method := c.Resolve(method_obj).(*LLVMValue)
-		if ptr_type != nil {
-			method.receiver = receiver.Deref()
-		} else {
+		if is_ptr_method {
+			// From the language spec:
+			//     If x is addressable and &x's method set contains m,
+			//     x.m() is shorthand for (&x).m()
+			if ptr_type == nil && receiver.address != nil {
+				receiver = receiver.address
+			}
 			method.receiver = receiver
+		} else {
+			if ptr_type != nil {
+				method.receiver = receiver.Deref()
+			} else {
+				method.receiver = receiver
+			}
 		}
 		return method
-	}
-
-	// From the language spec:
-	//     If x is addressable and &x's method set contains m,
-	//     x.m() is shorthand for (&x).m()
-	if ptr_type == nil && receiver.address != nil {
-		receiver = receiver.address
-		ptr_type = receiver.Type()
-	}
-
-	// Look up a method with receiver *T.
-	if ptr_type != nil {
-		method_obj = typeinfo.ptrmethods[name]
-		if method_obj != nil {
-			method := c.Resolve(method_obj).(*LLVMValue)
-			method.receiver = receiver
-			return method
-		}
 	}
 
 	panic("Shouldn't reach here (looking for " + name + ")")

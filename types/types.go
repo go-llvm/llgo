@@ -303,6 +303,7 @@ func (c *Chan) LLVMType() llvm.Type {
 type Name struct {
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
+	Methods    ObjList
 	// TODO(gri) need to remember fields and methods.
 	visited bool
 }

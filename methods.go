@@ -25,10 +25,13 @@ package llgo
 import (
 	"github.com/axw/llgo/types"
 	"go/ast"
+	"sort"
 )
 
 // fixMethodDecls will walk through a file and associate functions with their
 // receiver type.
+//
+// TODO This should all move into type checking.
 func (c *compiler) fixMethodDecls(file *ast.File) {
 	if file.Decls == nil {
 		return
@@ -44,19 +47,33 @@ func (c *compiler) fixMethodDecls(file *ast.File) {
 			funcdecl.Name.Obj.Decl = funcdecl
 
 			// Record the FuncDecl's AST object in the type's methodset.
+			var name *types.Name
 			if ptr, isptr := typ.(*types.Pointer); isptr {
-				typ := ptr.Base
-				if name, isname := typ.(*types.Name); isname {
-					typ = name.Underlying
-				}
-				typeinfo := c.types.lookup(typ)
-				typeinfo.ptrmethods[funcdecl.Name.String()] = funcdecl.Name.Obj
+				name = ptr.Base.(*types.Name)
 			} else {
-				if name, isname := typ.(*types.Name); isname {
-					typ = name.Underlying
+				name = typ.(*types.Name)
+			}
+
+			method_obj := funcdecl.Name.Obj
+			if name.Methods == nil {
+				name.Methods = types.ObjList{method_obj}
+			} else {
+				methods := name.Methods
+				methodname := funcdecl.Name.String()
+				i := sort.Search(len(methods), func(i int) bool {
+					return methods[i].Name >= methodname})
+				if i < len(methods) && methods[i].Name == methodname {
+					panic("Duplicate method")
+				} else if i <= 0 {
+					name.Methods = append(types.ObjList{method_obj},methods...)
+				} else if i >= len(methods) {
+					name.Methods = append(methods, method_obj)
+				} else {
+					right := methods[i:]
+					methods = methods[:i]
+					methods = append(methods, method_obj)
+					name.Methods = append(methods, right...)
 				}
-				typeinfo := c.types.lookup(typ)
-				typeinfo.methods[funcdecl.Name.String()] = funcdecl.Name.Obj
 			}
 		}
 	}
