@@ -100,23 +100,21 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 		value := values[i]
 		switch x := expr.(type) {
 		case *ast.Ident:
-			{
-				if x.Name != "_" {
-					obj := x.Obj
-					if stmt.Tok == token.DEFINE {
-						ptr := c.builder.CreateAlloca(
-							value.Type().LLVMType(), x.Name)
-						c.builder.CreateStore(value.LLVMValue(), ptr)
-						llvm_value := c.NewLLVMValue(
-							ptr, &types.Pointer{Base: value.Type()})
-						llvm_value.indirect = true
-						obj.Data = llvm_value
-					} else {
-						ptr, _ := (obj.Data).(Value)
-						value = value.Convert(types.Deref(ptr.Type()))
-						c.builder.CreateStore(
-							value.LLVMValue(), ptr.LLVMValue())
-					}
+			if x.Name != "_" {
+				obj := x.Obj
+				if stmt.Tok == token.DEFINE {
+					ptr := c.builder.CreateAlloca(
+						value.Type().LLVMType(), x.Name)
+					c.builder.CreateStore(value.LLVMValue(), ptr)
+					llvm_value := c.NewLLVMValue(
+						ptr, &types.Pointer{Base: value.Type()})
+					llvm_value.indirect = true
+					obj.Data = llvm_value
+				} else {
+					ptr, _ := (obj.Data).(Value)
+					value = value.Convert(types.Deref(ptr.Type()))
+					c.builder.CreateStore(
+						value.LLVMValue(), ptr.LLVMValue())
 				}
 			}
 		default:
@@ -130,8 +128,14 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	curr_block := c.builder.GetInsertBlock()
 	if_block := llvm.AddBasicBlock(curr_block.Parent(), "if")
-	else_block := llvm.AddBasicBlock(curr_block.Parent(), "else")
+	var else_block llvm.BasicBlock
+	if stmt.Else != nil {
+		else_block = llvm.AddBasicBlock(curr_block.Parent(), "else")
+	}
 	resume_block := llvm.AddBasicBlock(curr_block.Parent(), "endif")
+	if stmt.Else == nil {
+		else_block = resume_block
+	}
 
 	if stmt.Init != nil {
 		c.PushScope()
@@ -140,18 +144,31 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	}
 
 	cond_val := c.VisitExpr(stmt.Cond)
+	if llvm_value, ok := cond_val.(*LLVMValue); ok {
+		if llvm_value.indirect {
+			cond_val = llvm_value.Deref()
+		}
+	}
+
 	c.builder.CreateCondBr(
 		cond_val.LLVMValue(), if_block, else_block)
 
 	c.builder.SetInsertPointAtEnd(if_block)
 	c.VisitBlockStmt(stmt.Body)
-	c.builder.CreateBr(resume_block)
-
-	c.builder.SetInsertPointAtEnd(else_block)
-	if stmt.Else != nil {
-		c.VisitStmt(stmt.Else)
+	if in := if_block.LastInstruction(); in.IsNil()||!in.IsATerminatorInst() {
+		c.builder.CreateBr(resume_block)
 	}
-	c.builder.CreateBr(resume_block)
+
+	if stmt.Else != nil {
+		c.builder.SetInsertPointAtEnd(else_block)
+		c.VisitStmt(stmt.Else)
+		if in := else_block.LastInstruction();
+		   in.IsNil() || !in.IsATerminatorInst() {
+			c.builder.CreateBr(resume_block)
+		}
+	}
+
+	c.builder.SetInsertPointAtEnd(resume_block)
 }
 
 func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
