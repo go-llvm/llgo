@@ -144,7 +144,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 	last_block := llvm_fn.LastBasicBlock()
 	lasti := last_block.LastInstruction()
-	if lasti.IsNil() || !lasti.IsATerminatorInst() {
+	if lasti.IsNil() || lasti.IsATerminatorInst().IsNil() {
 		// Assume nil return type, AST should be checked first.
 		c.builder.CreateRetVoid()
 	}
