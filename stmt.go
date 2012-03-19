@@ -69,6 +69,12 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	} else {
 		if len(stmt.Results) == 1 {
 			value := c.VisitExpr(stmt.Results[0])
+			if llvm_value, ok := value.(*LLVMValue); ok {
+				if llvm_value.indirect {
+					value = llvm_value.Deref()
+				}
+			}
+
 			//cur_fn := c.functions[len(c.functions)-1]
 			//fn_type := cur_fn.Type()
 
