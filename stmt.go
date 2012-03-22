@@ -38,13 +38,9 @@ func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 
 	switch stmt.Tok {
 	case token.INC:
-		{
-			value = c.builder.CreateAdd(value, one, "")
-		}
+		value = c.builder.CreateAdd(value, one, "")
 	case token.DEC:
-		{
-			value = c.builder.CreateSub(value, one, "")
-		}
+		value = c.builder.CreateSub(value, one, "")
 	}
 
 	// TODO make sure we cover all possibilities (maybe just delegate this to
@@ -83,22 +79,35 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 			c.builder.CreateRet(result.LLVMValue())
 		} else {
-			// TODO
-			for _, expr := range stmt.Results {
-				c.VisitExpr(expr)
+			// TODO handle multi-return value functions in
+			// result expressions.
+			values := make([]llvm.Value, len(stmt.Results))
+			for i, expr := range stmt.Results {
+				values[i] = c.VisitExpr(expr).LLVMValue()
 			}
-			panic("Handling multiple results not yet implemented")
+			c.builder.CreateAggregateRet(values)
 		}
 	}
 }
 
 func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
-	values := make([]Value, len(stmt.Rhs))
-	for i, expr := range stmt.Rhs {
-		values[i] = c.VisitExpr(expr)
-		if value_, isllvm := values[i].(*LLVMValue); isllvm {
-			if value_.indirect {
-				values[i] = value_.Deref()
+	values := make([]Value, len(stmt.Lhs))
+	if len(stmt.Rhs) == 1 && len(stmt.Lhs) > 1 {
+		value := c.VisitExpr(stmt.Rhs[0])
+		ptr := value.LLVMValue()
+		struct_type := value.Type().(*types.Struct)
+		for i := 0; i < len(struct_type.Fields); i++ {
+			t := c.ObjGetType(struct_type.Fields[i])
+			value_ := c.builder.CreateExtractValue(ptr, i, "")
+			values[i] = c.NewLLVMValue(value_, t)
+		}
+	} else {
+		for i, expr := range stmt.Rhs {
+			values[i] = c.VisitExpr(expr)
+			if value_, isllvm := values[i].(*LLVMValue); isllvm {
+				if value_.indirect {
+					values[i] = value_.Deref()
+				}
 			}
 		}
 	}
@@ -109,8 +118,8 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			if x.Name != "_" {
 				obj := x.Obj
 				if stmt.Tok == token.DEFINE {
-					ptr := c.builder.CreateAlloca(
-						value.Type().LLVMType(), x.Name)
+					value_type := value.LLVMValue().Type()
+					ptr := c.builder.CreateAlloca(value_type, x.Name)
 					c.builder.CreateStore(value.LLVMValue(), ptr)
 					llvm_value := c.NewLLVMValue(
 						ptr, &types.Pointer{Base: value.Type()})

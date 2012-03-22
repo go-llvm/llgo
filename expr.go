@@ -383,12 +383,10 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	case *ast.ParenExpr:
 		return c.VisitExpr(x.X)
 	case *ast.Ident:
-		{
-			if x.Obj == nil {
-				x.Obj = c.LookupObj(x.Name)
-			}
-			return c.Resolve(x.Obj)
+		if x.Obj == nil {
+			x.Obj = c.LookupObj(x.Name)
 		}
+		return c.Resolve(x.Obj)
 	}
 	panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))
 }
