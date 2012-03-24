@@ -143,6 +143,10 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			fallthrough
 		case types.UntypedComplexKind:
 			rhs = rhs.Convert(lhs.Type()).(ConstValue)
+		case types.NilKind:
+			// The conversion will result in an *LLVMValue.
+			rhs_llvm := rhs.Convert(lhs.Type()).(*LLVMValue)
+			return lhs.BinaryOp(op, rhs_llvm)
 		}
 		rhs_value := rhs.LLVMValue()
 
@@ -166,7 +170,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	}
-	panic("unimplemented")
+	panic("unreachable")
 }
 
 func (v *LLVMValue) UnaryOp(op token.Token) Value {
@@ -220,8 +224,7 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 			}
 		}
 
-		if _, fromstruct := srctyp.(*types.Struct);
-		   srcname != nil && fromstruct {
+		if _, fromstruct := srctyp.(*types.Struct); srcname != nil && fromstruct {
 			// TODO check whether the functions in the struct take
 			// value or pointer receivers.
 
@@ -253,17 +256,17 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 					return methods[i].Name >= m.Name
 				})
 				if mi >= len(methods) || methods[mi].Name != m.Name {
-						panic("Failed to locate method: " + m.Name)
+					panic("Failed to locate method: " + m.Name)
 				}
 				method_obj := methods[mi]
 				method := v.compiler.Resolve(method_obj).(*LLVMValue)
 				llvm_value := method.LLVMValue()
 				llvm_value = builder.CreateBitCast(
-						llvm_value,
-						element_types[i+1], "")
+					llvm_value,
+					element_types[i+1], "")
 				iface_struct = builder.CreateInsertValue(
-						iface_struct, llvm_value,
-						i+1, "")
+					iface_struct, llvm_value,
+					i+1, "")
 			}
 
 			return v.compiler.NewLLVMValue(iface_struct, interface_)
@@ -375,7 +378,16 @@ func (v ConstValue) Convert(typ types.Type) Value {
 			typ = name.Underlying
 		}
 		compiler := v.compiler
-		return ConstValue{*v.Const.Convert(&typ), compiler, typ.(*types.Basic)}
+		if basic, ok := typ.(*types.Basic); ok {
+			return ConstValue{*v.Const.Convert(&typ), compiler, basic}
+		} else {
+			// Special case for 'nil'
+			if v.typ.Kind == types.NilKind {
+				zero := llvm.ConstNull(typ.LLVMType())
+				return compiler.NewLLVMValue(zero, typ)
+			}
+			panic("unhandled conversion")
+		}
 	}
 	return v
 }

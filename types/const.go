@@ -148,6 +148,8 @@ func (x *Const) Convert(typ *Type) *Const {
 
 func (x *Const) String() string {
 	switch x := x.Val.(type) {
+	case nil:
+		return "nil"
 	case bool:
 		if x {
 			return "true"

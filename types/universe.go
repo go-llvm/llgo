@@ -108,7 +108,10 @@ func init() {
 	defConst("false").Data = &Const{false}
 
 	defConst("iota")
-	defConst("nil")
+
+	nil_ := defConst("nil")
+	nil_.Data = &Const{}
+	nil_.Type = &Basic{NilKind}
 
 	defFun("append")
 	defFun("cap")

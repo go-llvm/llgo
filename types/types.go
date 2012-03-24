@@ -21,7 +21,8 @@ type BasicTypeKind int
 
 // Constants for basic types.
 const (
-	Uint8Kind BasicTypeKind = iota
+	NilKind BasicTypeKind = iota
+	Uint8Kind
 	Uint16Kind
 	Uint32Kind
 	Uint64Kind
