@@ -106,6 +106,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	}
 
 	var result llvm.Value
+	c := lhs.compiler
 	b := lhs.compiler.builder
 
 	switch rhs := rhs_.(type) {
@@ -113,6 +114,54 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// Deref rhs, if it's indirect.
 		if rhs.indirect {
 			rhs = rhs.Deref()
+		}
+
+		// Special case for structs.
+		// TODO handle strings as an even more special case.
+		if lhs.value.Type().TypeKind() == llvm.StructTypeKind {
+			// TODO check types are the same.
+			struct_type := lhs.Type()
+			if name, ok := struct_type.(*types.Name); ok {
+				struct_type = name.Underlying
+			}
+
+			element_types_count := lhs.value.Type().StructElementTypesCount()
+			var t types.Type = &types.Bad{}
+			var struct_fields types.ObjList
+			if s, ok := struct_type.(*types.Struct); ok {
+				struct_fields = s.Fields
+			}
+
+			if element_types_count > 0 {
+				if struct_fields != nil {
+					t = c.ObjGetType(struct_fields[0])
+				}
+				first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, 0, ""), t)
+				first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, 0, ""), t)
+				first := first_lhs.BinaryOp(op, first_rhs)
+				result := first
+
+				var logical_op token.Token
+				switch op {
+				case token.EQL:
+					logical_op = token.LAND
+				case token.NEQ:
+					logical_op = token.LOR
+				default:
+					panic("Unexpected operator")
+				}
+
+				for i := 1; i < element_types_count; i++ {
+					if struct_fields != nil {
+						t = c.ObjGetType(struct_fields[1])
+					}
+					next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, i, ""), t)
+					next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, i, ""), t)
+					next := next_lhs.BinaryOp(op, next_rhs)
+					result = result.BinaryOp(logical_op, next)
+				}
+				return result
+			}
 		}
 
 		switch op {
@@ -124,14 +173,26 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result = b.CreateAdd(lhs.value, rhs.value, "")
 		case token.SUB:
 			result = b.CreateSub(lhs.value, rhs.value, "")
+		case token.NEQ:
+			result = b.CreateICmp(llvm.IntNE, lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.EQL:
 			result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.LSS:
 			result = b.CreateICmp(llvm.IntULT, lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.LEQ: // TODO signed/unsigned
 			result = b.CreateICmp(llvm.IntULE, lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LAND:
+			result = b.CreateAnd(lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LOR:
+			result = b.CreateOr(lhs.value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		default:
-			panic("Unimplemented")
+			panic(fmt.Sprint("Unimplemented operator: ", op))
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case ConstValue:
@@ -145,6 +206,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			rhs = rhs.Convert(lhs.Type()).(ConstValue)
 		case types.NilKind:
 			// The conversion will result in an *LLVMValue.
+			// XXX Perhaps this is too lazy. We could optimise some
+			// comparisons, e.g. interface == nil could be optimised
+			// to only compare the type field.
 			rhs_llvm := rhs.Convert(lhs.Type()).(*LLVMValue)
 			return lhs.BinaryOp(op, rhs_llvm)
 		}
@@ -159,14 +223,26 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result = b.CreateAdd(lhs.value, rhs_value, "")
 		case token.SUB:
 			result = b.CreateSub(lhs.value, rhs_value, "")
+		case token.NEQ:
+			result = b.CreateICmp(llvm.IntNE, lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.EQL:
 			result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.LSS:
 			result = b.CreateICmp(llvm.IntULT, lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.LEQ: // TODO signed/unsigned
 			result = b.CreateICmp(llvm.IntULE, lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LAND:
+			result = b.CreateAnd(lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LOR:
+			result = b.CreateOr(lhs.value, rhs_value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		default:
-			panic("Unimplemented")
+			panic(fmt.Sprint("Unimplemented operator: ", op))
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	}
@@ -350,12 +426,23 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result = b.CreateAdd(lhs_value, rhs.value, "")
 		case token.SUB:
 			result = b.CreateSub(lhs_value, rhs.value, "")
+		case token.NEQ:
+			result = b.CreateICmp(llvm.IntNE, lhs_value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.EQL:
 			result = b.CreateICmp(llvm.IntEQ, lhs_value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		case token.LSS:
 			result = b.CreateICmp(llvm.IntULT, lhs_value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LAND:
+			result = b.CreateAnd(lhs_value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
+		case token.LOR:
+			result = b.CreateOr(lhs_value, rhs.value, "")
+			return lhs.compiler.NewLLVMValue(result, &types.Basic{types.BoolKind})
 		default:
-			panic("Unimplemented")
+			panic(fmt.Sprint("Unimplemented operator: ", op))
 		}
 		return rhs.compiler.NewLLVMValue(result, lhs.typ)
 	case ConstValue:

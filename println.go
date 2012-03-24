@@ -87,6 +87,9 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 					llvm_value = ptrval
 					args = append(args, lenval)
 					format += "%*s"
+				case types.BoolKind:
+					format += "%d"
+					llvm_value = c.builder.CreateZExt(llvm_value, llvm.Int32Type(), "")
 				default:
 					panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
 				}

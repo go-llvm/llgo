@@ -306,8 +306,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 					llvm_init = init_.Convert(value_type).LLVMValue()
 				}
 				c.builder.CreateStore(llvm_init, stack_value)
-				value_type = &types.Pointer{Base: value_type}
-				llvm_value := c.NewLLVMValue(stack_value, value_type)
+				llvm_value := c.NewLLVMValue(stack_value, &types.Pointer{Base: value_type})
 				llvm_value.indirect = true
 				value = llvm_value
 			} else { // ispackagelevel
