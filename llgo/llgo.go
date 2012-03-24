@@ -144,4 +144,3 @@ func main() {
 }
 
 // vim: set ft=go :
-

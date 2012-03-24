@@ -170,16 +170,14 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 
 	c.builder.SetInsertPointAtEnd(if_block)
 	c.VisitBlockStmt(stmt.Body)
-	if in := if_block.LastInstruction();
-	   in.IsNil() || in.IsATerminatorInst().IsNil() {
+	if in := if_block.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
 		c.builder.CreateBr(resume_block)
 	}
 
 	if stmt.Else != nil {
 		c.builder.SetInsertPointAtEnd(else_block)
 		c.VisitStmt(stmt.Else)
-		if in := else_block.LastInstruction();
-		   in.IsNil() || in.IsATerminatorInst().IsNil() {
+		if in := else_block.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
 			c.builder.CreateBr(resume_block)
 		}
 	}

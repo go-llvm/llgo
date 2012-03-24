@@ -61,11 +61,12 @@ func (c *compiler) fixMethodDecls(file *ast.File) {
 				methods := name.Methods
 				methodname := funcdecl.Name.String()
 				i := sort.Search(len(methods), func(i int) bool {
-					return methods[i].Name >= methodname})
+					return methods[i].Name >= methodname
+				})
 				if i < len(methods) && methods[i].Name == methodname {
 					panic("Duplicate method")
 				} else if i <= 0 {
-					name.Methods = append(types.ObjList{method_obj},methods...)
+					name.Methods = append(types.ObjList{method_obj}, methods...)
 				} else if i >= len(methods) {
 					name.Methods = append(methods, method_obj)
 				} else {
