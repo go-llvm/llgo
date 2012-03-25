@@ -81,7 +81,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		fn = fn.Deref()
 	}
 
-	fn_type := types.Deref(fn.Type()).(*types.Func)
+	fn_type := fn.Type().(*types.Func)
 	args := make([]llvm.Value, 0)
 	if fn_type.Recv != nil {
 		// Don't dereference the receiver here. It'll have been worked out in
@@ -319,7 +319,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		}
 
 		// Check if it's a pointer-receiver method.
-		method_type := method_obj.Type.(*types.Pointer).Base.(*types.Func)
+		method_type := method_obj.Type.(*types.Func)
 		recv_type := method_type.Recv.Type.(types.Type)
 		is_ptr_method := !types.Identical(recv_type, typ)
 

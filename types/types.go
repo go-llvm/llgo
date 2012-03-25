@@ -224,7 +224,8 @@ func (f *Func) LLVMType() llvm.Type {
 		return_type = llvm.StructType(elements, false)
 	}
 
-	return llvm.FunctionType(return_type, param_types, false)
+	fn_type := llvm.FunctionType(return_type, param_types, false)
+	return llvm.PointerType(fn_type, 0)
 
 	/*
 	   if fn_name == "init" {

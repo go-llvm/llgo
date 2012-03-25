@@ -55,8 +55,7 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
 		obj := c.LookupObj(x.Name)
 		return c.ObjGetType(obj)
 	case *ast.FuncType:
-		fn_type := c.VisitFuncType(x)
-		return &types.Pointer{Base: fn_type}
+		return c.VisitFuncType(x)
 	case *ast.ArrayType:
 		elttype := c.GetType(x.Elt)
 		if x.Len == nil {

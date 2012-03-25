@@ -72,18 +72,16 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 		pkgname := c.pkgmap[f.Name.Obj]
 		fn_name = pkgname + "." + fn_name
 	}
-	fn := llvm.AddFunction(c.module.Module, fn_name, fn_type.LLVMType())
+	llvm_fn_type := fn_type.LLVMType().ElementType()
+	fn := llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
 	if exported {
 		fn.SetLinkage(llvm.ExternalLinkage)
 	}
 
-	// llvm.AddFunction returns a pointer-to-function, so change the
-	// result type to a Pointer.
-	fn_ptr_type := &types.Pointer{Base: fn_type}
-	result := c.NewLLVMValue(fn, fn_ptr_type)
+	result := c.NewLLVMValue(fn, fn_type)
 	if f.Name.Obj != nil {
 		f.Name.Obj.Data = result
-		f.Name.Obj.Type = fn_ptr_type
+		f.Name.Obj.Type = fn_type
 	}
 	return result
 }
@@ -95,7 +93,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		fn = c.VisitFuncProtoDecl(f)
 	}
 
-	fn_type := types.Deref(fn.Type()).(*types.Func)
+	fn_type := fn.Type().(*types.Func)
 	llvm_fn := fn.LLVMValue()
 
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
@@ -181,7 +179,8 @@ func (c *compiler) createGlobal(e ast.Expr,
 		defer c.builder.SetInsertPointAtEnd(block)
 	}
 	fn_type := new(types.Func)
-	fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
+	llvm_fn_type := fn_type.LLVMType().ElementType()
+	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
