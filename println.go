@@ -116,10 +116,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 				format += "%s"
 
 			case *types.Pointer:
-				// FIXME don't assume string...
-				// TODO string should be a struct, with length & ptr. We'll
-				// probably encode the type as metadata.
-				format += "%s"
+				format += "0x%x"
 
 			default:
 				panic(fmt.Sprint("Unhandled type kind: ", typ))
