@@ -5,9 +5,10 @@ import (
 )
 
 func TestConst(t *testing.T) {
-	err := runAndCompareMain(testdata("const.go"))
-	if err != nil {t.Fatal(err)}
+	err := runAndCheckMain(testdata("const.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // vim: set ft=go:
-

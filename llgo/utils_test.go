@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
@@ -53,7 +52,7 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 
 	fn := engine.FindFunction(name)
 	if fn.IsNil() {
-		err = errors.New("Couldn't find function '" + name + "'")
+		err = fmt.Errorf("Couldn't find function '%s'", name)
 		return
 	}
 
@@ -99,30 +98,34 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 	return
 }
 
-func checkOutput(out, expectedOut []string) error {
+func checkStringsEqual(out, expectedOut []string) error {
 	if !reflect.DeepEqual(out, expectedOut) {
-		m := fmt.Sprintf("Output did not match: %q (actual) != %q (expected)",
-						 out, expectedOut)
-		return errors.New(m)
+		return fmt.Errorf("Output did not match: %q (actual) != %q (expected)",
+			out, expectedOut)
 	}
 	return nil
 }
 
-func runAndCompareMain(files []string) error {
+func runAndCheckMain(files []string, check func(a, b []string) error) error {
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
-	if err != nil {return err}
+	if err != nil {
+		return err
+	}
 	expected := strings.Split(strings.TrimSpace(string(gorun_out)), "\n")
 
 	// Now compile to and interpret the LLVM bitcode, comparing the output to
 	// the output of "go run" above.
 	m, err := compileFiles(files)
-	if err != nil {return err}
+	if err != nil {
+		return err
+	}
 	output, err := runFunction(m, "main")
-	if err == nil {err = checkOutput(output, expected)}
+	if err == nil {
+		err = check(output, expected)
+	}
 	return err
 }
 
 // vim: set ft=go:
-

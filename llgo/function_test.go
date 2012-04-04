@@ -5,14 +5,17 @@ import (
 )
 
 func TestFunction(t *testing.T) {
-	err := runAndCompareMain(testdata("fun.go"))
-	if err != nil {t.Fatal(err)}
+	err := runAndCheckMain(testdata("fun.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestVarargsFunction(t *testing.T) {
-	err := runAndCompareMain(testdata("varargs.go"))
-	if err != nil {t.Fatal(err)}
+	err := runAndCheckMain(testdata("varargs.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // vim: set ft=go:
-

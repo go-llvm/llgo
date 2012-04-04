@@ -70,8 +70,7 @@ func parseFile(fset *token.FileSet, filename string) *ast.File {
 	return file
 }
 
-func parseFiles(fset *token.FileSet,
-	filenames []string) (files map[string]*ast.File) {
+func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File) {
 	files = make(map[string]*ast.File)
 	for _, filename := range filenames {
 		if file := parseFile(fset, filename); file != nil {
@@ -91,7 +90,7 @@ func isGoFilename(filename string) bool {
 		strings.HasSuffix(filename, ".go")
 }
 
-func processFiles(filenames []string) {
+func compileFiles(filenames []string) (*llgo.Module, error) {
 	i := 0
 	for _, filename := range filenames {
 		switch _, err := os.Stat(filename); {
@@ -102,25 +101,31 @@ func processFiles(filenames []string) {
 			i++
 		}
 	}
+	if i == 0 {
+		return nil, errors.New("No Go source files were specified")
+	}
 	fset := token.NewFileSet()
-	processPackage(fset, parseFiles(fset, filenames[0:i]))
+	return compilePackage(fset, parseFiles(fset, filenames[0:i]))
 }
 
-func processPackage(fset *token.FileSet, files map[string]*ast.File) {
+func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Module, error) {
 	// make a package (resolve all identifiers)
 	pkg, err := ast.NewPackage(fset, files, types.GcImporter, types.Universe)
 	if err != nil {
 		report(err)
-		return
+		return nil, err
 	}
 	_, err = types.Check(fset, pkg)
 	if err != nil {
 		report(err)
-		return
+		return nil, err
 	}
+	return llgo.Compile(fset, pkg)
+}
 
-	// Build LLVM module(s).
-	module, err := llgo.Compile(fset, pkg)
+func main() {
+	flag.Parse()
+	module, err := compileFiles(flag.Args())
 	if err == nil {
 		defer module.Dispose()
 		if *dump {
@@ -135,11 +140,6 @@ func processPackage(fset *token.FileSet, files map[string]*ast.File) {
 		//fmt.Printf("llg.Compile(%v) failed: %v", file.Name, err)
 		report(err)
 	}
-}
-
-func main() {
-	flag.Parse()
-	processFiles(flag.Args())
 	os.Exit(exitCode)
 }
 

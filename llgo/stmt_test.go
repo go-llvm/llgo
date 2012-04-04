@@ -5,9 +5,10 @@ import (
 )
 
 func TestMultipleAssigment(t *testing.T) {
-	err := runAndCompareMain(testdata("multi.go"))
-	if err != nil {t.Fatal(err)}
+	err := runAndCheckMain(testdata("multi.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // vim: set ft=go:
-
