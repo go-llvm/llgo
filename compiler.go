@@ -53,6 +53,7 @@ type compiler struct {
 	filescope *ast.Scope
 	scope     *ast.Scope
 	pkgmap    map[*ast.Object]string
+	types     *TypeMap
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -122,7 +123,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			module := c.module.Module
 			t := obj.Type.(types.Type)
 			name := c.pkgmap[obj] + "." + obj.Name
-			g := llvm.AddGlobal(module, t.LLVMType(), name)
+			g := llvm.AddGlobal(module, c.types.ToLLVM(t), name)
 			g.SetLinkage(llvm.AvailableExternallyLinkage)
 			obj.Data = c.NewLLVMValue(g, t)
 		}
@@ -176,6 +177,7 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 	compiler.fileset = fset
 	compiler.pkg = pkg
 	compiler.initfuncs = make([]Value, 0)
+	compiler.types = NewTypeMap()
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = llvm.GlobalContext().NewBuilder()

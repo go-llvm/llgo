@@ -30,7 +30,7 @@ import (
 
 func (c *compiler) makeSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
 	n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
-	mem := c.builder.CreateArrayMalloc(elttyp.LLVMType(), n, "")
+	mem := c.builder.CreateArrayMalloc(c.types.ToLLVM(elttyp), n, "")
 	for i, value := range v {
 		indices := []llvm.Value{
 			llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
@@ -38,7 +38,7 @@ func (c *compiler) makeSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
 		c.builder.CreateStore(value, ep)
 	}
 	slicetyp := types.Slice{Elt: elttyp}
-	struct_ := c.builder.CreateAlloca(slicetyp.LLVMType(), "")
+	struct_ := c.builder.CreateAlloca(c.types.ToLLVM(&slicetyp), "")
 	c.builder.CreateStore(mem, c.builder.CreateStructGEP(struct_, 0, ""))
 	c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 1, ""))
 	c.builder.CreateStore(n, c.builder.CreateStructGEP(struct_, 2, ""))

@@ -16,10 +16,6 @@ func (m MagicNumber) Number() int {
     return 3
 }
 
-//func test(n Numbered) {
-//    n.Number()
-//}
-
 func main() {
     var b Beast
     var m MagicNumber

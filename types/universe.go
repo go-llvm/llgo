@@ -111,7 +111,7 @@ func init() {
 
 	nil_ := defConst("nil")
 	nil_.Data = &Const{}
-	nil_.Type = &Basic{NilKind}
+	nil_.Type = &Basic{Kind: NilKind}
 
 	defFun("append")
 	defFun("cap")

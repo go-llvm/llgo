@@ -128,8 +128,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				} else {
 					ptr, _ := (obj.Data).(Value)
 					value = value.Convert(types.Deref(ptr.Type()))
-					c.builder.CreateStore(
-						value.LLVMValue(), ptr.LLVMValue())
+					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 				}
 			}
 		default:
@@ -250,7 +249,7 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 		fn_type := types.Deref(fn.Type()).(*types.Func)
 		for _, param := range fn_type.Params {
 			typ := param.Type.(types.Type)
-			param_types = append(param_types, typ.LLVMType())
+			param_types = append(param_types, c.types.ToLLVM(typ))
 		}
 		args_struct_type = llvm.StructType(param_types, false)
 		args_mem = c.builder.CreateAlloca(args_struct_type, "")

@@ -35,7 +35,7 @@ func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
 
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	fn_type := c.VisitFuncType(lit.Type)
-	fn := llvm.AddFunction(c.module.Module, "", fn_type.LLVMType())
+	fn := llvm.AddFunction(c.module.Module, "", c.types.ToLLVM(fn_type))
 	fn.SetFunctionCallConv(llvm.FastCallConv)
 
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
@@ -98,13 +98,13 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			llvm_values := make([]llvm.Value, len(values))
 			for i, value := range values {
 				if value == nil {
-					llvm_values[i] = llvm.ConstNull(elttype.LLVMType())
+					llvm_values[i] = llvm.ConstNull(c.types.ToLLVM(elttype))
 				} else {
 					llvm_values[i] = value.Convert(elttype).LLVMValue()
 				}
 			}
 			return c.NewLLVMValue(
-				llvm.ConstArray(elttype.LLVMType(), llvm_values), typ)
+				llvm.ConstArray(c.types.ToLLVM(elttype), llvm_values), typ)
 		}
 	}
 	panic(fmt.Sprint("Unhandled type kind: ", typ))

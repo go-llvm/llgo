@@ -12,7 +12,6 @@ package types
 
 import (
 	"fmt"
-	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"sort"
 )
@@ -46,12 +45,19 @@ const (
 
 // All types implement the Type interface.
 type Type interface {
-	LLVMType() llvm.Type
+	isType()
 	String() string
 }
 
+// All concrete types embed ImplementsType which
+// ensures that all types implement the Type interface.
+type ImplementsType struct{}
+
+func (t *ImplementsType) isType() {}
+
 // A Bad type is a non-nil placeholder type when we don't know a type.
 type Bad struct {
+	ImplementsType
 	Msg string // for better error reporting/debugging
 }
 
@@ -59,12 +65,9 @@ func (b *Bad) String() string {
 	return fmt.Sprint("Bad(", b.Msg, ")")
 }
 
-func (b *Bad) LLVMType() llvm.Type {
-	return llvm.Type{nil}
-}
-
 // A Basic represents a (unnamed) basic type.
 type Basic struct {
+	ImplementsType
 	Kind BasicTypeKind
 	// TODO(gri) need a field specifying the exact basic type
 }
@@ -73,39 +76,9 @@ func (b *Basic) String() string {
 	return fmt.Sprint("Basic(", b.Kind, ")")
 }
 
-func (b *Basic) LLVMType() llvm.Type {
-	switch b.Kind {
-	case BoolKind:
-		return llvm.Int1Type()
-	case ByteKind, Int8Kind, Uint8Kind:
-		return llvm.Int8Type()
-	case Int16Kind, Uint16Kind:
-		return llvm.Int16Type()
-	case UintptrKind, Int32Kind, Uint32Kind:
-		return llvm.Int32Type()
-	case Int64Kind, Uint64Kind:
-		return llvm.Int64Type()
-	case Float32Kind:
-		return llvm.FloatType()
-	case Float64Kind:
-		return llvm.DoubleType()
-	//case Complex64: TODO
-	//case Complex128:
-	//case UntypedInt:
-	//case UntypedFloat:
-	//case UntypedComplex:
-	case StringKind:
-		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-		elements := []llvm.Type{i8ptr, llvm.Int32Type()}
-		return llvm.StructType(elements, false)
-	case RuneKind:
-		return Int.LLVMType()
-	}
-	panic(fmt.Sprint("unhandled kind: ", b.Kind))
-}
-
 // An Array represents an array type [Len]Elt.
 type Array struct {
+	ImplementsType
 	Len uint64
 	Elt Type
 }
@@ -114,22 +87,10 @@ func (a *Array) String() string {
 	return fmt.Sprint("Array(", a.Len, ", ", a.Elt, ")")
 }
 
-func (a *Array) LLVMType() llvm.Type {
-	return llvm.ArrayType(a.Elt.LLVMType(), int(a.Len))
-}
-
 // A Slice represents a slice type []Elt.
 type Slice struct {
+	ImplementsType
 	Elt Type
-}
-
-func (s *Slice) LLVMType() llvm.Type {
-	elements := []llvm.Type{
-		llvm.PointerType(s.Elt.LLVMType(), 0),
-		llvm.Int32Type(),
-		llvm.Int32Type(),
-	}
-	return llvm.StructType(elements, false)
 }
 
 func (s *Slice) String() string {
@@ -139,9 +100,9 @@ func (s *Slice) String() string {
 // A Struct represents a struct type struct{...}.
 // Anonymous fields are represented by objects with empty names.
 type Struct struct {
+	ImplementsType
 	Fields ObjList  // struct fields; or nil
 	Tags   []string // corresponding tags; or nil
-	typ    llvm.Type
 	// TODO(gri) This type needs some rethinking:
 	// - at the moment anonymous fields are marked with "" object names,
 	//   and their names have to be reconstructed
@@ -152,22 +113,9 @@ func (s *Struct) String() string {
 	return fmt.Sprint("Struct(", s.Fields, ", ", s.Tags, ")")
 }
 
-func (s *Struct) LLVMType() llvm.Type {
-	if s.typ.IsNil() {
-		s.typ = llvm.GlobalContext().StructCreateNamed("")
-		elements := make([]llvm.Type, len(s.Fields))
-		for i, f := range s.Fields {
-			ft := f.Type.(Type)
-			elements[i] = ft.LLVMType()
-		}
-		//return llvm.StructType(elements, false)
-		s.typ.StructSetBody(elements, false)
-	}
-	return s.typ
-}
-
 // A Pointer represents a pointer type *Base.
 type Pointer struct {
+	ImplementsType
 	Base Type
 }
 
@@ -175,13 +123,10 @@ func (p *Pointer) String() string {
 	return fmt.Sprint("Pointer(", p.Base, ")")
 }
 
-func (p *Pointer) LLVMType() llvm.Type {
-	return llvm.PointerType(p.Base.LLVMType(), 0)
-}
-
 // A Func represents a function type func(...) (...).
 // Unnamed parameters are represented by objects with empty names.
 type Func struct {
+	ImplementsType
 	Recv       *ast.Object // nil if not a method
 	Params     ObjList     // (incoming) parameters from left to right; or nil
 	Results    ObjList     // (outgoing) results from left to right; or nil
@@ -193,69 +138,9 @@ func (f *Func) String() string {
 		f.Params, f.Results, f.IsVariadic)
 }
 
-func (f *Func) LLVMType() llvm.Type {
-	param_types := make([]llvm.Type, 0)
-
-	// Add receiver parameter.
-	if f.Recv != nil {
-		recv_type := f.Recv.Type.(Type)
-		param_types = append(param_types, recv_type.LLVMType())
-	}
-
-	for i, param := range f.Params {
-		param_type := param.Type.(Type)
-		if f.IsVariadic && i == len(f.Params)-1 {
-			param_type = &Slice{Elt: param_type}
-		}
-		param_types = append(param_types, param_type.LLVMType())
-	}
-
-	var return_type llvm.Type
-	switch len(f.Results) {
-	case 0:
-		return_type = llvm.VoidType()
-	case 1:
-		return_type = (f.Results[0].Type.(Type)).LLVMType()
-	default:
-		elements := make([]llvm.Type, len(f.Results))
-		for i, result := range f.Results {
-			elements[i] = result.Type.(Type).LLVMType()
-		}
-		return_type = llvm.StructType(elements, false)
-	}
-
-	fn_type := llvm.FunctionType(return_type, param_types, false)
-	return llvm.PointerType(fn_type, 0)
-
-	/*
-	   if fn_name == "init" {
-	       // Make init functions anonymous
-	       fn_name = ""
-	   } else if f.Recv != nil {
-	       return_type := llvm.VoidType() //fn_type.ReturnType() TODO
-	       param_types := make([]llvm.Type, 0) //fn_type.ParamTypes()
-	       isvararg := fn_type.IsVariadic
-
-	       // Add receiver as the first parameter type.
-	       recv_type := c.GetType(f.Recv.List[0].Type)
-	       if recv_type != nil {
-	           param_types = append(param_types, recv_type.LLVMType())
-	       }
-
-	       for _, param := range fn_type.Params {
-	           param_type := param.Type.(Type)
-	           param_types = append(param_types, param_type.LLVMType())
-	       }
-
-	       fn_type = llvm.FunctionType(return_type, param_types, isvararg)
-	   }
-
-	   return fn_type
-	*/
-}
-
 // An Interface represents an interface type interface{...}.
 type Interface struct {
+	ImplementsType
 	Methods ObjList // interface methods sorted by name; or nil
 }
 
@@ -263,19 +148,9 @@ func (i *Interface) String() string {
 	return fmt.Sprint("Interface(", i.Methods, ")")
 }
 
-func (i *Interface) LLVMType() llvm.Type {
-	ptr_type := llvm.PointerType(llvm.Int8Type(), 0)
-	elements := make([]llvm.Type, 1+len(i.Methods))
-	elements[0] = ptr_type // value
-	for n, m := range i.Methods {
-		fnptr := Pointer{Base: m.Type.(Type)}
-		elements[n+1] = fnptr.LLVMType()
-	}
-	return llvm.StructType(elements, false)
-}
-
 // A Map represents a map type map[Key]Elt.
 type Map struct {
+	ImplementsType
 	Key, Elt Type
 }
 
@@ -283,12 +158,9 @@ func (m *Map) String() string {
 	return fmt.Sprint("Map(", m.Key, ", ", m.Elt, ")")
 }
 
-func (m *Map) LLVMType() llvm.Type {
-	return llvm.Type{nil} // TODO
-}
-
 // A Chan represents a channel type chan Elt, <-chan Elt, or chan<-Elt.
 type Chan struct {
+	ImplementsType
 	Dir ast.ChanDir
 	Elt Type
 }
@@ -297,31 +169,24 @@ func (c *Chan) String() string {
 	return fmt.Sprint("Chan(", c.Dir, ", ", c.Elt, ")")
 }
 
-func (c *Chan) LLVMType() llvm.Type {
-	return llvm.Type{nil} // TODO
-}
-
 // A Name represents a named type as declared in a type declaration.
 type Name struct {
+	ImplementsType
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
 	Methods    ObjList
 	// TODO(gri) need to remember fields and methods.
-	visited bool
 }
 
 func (n *Name) String() string {
-	if !n.visited {
-		n.visited = true
-		res := fmt.Sprint("Name(", n.Obj.Name, ", ", n.Underlying, ")")
-		n.visited = false
+	u := n.Underlying
+	if u != nil {
+		n.Underlying = nil
+		res := fmt.Sprint("Name(", n.Obj.Name, ", ", u, ")")
+		n.Underlying = u
 		return res
 	}
 	return fmt.Sprint("Name(", n.Obj.Name, ", ...)")
-}
-
-func (n *Name) LLVMType() llvm.Type {
-	return n.Underlying.LLVMType()
 }
 
 // typ must be a pointer type; Deref returns the pointer's base type.

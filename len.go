@@ -73,7 +73,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		return c.NewConstValue(token.INT, v)
 
 	case *types.Struct:
-		sz := llvm.SizeOf(typ.LLVMType())
+		sz := llvm.SizeOf(c.types.ToLLVM(typ))
 		// FIXME
 		// SizeOf returns a Constant, but not a ConstantInt, so we
 		// can't call ZExtValue on it. Not sure how best to tackle

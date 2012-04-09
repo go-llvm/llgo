@@ -291,16 +291,14 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			struct_value := lhs.LLVMValue()
 			receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
 			fn_value := c.builder.CreateStructGEP(struct_value, i+1, "")
-			receiver_type := &types.Pointer{Base: types.Int8}
 			method_type := c.ObjGetType(iface.Methods[i]).(*types.Func)
-			method_type.Recv = ast.NewObj(ast.Var, "")
-			method_type.Recv.Type = receiver_type
 			method := c.NewLLVMValue(
 				c.builder.CreateBitCast(
 					c.builder.CreateLoad(fn_value, ""),
-					method_type.LLVMType(), ""), method_type)
+					c.types.ToLLVM(method_type), ""), method_type)
 			method.receiver = c.NewLLVMValue(
-				c.builder.CreateLoad(receiver_value, ""), receiver_type)
+				c.builder.CreateLoad(receiver_value, ""),
+				method_type.Recv.Type.(types.Type))
 			return method
 		}
 	}

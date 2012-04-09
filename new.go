@@ -33,7 +33,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 		panic("Expecting only one argument to new")
 	}
 	typ := c.GetType(expr.Args[0])
-	llvm_typ := typ.LLVMType()
+	llvm_typ := c.types.ToLLVM(typ)
 	mem := c.builder.CreateMalloc(llvm_typ, "")
 	c.builder.CreateStore(llvm.ConstNull(llvm_typ), mem)
 	return c.NewLLVMValue(mem, &types.Pointer{Base: typ})

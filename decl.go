@@ -72,7 +72,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 		pkgname := c.pkgmap[f.Name.Obj]
 		fn_name = pkgname + "." + fn_name
 	}
-	llvm_fn_type := fn_type.LLVMType().ElementType()
+	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
 	if exported {
 		fn.SetLinkage(llvm.ExternalLinkage)
@@ -108,7 +108,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		recv_obj := fn_type.Recv
 		recv_type := recv_obj.Type.(types.Type)
 		stack_value := c.builder.CreateAlloca(
-			recv_type.LLVMType(), recv_obj.Name)
+			c.types.ToLLVM(recv_type), recv_obj.Name)
 		c.builder.CreateStore(param_0, stack_value)
 		value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
 		value.indirect = true
@@ -124,7 +124,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 			}
 
 			param_value := llvm_fn.Param(param_i)
-			stack_value := c.builder.CreateAlloca(param_type.LLVMType(), name)
+			stack_value := c.builder.CreateAlloca(c.types.ToLLVM(param_type), name)
 			c.builder.CreateStore(param_value, stack_value)
 			value := c.NewLLVMValue(stack_value,
 				&types.Pointer{Base: param_type})
@@ -169,7 +169,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 	t types.Type,
 	name string) (g *LLVMValue) {
 	if e == nil {
-		gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+		gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 		g.indirect = !isArray(t)
 		return g
@@ -179,7 +179,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 		defer c.builder.SetInsertPointAtEnd(block)
 	}
 	fn_type := new(types.Func)
-	llvm_fn_type := fn_type.LLVMType().ElementType()
+	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
@@ -211,7 +211,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 	// Set the initialiser. If it's a non-const value, then
 	// we'll have to do the assignment in a global constructor
 	// function.
-	gv := llvm.AddGlobal(c.module.Module, t.LLVMType(), name)
+	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
 	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 	g.indirect = !isArray(t)
 	if isconst {
@@ -219,7 +219,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 		// global now.
 		gv.SetInitializer(init_.LLVMValue())
 	} else {
-		gv.SetInitializer(llvm.ConstNull(t.LLVMType()))
+		gv.SetInitializer(llvm.ConstNull(c.types.ToLLVM(t)))
 		c.builder.CreateStore(init_.LLVMValue(), gv)
 	}
 
@@ -296,11 +296,11 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				// declared inside a function.
 				var llvm_init llvm.Value
 				stack_value := c.builder.CreateAlloca(
-					value_type.LLVMType(), name)
+					c.types.ToLLVM(value_type), name)
 				if init_ == nil {
 					// If no initialiser was specified, set it to the
 					// zero value.
-					llvm_init = llvm.ConstNull(value_type.LLVMType())
+					llvm_init = llvm.ConstNull(c.types.ToLLVM(value_type))
 				} else {
 					llvm_init = init_.Convert(value_type).LLVMValue()
 				}
