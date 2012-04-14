@@ -335,6 +335,9 @@ func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
 	type_, istype := (obj.Type).(types.Type)
 	if !istype {
 		type_ = c.GetType(spec.Type)
+		if name, isname := type_.(*types.Name); isname {
+			type_ = types.Underlying(name)
+		}
 		obj.Type = &types.Name{Underlying: type_, Obj: obj}
 	}
 }

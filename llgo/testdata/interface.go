@@ -11,14 +11,14 @@ func (b *Beast) Number() int {
     return 666
 }
 
-type MagicNumber struct {}
+type MagicNumber int
 func (m MagicNumber) Number() int {
-    return 3
+    return int(m)
 }
 
 func main() {
     var b Beast
-    var m MagicNumber
+    var m MagicNumber = 3
     var n Numbered = &b
     println(n.Number())
 

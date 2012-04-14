@@ -29,7 +29,6 @@ import (
 	"go/token"
 	"math"
 	"math/big"
-	"sort"
 )
 
 var (
@@ -272,87 +271,40 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	panic("unreachable")
 }
 
-func (v *LLVMValue) Convert(typ types.Type) Value {
-	if types.Identical(v.typ, typ) {
-		return v
+func (v *LLVMValue) Convert(dst_typ types.Type) Value {
+	// If it's a stack allocated value, we'll want to compare the
+	// value type, not the pointer type.
+	src_typ := v.typ
+	if v.indirect {
+		src_typ = types.Deref(src_typ)
 	}
 
-	if name, isname := typ.(*types.Name); isname {
-		typ = name.Underlying
+	// Get the underlying type, if any.
+	orig_dst_typ := dst_typ
+	if name, isname := dst_typ.(*types.Name); isname {
+		dst_typ = types.Underlying(name)
 	}
 
-	var srcname *types.Name
-	srctyp := v.typ
-	if name, isname := srctyp.(*types.Name); isname {
-		srcname = name
-		srctyp = name.Underlying
+	// Get the underlying type, if any.
+	if name, isname := src_typ.(*types.Name); isname {
+		src_typ = types.Underlying(name)
+	}
+
+	// Identical (underlying) types? Just swap in the destination type.
+	if types.Identical(src_typ, dst_typ) {
+		dst_typ = orig_dst_typ
+		if v.indirect {
+			dst_typ = &types.Pointer{Base: dst_typ}
+		}
+		// XXX do we need to copy address/receiver here?
+		newv := v.compiler.NewLLVMValue(v.value, dst_typ)
+		newv.indirect = true
+		return newv
 	}
 
 	// Converting to an interface type.
-	if interface_, isinterface := typ.(*types.Interface); isinterface {
-		isptr := false
-		if p, fromptr := srctyp.(*types.Pointer); fromptr {
-			isptr = true
-			srctyp = p.Base
-			if name, isname := srctyp.(*types.Name); isname {
-				srcname = name
-				srctyp = name.Underlying
-			}
-		}
-
-		if _, fromstruct := srctyp.(*types.Struct); srcname != nil && fromstruct {
-			// TODO check whether the functions in the struct take
-			// value or pointer receivers.
-
-			iface_elements := make([]llvm.Value, 1+len(interface_.Methods))
-			iface_struct_type := v.compiler.types.ToLLVM(interface_)
-			element_types := iface_struct_type.StructElementTypes()
-			for i, _ := range iface_elements {
-				iface_elements[i] = llvm.ConstNull(element_types[i])
-			}
-			iface_struct := llvm.ConstStruct(iface_elements, false)
-
-			builder := v.compiler.builder
-			var ptr llvm.Value
-			if isptr {
-				ptr = v.LLVMValue()
-			} else {
-				ptr = builder.CreateMalloc(v.compiler.types.ToLLVM(srctyp), "")
-			}
-			ptr = builder.CreateBitCast(ptr, element_types[0], "")
-			iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
-
-			// Look up the method by name.
-			methods := srcname.Methods
-			for i, m := range interface_.Methods {
-				// TODO make this loop linear by iterating through the
-				// interface methods and type methods together.
-				mi := sort.Search(len(methods), func(i int) bool {
-					return methods[i].Name >= m.Name
-				})
-				if mi >= len(methods) || methods[mi].Name != m.Name {
-					panic("Failed to locate method: " + m.Name)
-				}
-				method_obj := methods[mi]
-				method := v.compiler.Resolve(method_obj).(*LLVMValue)
-				llvm_value := method.LLVMValue()
-				llvm_value = builder.CreateBitCast(
-					llvm_value,
-					element_types[i+1], "")
-				iface_struct = builder.CreateInsertValue(
-					iface_struct, llvm_value,
-					i+1, "")
-			}
-
-			return v.compiler.NewLLVMValue(iface_struct, interface_)
-
-			//iface_struct := v.compiler.builder.CreateMalloc(
-			//    iface_struct_type, "")
-			//return NewLLVMValue(v.compiler, iface_struct,
-			//                    &types.Pointer{Base: interface_})
-		}
-		// TODO handle other interface conversions (e.g. one interface to
-		// another).
+	if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
+		return v.convertV2I(interface_)
 	}
 
 	/*
@@ -373,7 +325,7 @@ func (v *LLVMValue) Convert(typ types.Type) Value {
 	       }
 	   }
 	*/
-	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", typ))
+	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", orig_dst_typ))
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
@@ -458,22 +410,32 @@ func (v ConstValue) UnaryOp(op token.Token) Value {
 	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ}
 }
 
-func (v ConstValue) Convert(typ types.Type) Value {
-	if !types.Identical(v.typ, typ) {
-		if name, isname := typ.(*types.Name); isname {
-			typ = name.Underlying
+func (v ConstValue) Convert(dst_typ types.Type) Value {
+	// Get the underlying type, if any.
+	if name, isname := dst_typ.(*types.Name); isname {
+		dst_typ = types.Underlying(name)
+	}
+
+	if !types.Identical(v.typ, dst_typ) {
+		// Get the Basic type.
+		if name, isname := dst_typ.(*types.Name); isname {
+			dst_typ = name.Underlying
 		}
+
 		compiler := v.compiler
-		if basic, ok := typ.(*types.Basic); ok {
-			return ConstValue{*v.Const.Convert(&typ), compiler, basic}
+		if basic, ok := dst_typ.(*types.Basic); ok {
+			return ConstValue{*v.Const.Convert(&dst_typ), compiler, basic}
 		} else {
 			// Special case for 'nil'
 			if v.typ.Kind == types.NilKind {
-				zero := llvm.ConstNull(compiler.types.ToLLVM(typ))
-				return compiler.NewLLVMValue(zero, typ)
+				zero := llvm.ConstNull(compiler.types.ToLLVM(dst_typ))
+				return compiler.NewLLVMValue(zero, dst_typ)
 			}
 			panic("unhandled conversion")
 		}
+	} else {
+		// TODO convert to dst type. ConstValue may need to change to allow
+		// storage of types other than Basic.
 	}
 	return v
 }

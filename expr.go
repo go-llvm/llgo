@@ -357,6 +357,19 @@ func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 	return operand
 }
 
+func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
+	if expr.Type == nil {
+		// .(type) switch
+		// XXX this will probably be handled in the switch statement.
+		panic("TODO")
+	} else {
+		lhs := c.VisitExpr(expr.X)
+		typ := c.GetType(expr.Type)
+		return lhs.Convert(typ)
+	}
+	return nil
+}
+
 func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	switch x := expr.(type) {
 	case *ast.BasicLit:
@@ -379,6 +392,8 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 		return c.VisitStarExpr(x)
 	case *ast.ParenExpr:
 		return c.VisitExpr(x.X)
+	case *ast.TypeAssertExpr:
+		return c.VisitTypeAssertExpr(x)
 	case *ast.Ident:
 		if x.Obj == nil {
 			x.Obj = c.LookupObj(x.Name)
