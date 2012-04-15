@@ -13,34 +13,38 @@ package types
 import (
 	"fmt"
 	"go/ast"
+	"reflect"
 	"sort"
 )
 
-type BasicTypeKind int
+type BasicTypeKind reflect.Kind
 
 // Constants for basic types.
 const (
-	NilKind BasicTypeKind = iota
-	Uint8Kind
-	Uint16Kind
-	Uint32Kind
-	Uint64Kind
-	Int8Kind
-	Int16Kind
-	Int32Kind
-	Int64Kind
-	Float32Kind
-	Float64Kind
-	Complex64Kind
-	Complex128Kind
+	BoolKind = BasicTypeKind(reflect.Bool)
+	IntKind = BasicTypeKind(reflect.Int)
+	Int8Kind = BasicTypeKind(reflect.Int8)
+	Int16Kind = BasicTypeKind(reflect.Int16)
+	Int32Kind = BasicTypeKind(reflect.Int32)
+	Int64Kind = BasicTypeKind(reflect.Int64)
+	UintKind = BasicTypeKind(reflect.Uint)
+	Uint8Kind = BasicTypeKind(reflect.Uint8)
+	Uint16Kind = BasicTypeKind(reflect.Uint16)
+	Uint32Kind = BasicTypeKind(reflect.Uint32)
+	Uint64Kind = BasicTypeKind(reflect.Uint64)
+	UintptrKind = BasicTypeKind(reflect.Uintptr)
+	Float32Kind = BasicTypeKind(reflect.Float32)
+	Float64Kind = BasicTypeKind(reflect.Float64)
+	Complex64Kind = BasicTypeKind(reflect.Complex64)
+	Complex128Kind = BasicTypeKind(reflect.Complex128)
+	StringKind = BasicTypeKind(reflect.String)
+
+	NilKind BasicTypeKind = StringKind + iota + 1
+	RuneKind
+	ByteKind
 	UntypedIntKind
 	UntypedFloatKind
 	UntypedComplexKind
-	ByteKind
-	BoolKind
-	UintptrKind
-	RuneKind
-	StringKind
 )
 
 // All types implement the Type interface.

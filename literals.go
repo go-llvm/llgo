@@ -56,11 +56,11 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	return fn_value
 }
 
-// XXX currently only handles composite array literals
 func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 	typ := c.GetType(lit.Type)
 	var values []Value
 	if lit.Elts != nil {
+		// TODO handle string keys.
 		valuemap := make(map[int]Value)
 		maxi := 0
 		for i, elt := range lit.Elts {
@@ -90,22 +90,45 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		}
 	}
 
-	switch typ := typ.(type) {
+	origtyp := typ
+	switch typ := types.Underlying(typ).(type) {
 	case *types.Array:
-		{
-			typ.Len = uint64(len(values))
-			elttype := typ.Elt
-			llvm_values := make([]llvm.Value, len(values))
-			for i, value := range values {
-				if value == nil {
-					llvm_values[i] = llvm.ConstNull(c.types.ToLLVM(elttype))
-				} else {
-					llvm_values[i] = value.Convert(elttype).LLVMValue()
+		typ.Len = uint64(len(values))
+		elttype := typ.Elt
+		llvm_values := make([]llvm.Value, len(values))
+		for i, value := range values {
+			if value == nil {
+				llvm_values[i] = llvm.ConstNull(c.types.ToLLVM(elttype))
+			} else {
+				if lv, islv := value.(*LLVMValue); islv && lv.indirect {
+					value = lv.Deref()
 				}
+				llvm_values[i] = value.Convert(elttype).LLVMValue()
 			}
-			return c.NewLLVMValue(
-				llvm.ConstArray(c.types.ToLLVM(elttype), llvm_values), typ)
 		}
+		// TODO set non-const values after creating const array.
+		return c.NewLLVMValue(
+			llvm.ConstArray(c.types.ToLLVM(elttype), llvm_values), origtyp)
+
+	case *types.Struct:
+		struct_value := c.builder.CreateMalloc(c.types.ToLLVM(typ), "")
+		for i, value := range values {
+			elttype := c.ObjGetType(typ.Fields[i])
+			var llvm_value llvm.Value
+			if value == nil {
+				llvm_value = llvm.ConstNull(c.types.ToLLVM(elttype))
+			} else {
+				if lv, islv := value.(*LLVMValue); islv && lv.indirect {
+					value = lv.Deref()
+				}
+				llvm_value = value.Convert(elttype).LLVMValue()
+			}
+			ptr := c.builder.CreateStructGEP(struct_value, i, "")
+			c.builder.CreateStore(llvm_value, ptr)
+		}
+		m := c.NewLLVMValue(struct_value, &types.Pointer{Base: origtyp})
+		m.indirect = true
+		return m
 	}
 	panic(fmt.Sprint("Unhandled type kind: ", typ))
 }

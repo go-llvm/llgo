@@ -30,6 +30,8 @@ import (
 
 // ConvertV2I converts a value to an interface.
 func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
+	// TODO deref indirect value, then use 'address' as pointer
+	// value.
 	var srcname *types.Name
 	srctyp := v.Type()
 	if name, isname := srctyp.(*types.Name); isname {
@@ -115,8 +117,47 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 }
 
 // ConvertI2I converts an interface to another interface.
-func (v *LLVMValue) convertI2I(i *types.Interface) Value {
-	panic("unimplemented")
+func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
+	builder := v.compiler.builder
+	src_typ := v.typ
+	var vptr llvm.Value
+	if v.indirect {
+		src_typ = types.Deref(src_typ)
+		vptr = v.LLVMValue()
+	} else {
+		vptr = v.address.LLVMValue()
+	}
+	src_typ = src_typ.(*types.Name).Underlying
+
+	iface_struct_type := v.compiler.types.ToLLVM(iface)
+	element_types := iface_struct_type.StructElementTypes()
+	iface_elements := make([]llvm.Value, len(element_types))
+	for i, _ := range iface_elements {
+		iface_elements[i] = llvm.ConstNull(element_types[i])
+	}
+	iface_struct := llvm.ConstStruct(iface_elements, false)
+	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
+	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 0, "")
+
+	// TODO check whether the functions in the struct take
+	// value or pointer receivers.
+
+	// TODO handle dynamic interface conversion (non-subset).
+	methods := src_typ.(*types.Interface).Methods
+	for i, m := range iface.Methods {
+		// TODO make this loop linear by iterating through the
+		// interface methods and type methods together.
+		mi := sort.Search(len(methods), func(i int) bool {
+			return methods[i].Name >= m.Name
+		})
+		if mi >= len(methods) || methods[mi].Name != m.Name {
+			panic("Failed to locate method: " + m.Name)
+		}
+		method := builder.CreateStructGEP(vptr, mi+1, "")
+		iface_struct = builder.CreateInsertValue(
+			iface_struct, builder.CreateLoad(method, ""), i+1, "")
+	}
+	return v.compiler.NewLLVMValue(iface_struct, iface)
 }
 
 // vim: set ft=go :

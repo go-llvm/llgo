@@ -19,10 +19,10 @@ func TestInterfaceToInterfaceConversion(t *testing.T) {
 }
 
 func TestStaticBasicTypeToInterfaceConversion(t *testing.T) {
-    err := runAndCheckMain(testdata("interface_basic.go"), checkStringsEqual)
-    if err != nil {
-        t.Fatal(err)
-    }
+	err := runAndCheckMain(testdata("interface_basic.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // vim: set ft=go:

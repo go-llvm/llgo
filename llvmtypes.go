@@ -40,9 +40,13 @@ func NewTypeMap() *TypeMap {
 }
 
 func (tm *TypeMap) ToLLVM(t types.Type) llvm.Type {
+	t = types.Underlying(t)
 	lt, ok := tm.types[t]
 	if !ok {
 		lt = tm.makeLLVMType(t)
+		if lt.IsNil() {
+			panic(fmt.Sprint("Failed to create LLVM type for: ", t))
+		}
 		tm.types[t] = lt
 	}
 	return lt
@@ -199,7 +203,19 @@ func (tm *TypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
 }
 
 func (tm *TypeMap) mapLLVMType(m *types.Map) llvm.Type {
-	return llvm.Type{nil} // TODO
+	// XXX This map type will change in the future, when I get around to it.
+	// At the moment, it's representing a really dumb singly linked list.
+	list_type := llvm.GlobalContext().StructCreateNamed("")
+	list_ptr_type := llvm.PointerType(list_type, 0)
+	size_type := llvm.Int32Type()
+	element_types := []llvm.Type{size_type, list_type}
+	typ := llvm.StructType(element_types, false)
+	tm.types[m] = typ
+
+	list_element_types := []llvm.Type{
+		list_ptr_type, tm.ToLLVM(m.Key), tm.ToLLVM(m.Elt)}
+	list_type.StructSetBody(list_element_types, false)
+	return typ
 }
 
 func (tm *TypeMap) chanLLVMType(c *types.Chan) llvm.Type {
