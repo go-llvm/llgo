@@ -396,10 +396,8 @@ func (c *compiler) VisitDecl(decl ast.Decl) Value {
 	case *ast.FuncDecl:
 		return c.VisitFuncDecl(x)
 	case *ast.GenDecl:
-		{
-			c.VisitGenDecl(x)
-			return nil
-		}
+		c.VisitGenDecl(x)
+		return nil
 	}
 	panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",
 		reflect.TypeOf(decl),

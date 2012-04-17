@@ -253,10 +253,10 @@ func (p *gcParser) parsePkgId() *ast.Object {
 	pkg := p.imports[id]
 	if pkg == nil {
 		/*
-		scope = ast.NewScope(nil)
-		pkg = ast.NewObj(ast.Pkg, "")
-		pkg.Data = scope
-		p.imports[id] = pkg
+			scope = ast.NewScope(nil)
+			pkg = ast.NewObj(ast.Pkg, "")
+			pkg.Data = scope
+			p.imports[id] = pkg
 		*/
 		// FIXME Ideally this should only be done if the main program refers
 		// to the package. If it doesn't, this is an unnecessary performance

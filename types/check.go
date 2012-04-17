@@ -158,6 +158,14 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 
 	case *ast.StructType:
 		fields, tags, _ := c.collectFields(token.STRUCT, t.Fields, cycleOk)
+		tagmap := make(map[*ast.Object]string)
+		for i, field := range fields {
+			tagmap[field] = tags[i]
+		}
+		fields.Sort()
+		for i, field := range fields {
+			tags[i] = tagmap[field]
+		}
 		return &Struct{Fields: fields, Tags: tags}
 
 	case *ast.FuncType:
@@ -229,4 +237,3 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 }
 
 // vim: set ft=go :
-
