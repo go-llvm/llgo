@@ -71,7 +71,10 @@ func (c *compiler) LookupObj(name string) *ast.Object {
 func (c *compiler) Resolve(obj *ast.Object) Value {
 	if obj.Kind == ast.Pkg {
 		return nil
+	} else if obj.Kind == ast.Typ {
+		return TypeValue{obj.Type.(types.Type)}
 	}
+
 	value, isvalue := (obj.Data).(Value)
 	if isvalue {
 		return value

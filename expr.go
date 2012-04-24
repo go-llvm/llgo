@@ -48,7 +48,7 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 }
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
-	var fn *LLVMValue
+	// XXX we need to disambiguate between type/expression here.
 	switch x := (expr.Fun).(type) {
 	case *ast.Ident:
 		switch x.String() {
@@ -58,25 +58,21 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return c.VisitLen(expr)
 		case "new":
 			return c.VisitNew(expr)
-		default:
-			// Is it a named type? Then this is a conversion (e.g. int(123))
-			if len(expr.Args) == 1 {
-				typ := c.GetType(x)
-				if _, ok := typ.(*types.Name); ok {
-					value := c.VisitExpr(expr.Args[0])
-					return value.Convert(typ)
-				}
-			}
-
-			fn = c.Resolve(x.Obj).(*LLVMValue)
-			if fn == nil {
-				panic(fmt.Sprintf(
-					"No function found with name '%s'", x.String()))
-			}
 		}
-	default:
-		fn = c.VisitExpr(expr.Fun).(*LLVMValue)
 	}
+	lhs := c.VisitExpr(expr.Fun)
+
+	// Is it a type conversion?
+	if len(expr.Args) == 1 {
+		if _, ok := lhs.(TypeValue); ok {
+			typ := lhs.Type()
+			value := c.VisitExpr(expr.Args[0])
+			return value.Convert(typ)
+		}
+	}
+
+	// Not a type conversion, so must be a function call.
+	fn := lhs.(*LLVMValue)
 	if fn.indirect {
 		fn = fn.Deref()
 	}
@@ -216,8 +212,9 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 	gep_indices = append(gep_indices, index.LLVMValue())
 	element := c.builder.CreateGEP(ptr, gep_indices, "")
-	result := c.builder.CreateLoad(element, "")
-	return c.NewLLVMValue(result, result_type)
+	result := c.NewLLVMValue(element, &types.Pointer{Base: result_type})
+	result.indirect = true
+	return result
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
@@ -228,6 +225,9 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		pkgident := (expr.X).(*ast.Ident)
 		pkgscope := (pkgident.Obj.Data).(*ast.Scope)
 		obj := pkgscope.Lookup(expr.Sel.String())
+		if obj.Kind == ast.Typ {
+			return TypeValue{obj.Type.(types.Type)}
+		}
 		return c.Resolve(obj)
 	}
 
@@ -345,16 +345,21 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 	// Are we dereferencing a pointer that's on the stack? Then load the stack
 	// value.
-	operand := c.VisitExpr(expr.X).(*LLVMValue)
-	if operand.indirect {
-		operand = operand.Deref()
-	}
+	switch operand := c.VisitExpr(expr.X).(type) {
+	case TypeValue:
+		return TypeValue{&types.Pointer{Base: operand.Type()}}
+	case *LLVMValue:
+		if operand.indirect {
+			operand = operand.Deref()
+		}
 
-	// We don't want to immediately load the value, as we might be doing an
-	// assignment rather than an evaluation. Instead, we return the pointer and
-	// tell the caller to load it on demand.
-	operand.indirect = true
-	return operand
+		// We don't want to immediately load the value, as we might be doing an
+		// assignment rather than an evaluation. Instead, we return the pointer and
+		// tell the caller to load it on demand.
+		operand.indirect = true
+		return operand
+	}
+	panic("unreachable")
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {

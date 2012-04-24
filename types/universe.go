@@ -61,6 +61,7 @@ var (
 	Bool,
 	Uintptr,
 	Rune,
+	UnsafePointer,
 	String *Name
 )
 
@@ -133,7 +134,7 @@ func init() {
 	Unsafe = ast.NewObj(ast.Pkg, "unsafe")
 	Unsafe.Data = scope
 
-	defType("Pointer", UintptrKind)
+	UnsafePointer = defType("Pointer", UintptrKind)
 
 	defFun("Alignof")
 	defFun("New")

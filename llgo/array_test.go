@@ -12,4 +12,11 @@ func TestArray(t *testing.T) {
 	}
 }
 
+func TestArrayIndexing(t *testing.T) {
+	err := runAndCheckMain(testdata("array_index.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // vim: set ft=go:

@@ -56,6 +56,8 @@ type Value interface {
 	Type() types.Type
 }
 
+// LLVMValue represents a dynamic value produced as the result of an
+// expression.
 type LLVMValue struct {
 	compiler *compiler
 	value    llvm.Value
@@ -65,10 +67,18 @@ type LLVMValue struct {
 	receiver *LLVMValue
 }
 
+// ConstValue represents a constant value produced as the result of an
+// expression.
 type ConstValue struct {
 	types.Const
 	compiler *compiler
 	typ      *types.Basic
+}
+
+// TypeValue represents a Type result of an expression. All methods
+// other than Type() will panic when called.
+type TypeValue struct {
+	typ types.Type
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
@@ -133,19 +143,12 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 	// Special case for structs.
 	// TODO handle strings as an even more special case.
-	if lhs.value.Type().TypeKind() == llvm.StructTypeKind {
+	if struct_type, ok := types.Underlying(lhs.typ).(*types.Struct); ok {
 		// TODO check types are the same.
-		struct_type := lhs.Type()
-		if name, ok := struct_type.(*types.Name); ok {
-			struct_type = name.Underlying
-		}
 
 		element_types_count := lhs.value.Type().StructElementTypesCount()
 		var t types.Type = &types.Bad{}
-		var struct_fields types.ObjList
-		if s, ok := struct_type.(*types.Struct); ok {
-			struct_fields = s.Fields
-		}
+		struct_fields := struct_type.Fields
 
 		if element_types_count > 0 {
 			if struct_fields != nil {
@@ -176,6 +179,21 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 				result = result.BinaryOp(logical_op, next)
 			}
 			return result
+		}
+	}
+
+	if types.Underlying(lhs.typ) == types.String.Underlying {
+		switch op {
+		case token.ADD:
+			return c.concatenateStrings(lhs, rhs)
+		//case token.EQL:
+		//	return c.compareStringsEqual(lhs.value, rhs.value)
+		//case token.LSS:
+		//	return c.compareStringsLess(lhs.value, rhs.value)
+		//case token.LEQ:
+		//	return c.compareStringsLessEqual(lhs.value, rhs.value)
+		default:
+			panic(fmt.Sprint("Unimplemented operator: ", op))
 		}
 	}
 
@@ -282,6 +300,31 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
 		return v.convertV2I(interface_)
 	}
+
+	// TODO other special conversions, e.g. int->string.
+
+	llvm_type := v.compiler.types.ToLLVM(dst_typ)
+	if v.indirect {
+		v = v.Deref()
+	}
+
+	// Unsafe pointer conversions.
+	if dst_typ == types.UnsafePointer { // X -> unsafe.Pointer
+		if _, isptr := src_typ.(*types.Pointer); isptr {
+			value := v.compiler.builder.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewLLVMValue(value, dst_typ)
+		}
+	} else if src_typ == types.UnsafePointer { // unsafe.Pointer -> X
+		if _, isptr := dst_typ.(*types.Pointer); isptr {
+			value := v.compiler.builder.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewLLVMValue(value, dst_typ)
+		}
+	}
+
+	// FIXME select the appropriate cast here, depending on size, type (int/float)
+	// and sign.
+	bitcast_value := v.compiler.builder.CreateBitCast(v.LLVMValue(), llvm_type, "")
+	return v.compiler.NewLLVMValue(bitcast_value, dst_typ)
 
 	/*
 	   value_type := value.Type()
@@ -403,7 +446,7 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		fallthrough
 	case types.UntypedComplexKind:
 		panic("Attempting to take LLVM value of untyped constant")
-	case types.Int32Kind, types.Uint32Kind:
+	case types.Int32Kind, types.Uint32Kind, types.UintptrKind: // FIXME uintptr to become bitwidth dependent
 		// XXX rune
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 	case types.Int16Kind, types.Uint16Kind:
@@ -435,5 +478,14 @@ func (v ConstValue) Int64() int64 {
 	int_val := v.Val.(*big.Int)
 	return int_val.Int64()
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// 
+
+func (TypeValue) BinaryOp(op token.Token, rhs Value) Value { panic("this should not be called") }
+func (TypeValue) UnaryOp(op token.Token) Value             { panic("this should not be called") }
+func (TypeValue) Convert(typ types.Type) Value             { panic("this should not be called") }
+func (TypeValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
+func (t TypeValue) Type() types.Type                       { return t.typ }
 
 // vim: set ft=go :

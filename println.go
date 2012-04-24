@@ -71,7 +71,7 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 				switch typ.Kind {
 				case types.Uint16Kind:
 					format += "%hu"
-				case types.Uint32Kind:
+				case types.Uint32Kind, types.UintptrKind: // FIXME uintptr to become bitwidth dependent
 					format += "%u"
 				case types.Uint64Kind:
 					format += "%llu" // FIXME windows

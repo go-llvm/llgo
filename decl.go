@@ -53,8 +53,8 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 
 	// Add receiver.
 	if fn_type.Recv == nil && f.Recv != nil {
-		ident := f.Recv.List[0].Names[0]
-		if ident != nil {
+		if len(f.Recv.List) > 0 && len(f.Recv.List[0].Names) > 0 {
+			ident := f.Recv.List[0].Names[0]
 			fn_type.Recv = ident.Obj
 		} else {
 			fn_type.Recv = ast.NewObj(ast.Var, "_")
