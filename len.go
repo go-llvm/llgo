@@ -81,6 +81,13 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		//return c.NewConstValue(token.INT, string(sz.ZExtValue()))
 		return c.NewLLVMValue(sz, types.Int32)
 
+	case *types.Basic:
+		if typ == types.String.Underlying {
+			ptr := value.(*LLVMValue).address
+			len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
+			len_value := c.builder.CreateLoad(len_field, "")
+			return c.NewLLVMValue(len_value, types.Int32)
+		}
 	}
 	panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }

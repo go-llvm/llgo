@@ -92,7 +92,7 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.Int8Type()
 	case types.Int16Kind, types.Uint16Kind:
 		return llvm.Int16Type()
-	case types.UintptrKind, types.Int32Kind, types.Uint32Kind: // XXX uintptr size depends on bit width
+	case types.UnsafePointerKind, types.UintptrKind, types.Int32Kind, types.Uint32Kind: // XXX uintptr size depends on bit width
 		return llvm.Int32Type()
 	case types.Int64Kind, types.Uint64Kind:
 		return llvm.Int64Type()

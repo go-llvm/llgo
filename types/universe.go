@@ -134,16 +134,11 @@ func init() {
 	Unsafe = ast.NewObj(ast.Pkg, "unsafe")
 	Unsafe.Data = scope
 
-	UnsafePointer = defType("Pointer", UintptrKind)
+	UnsafePointer = defType("Pointer", UnsafePointerKind)
 
 	defFun("Alignof")
-	defFun("New")
-	defFun("NewArray")
 	defFun("Offsetof")
-	defFun("Reflect")
 	defFun("Sizeof")
-	defFun("Typeof")
-	defFun("Unreflect")
 }
 
 // vim: set ft=go :

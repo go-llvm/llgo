@@ -86,7 +86,8 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 					lenval := c.builder.CreateExtractValue(llvm_value, 1, "")
 					llvm_value = ptrval
 					args = append(args, lenval)
-					format += "%*s"
+					format += "%.*s"
+
 				case types.BoolKind:
 					format += "%d"
 					llvm_value = c.builder.CreateZExt(llvm_value, llvm.Int32Type(), "")

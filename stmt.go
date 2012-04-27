@@ -141,12 +141,16 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 
 func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	curr_block := c.builder.GetInsertBlock()
-	if_block := llvm.AddBasicBlock(curr_block.Parent(), "if")
-	var else_block llvm.BasicBlock
-	if stmt.Else != nil {
-		else_block = llvm.AddBasicBlock(curr_block.Parent(), "else")
-	}
 	resume_block := llvm.AddBasicBlock(curr_block.Parent(), "endif")
+	resume_block.MoveAfter(curr_block)
+
+	var if_block, else_block llvm.BasicBlock
+	if stmt.Else != nil {
+		else_block = llvm.InsertBasicBlock(resume_block, "else")
+		if_block = llvm.InsertBasicBlock(else_block, "if")
+	} else {
+		if_block = llvm.InsertBasicBlock(resume_block, "if")
+	}
 	if stmt.Else == nil {
 		else_block = resume_block
 	}
@@ -164,9 +168,7 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 		}
 	}
 
-	c.builder.CreateCondBr(
-		cond_val.LLVMValue(), if_block, else_block)
-
+	c.builder.CreateCondBr(cond_val.LLVMValue(), if_block, else_block)
 	c.builder.SetInsertPointAtEnd(if_block)
 	c.VisitBlockStmt(stmt.Body)
 	if in := if_block.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
@@ -181,7 +183,13 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 		}
 	}
 
+	// If there's a block after the "resume" block (i.e. a nested control
+	// statement), then create a branch to it as the last instruction.
 	c.builder.SetInsertPointAtEnd(resume_block)
+	if last := resume_block.Parent().LastBasicBlock(); last != resume_block {
+		c.builder.CreateBr(last)
+		c.builder.SetInsertPointBefore(resume_block.FirstInstruction())
+	}
 }
 
 func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {

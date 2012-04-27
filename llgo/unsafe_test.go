@@ -5,7 +5,7 @@ import (
 )
 
 func TestUnsafePointer(t *testing.T) {
-	err := runAndCheckMain(testdata("unsafe.go"), checkStringsEqual)
+	err := runAndCheckMain(testdata("unsafe/pointer.go"), checkStringsEqual)
 	if err != nil {
 		t.Fatal(err)
 	}

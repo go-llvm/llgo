@@ -446,7 +446,7 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		fallthrough
 	case types.UntypedComplexKind:
 		panic("Attempting to take LLVM value of untyped constant")
-	case types.Int32Kind, types.Uint32Kind, types.UintptrKind: // FIXME uintptr to become bitwidth dependent
+	case types.Int32Kind, types.Uint32Kind, types.UintptrKind, types.UnsafePointerKind: // FIXME uintptr to become bitwidth dependent
 		// XXX rune
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 	case types.Int16Kind, types.Uint16Kind:
@@ -462,7 +462,7 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		}
 		return llvm.ConstNull(llvm.Int1Type())
 	}
-	panic("Unhandled type")
+	panic(fmt.Errorf("Unhandled type: %v", v.typ.Kind))
 }
 
 func (v ConstValue) Type() types.Type {

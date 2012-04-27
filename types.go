@@ -27,7 +27,6 @@ import (
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"math/big"
-	"reflect"
 	"sort"
 )
 
@@ -86,7 +85,8 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
 	case *ast.Ellipsis:
 		return c.GetType(x.Elt)
 	default:
-		panic(fmt.Sprint("Unhandled Expr: ", reflect.TypeOf(x)))
+		value := c.VisitExpr(expr)
+		return value.(TypeValue).typ
 	}
 	return nil
 }
@@ -101,18 +101,24 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *types.Func {
 		}
 		for i := 0; i < len(f.Params.List); i++ {
 			namecount := len(f.Params.List[i].Names)
-			args := make([]*ast.Object, namecount)
 			typ := c.GetType(f.Params.List[i].Type)
-			for j := 0; j < namecount; j++ {
-				ident := f.Params.List[i].Names[j]
-				if ident != nil {
-					args[j] = ident.Obj
-				} else {
-					args[j] = ast.NewObj(ast.Var, "_")
+			if namecount == 0 {
+				arg := ast.NewObj(ast.Var, "_")
+				arg.Type = typ
+				fn_type.Params = append(fn_type.Params, arg)
+			} else {
+				args := make([]*ast.Object, namecount)
+				for j := 0; j < namecount; j++ {
+					ident := f.Params.List[i].Names[j]
+					if ident != nil {
+						args[j] = ident.Obj
+					} else {
+						args[j] = ast.NewObj(ast.Var, "_")
+					}
+					args[j].Type = typ
 				}
-				args[j].Type = typ
+				fn_type.Params = append(fn_type.Params, args...)
 			}
-			fn_type.Params = append(fn_type.Params, args...)
 		}
 	}
 

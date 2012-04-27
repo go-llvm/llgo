@@ -92,6 +92,9 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	if fn == nil {
 		fn = c.VisitFuncProtoDecl(f)
 	}
+	if f.Body == nil {
+		return fn
+	}
 
 	fn_type := fn.Type().(*types.Func)
 	llvm_fn := fn.LLVMValue()

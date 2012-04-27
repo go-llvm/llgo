@@ -215,6 +215,9 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 		}
 	}
 
+	// Define intrinsics for use by the runtime: malloc, free, memcpy, etc.
+	compiler.defineRuntimeIntrinsics()
+
 	// Create global constructors.
 	//
 	// XXX When imports are handled, we'll need to defer creating

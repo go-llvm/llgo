@@ -225,6 +225,10 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		pkgident := (expr.X).(*ast.Ident)
 		pkgscope := (pkgident.Obj.Data).(*ast.Scope)
 		obj := pkgscope.Lookup(expr.Sel.String())
+		if obj == nil {
+			panic(fmt.Errorf("Failed to locate object: %v.%v",
+							 pkgident.Name, expr.Sel.String()))
+		}
 		if obj.Kind == ast.Typ {
 			return TypeValue{obj.Type.(types.Type)}
 		}
