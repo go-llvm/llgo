@@ -27,7 +27,6 @@ import (
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
-	"runtime"
 )
 
 type Module struct {
@@ -250,7 +249,6 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 	// Create debug metadata.
 	compiler.createMetadata()
 
-	runtime.SetFinalizer(compiler.module, func(m *Module) { m.Dispose() })
 	return compiler.module, nil
 }
 

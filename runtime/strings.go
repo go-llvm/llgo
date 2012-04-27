@@ -40,7 +40,7 @@ func strcat(a, b str) str {
 	}
 
 	mem := malloc(a.size + b.size)
-	if mem == unsafe.Pointer(0) {
+	if mem == unsafe.Pointer(uintptr(0)) {
 		// TODO panic? abort?
 	}
 

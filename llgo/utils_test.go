@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"path"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
+	"go/build"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -42,8 +44,54 @@ func addExterns(m *llgo.Module) {
 	fflush.SetFunctionCallConv(llvm.CCallConv)
 }
 
+func getRuntimeFiles() (files []string, err error) {
+	var pkg *build.Package
+	pkgpath := "github.com/axw/llgo/runtime"
+	pkg, err = build.Import(pkgpath, "", 0)
+	if err == nil {
+		files = make([]string, len(pkg.GoFiles))
+		for i, filename := range pkg.GoFiles {
+			files[i] = path.Join(pkg.Dir, filename)
+		}
+	}
+	return
+}
+
+func getRuntimeModule() (m llvm.Module, err error) {
+	gofiles, err := getRuntimeFiles()
+	if err == nil {
+		var runtimeModule *llgo.Module
+		runtimeModule, err = compileFiles(gofiles)
+		if runtimeModule != nil {
+			m = runtimeModule.Module
+		}
+	}
+	return
+}
+
+func addRuntime(m *llgo.Module) (err error) {
+	runtimeModule, err := getRuntimeModule()
+	if err != nil {
+		return
+	}
+	// TODO link runtime into target module.
+	// This requires an addition to the LLVM-C API.
+	runtimeModule.Dispose()
+	return
+}
+
 func runFunction(m *llgo.Module, name string) (output []string, err error) {
 	addExterns(m)
+	err = addRuntime(m)
+	if err != nil {
+		return
+	}
+
+	err = llvm.VerifyModule(m.Module, llvm.ReturnStatusAction)
+	if err != nil {
+		return
+	}
+
 	engine, err := llvm.NewJITCompiler(m.Module, 0)
 	if err != nil {
 		return
