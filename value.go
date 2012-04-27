@@ -132,7 +132,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case ConstValue:
 		switch rhs_.typ.Kind {
 		case types.NilKind:
-			rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
+			rhs = rhs_.Convert(lhs.Type()).(*LLVMValue)
 		case types.UntypedIntKind, types.UntypedFloatKind, types.UntypedComplexKind:
 			rhs_ = rhs_.Convert(lhs.Type()).(ConstValue)
 			fallthrough
