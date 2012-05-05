@@ -31,11 +31,6 @@ import (
 	"sort"
 )
 
-func isglobal(value Value) bool {
-	//return !value.IsAGlobalVariable().IsNil()
-	return false
-}
-
 func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	rhs := c.VisitExpr(expr.Y)
@@ -48,7 +43,6 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 }
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
-	// XXX we need to disambiguate between type/expression here.
 	switch x := (expr.Fun).(type) {
 	case *ast.Ident:
 		switch x.String() {
@@ -227,15 +221,13 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		obj := pkgscope.Lookup(expr.Sel.String())
 		if obj == nil {
 			panic(fmt.Errorf("Failed to locate object: %v.%v",
-							 pkgident.Name, expr.Sel.String()))
+				pkgident.Name, expr.Sel.String()))
 		}
 		if obj.Kind == ast.Typ {
 			return TypeValue{obj.Type.(types.Type)}
 		}
 		return c.Resolve(obj)
 	}
-
-	// TODO handle interfaces.
 
 	// TODO when we support embedded types, we'll need to do a breadth-first
 	// search for the name, since the specification says to take the shallowest
@@ -273,15 +265,11 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	underlying := typ.(*types.Name).Underlying
 	switch x := underlying.(type) {
 	case *types.Struct:
-		styp := x
-		i := sort.Search(len(styp.Fields), func(i int) bool {
-			return styp.Fields[i].Name >= name
-		})
-		if i < len(styp.Fields) && styp.Fields[i].Name == name {
+		if i, exists := x.FieldIndices[name]; exists {
 			index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
 			indexes = append(indexes, index)
 			llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
-			elt_typ := styp.Fields[i].Type.(types.Type)
+			elt_typ := x.Fields[i].Type.(types.Type)
 			value := c.NewLLVMValue(llvm_value, &types.Pointer{Base: elt_typ})
 			value.indirect = true
 			return value
@@ -294,7 +282,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		if i < len(iface.Methods) && iface.Methods[i].Name == name {
 			struct_value := lhs.LLVMValue()
 			receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
-			fn_value := c.builder.CreateStructGEP(struct_value, i+1, "")
+			fn_value := c.builder.CreateStructGEP(struct_value, i+2, "")
 			method_type := c.ObjGetType(iface.Methods[i]).(*types.Func)
 			method := c.NewLLVMValue(
 				c.builder.CreateBitCast(

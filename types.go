@@ -27,7 +27,6 @@ import (
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"math/big"
-	"sort"
 )
 
 // Get a Type from an ast object.
@@ -180,7 +179,6 @@ func (c *compiler) VisitStructType(s *ast.StructType) *types.Struct {
 			}
 		}
 
-		sort.Sort(typ.Fields)
 		typ.Tags = make([]string, len(typ.Fields))
 		for i, field := range typ.Fields {
 			// TODO unquote string?

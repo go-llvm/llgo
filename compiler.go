@@ -179,7 +179,6 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 	compiler.fileset = fset
 	compiler.pkg = pkg
 	compiler.initfuncs = make([]Value, 0)
-	compiler.types = NewTypeMap()
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = llvm.GlobalContext().NewBuilder()
@@ -197,6 +196,7 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 			//err = e.(error)
 		}
 	}()
+	compiler.types = NewTypeMap(compiler.module.Module)
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.

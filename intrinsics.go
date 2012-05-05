@@ -28,10 +28,14 @@ import (
 
 func (c *compiler) defineRuntimeIntrinsics() {
 	fn := c.module.NamedFunction("runtime.malloc")
-	if !fn.IsNil() {c.defineMallocFunction(fn)}
+	if !fn.IsNil() {
+		c.defineMallocFunction(fn)
+	}
 
 	fn = c.module.NamedFunction("runtime.memcpy")
-	if !fn.IsNil() {c.defineMemcpyFunction(fn)}
+	if !fn.IsNil() {
+		c.defineMemcpyFunction(fn)
+	}
 }
 
 func (c *compiler) defineMallocFunction(fn llvm.Value) {
@@ -66,11 +70,10 @@ func (c *compiler) defineMemcpyFunction(fn llvm.Value) {
 	args := []llvm.Value{
 		dst, src, size,
 		llvm.ConstInt(llvm.Int32Type(), 1, false), // single byte alignment
-		llvm.ConstInt(llvm.Int1Type(), 0, false), // not volatile
+		llvm.ConstInt(llvm.Int1Type(), 0, false),  // not volatile
 	}
 	c.builder.CreateCall(memcpy, args, "")
 	c.builder.CreateRetVoid()
 }
 
 // vim: set ft=go:
-

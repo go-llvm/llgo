@@ -147,32 +147,22 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// TODO check types are the same.
 
 		element_types_count := lhs.value.Type().StructElementTypesCount()
-		var t types.Type = &types.Bad{}
 		struct_fields := struct_type.Fields
 
 		if element_types_count > 0 {
-			if struct_fields != nil {
-				t = c.ObjGetType(struct_fields[0])
-			}
+			t := c.ObjGetType(struct_fields[0])
 			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, 0, ""), t)
 			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
-			result := first
 
-			var logical_op token.Token
-			switch op {
-			case token.EQL:
-				logical_op = token.LAND
-			case token.NEQ:
+			logical_op := token.LAND
+			if op == token.NEQ {
 				logical_op = token.LOR
-			default:
-				panic("Unexpected operator")
 			}
 
+			result := first
 			for i := 1; i < element_types_count; i++ {
-				if struct_fields != nil {
-					t = c.ObjGetType(struct_fields[1])
-				}
+				t := c.ObjGetType(struct_fields[i])
 				next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, i, ""), t)
 				next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, i, ""), t)
 				next := next_lhs.BinaryOp(op, next_rhs)
@@ -182,20 +172,69 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 	}
 
-	if types.Underlying(lhs.typ) == types.String.Underlying {
-		switch op {
-		case token.ADD:
-			return c.concatenateStrings(lhs, rhs)
-		//case token.EQL:
-		//	return c.compareStringsEqual(lhs.value, rhs.value)
-		//case token.LSS:
-		//	return c.compareStringsLess(lhs.value, rhs.value)
-		//case token.LEQ:
-		//	return c.compareStringsLessEqual(lhs.value, rhs.value)
-		default:
-			panic(fmt.Sprint("Unimplemented operator: ", op))
+	// Interfaces.
+	if _, ok := types.Underlying(lhs.typ).(*types.Interface); ok {
+		// TODO check for interface/interface comparison vs. interface/value comparison.
+
+		// nil comparison
+		if /*rhs.value.IsConstant() &&*/ rhs.value.IsNull() {
+			var result llvm.Value
+			if op == token.EQL {
+				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				result = b.CreateAnd(typeNull, valueNull, "")
+			} else {
+				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				result = b.CreateOr(typeNotNull, valueNotNull, "")
+			}
+			return c.NewLLVMValue(result, types.Bool)
 		}
+
+		// First, check that the dynamic types are identical.
+		// FIXME provide runtime function for type identity comparison.
+		lhsType := b.CreateExtractValue(lhs.value, 0, "")
+		rhsType := b.CreateExtractValue(rhs.value, 0, "")
+		diff := b.CreatePtrDiff(lhsType, rhsType, "")
+		zero := llvm.ConstNull(diff.Type())
+
+		var result llvm.Value
+		if op == token.EQL {
+			typesIdentical := b.CreateICmp(llvm.IntEQ, diff, zero, "")
+			//valuesEqual := ...
+			//result = b.CreateAnd(typesIdentical, valuesEqual, "")
+			result = typesIdentical
+		} else {
+			typesDifferent := b.CreateICmp(llvm.IntNE, diff, zero, "")
+			//valuesUnequal := ...
+			//result = b.CreateOr(typesDifferent, valuesUnequal, "")
+			result = typesDifferent
+		}
+		return c.NewLLVMValue(result, types.Bool)
 	}
+
+	if types.Underlying(lhs.typ) == types.String.Underlying {
+		if types.Underlying(rhs.typ) == types.String.Underlying {
+			switch op {
+			case token.ADD:
+				return c.concatenateStrings(lhs, rhs)
+			//case token.EQL:
+			//	return c.compareStringsEqual(lhs.value, rhs.value)
+			//case token.LSS:
+			//	return c.compareStringsLess(lhs.value, rhs.value)
+			//case token.LEQ:
+			//	return c.compareStringsLessEqual(lhs.value, rhs.value)
+			default:
+				panic(fmt.Sprint("Unimplemented operator: ", op))
+			}
+		}
+		panic("unimplemented")
+	}
+
+	// Determine whether to use integer or floating point instructions.
+	// TODO determine the NaN rules.
+	isfp := types.Identical(types.Underlying(lhs.typ), types.Float32) ||
+		types.Identical(types.Underlying(lhs.typ), types.Float64)
 
 	switch op {
 	case token.MUL:
@@ -211,7 +250,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		result = b.CreateSub(lhs.value, rhs.value, "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
-		result = b.CreateICmp(llvm.IntNE, lhs.value, rhs.value, "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatONE, lhs.value, rhs.value, "")
+		} else {
+			result = b.CreateICmp(llvm.IntNE, lhs.value, rhs.value, "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.EQL:
 		result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs.value, "")
@@ -292,8 +335,9 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	if _, isinterface := src_typ.(*types.Interface); isinterface {
 		if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
 			return v.convertI2I(interface_)
+		} else {
+			return v.convertI2V(dst_typ)
 		}
-		// TODO I2V
 	}
 
 	// Converting to an interface type.

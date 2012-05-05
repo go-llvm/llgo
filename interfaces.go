@@ -28,7 +28,7 @@ import (
 	"sort"
 )
 
-// ConvertV2I converts a value to an interface.
+// convertV2I converts a value to an interface.
 func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	// TODO deref indirect value, then use 'address' as pointer
 	// value.
@@ -83,6 +83,15 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	ptr = builder.CreateBitCast(ptr, element_types[0], "")
 	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
 
+	var runtimeType llvm.Value
+	if srcname != nil {
+		runtimeType = v.compiler.types.ToRuntime(srcname)
+	} else {
+		runtimeType = v.compiler.types.ToRuntime(srctyp)
+	}
+	runtimeType = builder.CreateBitCast(runtimeType, element_types[1], "")
+	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 1, "")
+
 	// TODO assert either source is a named type (or pointer to), or the
 	// interface has an empty methodset.
 
@@ -105,18 +114,16 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			method := v.compiler.Resolve(method_obj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
 			llvm_value = builder.CreateBitCast(
-				llvm_value,
-				element_types[i+1], "")
+				llvm_value, element_types[i+2], "")
 			iface_struct = builder.CreateInsertValue(
-				iface_struct, llvm_value,
-				i+1, "")
+				iface_struct, llvm_value, i+2, "")
 		}
 	}
 
 	return v.compiler.NewLLVMValue(iface_struct, iface)
 }
 
-// ConvertI2I converts an interface to another interface.
+// convertI2I converts an interface to another interface.
 func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
 	builder := v.compiler.builder
 	src_typ := v.typ
@@ -159,5 +166,53 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
 	}
 	return v.compiler.NewLLVMValue(iface_struct, iface)
 }
+
+// convertI2V converts an interface to a value.
+func (v *LLVMValue) convertI2V(typ types.Type) Value {
+	typptrType := llvm.PointerType(llvm.Int8Type(), 0)
+	runtimeType := v.compiler.types.ToRuntime(typ)
+	runtimeType = llvm.ConstBitCast(runtimeType, typptrType)
+
+	var vptr llvm.Value
+	if v.indirect {
+		vptr = v.LLVMValue()
+	} else {
+		vptr = v.address.LLVMValue()
+	}
+
+	builder := v.compiler.builder
+	ifaceType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
+	diff := builder.CreatePtrDiff(runtimeType, ifaceType, "")
+	zero := llvm.ConstNull(diff.Type())
+	predicate := builder.CreateICmp(llvm.IntEQ, diff, zero, "")
+	llvmtype := v.compiler.types.ToLLVM(typ)
+	result := builder.CreateAlloca(llvmtype, "")
+
+	// If result is zero, then we've got a match.
+	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
+	end.MoveAfter(builder.GetInsertBlock())
+	nonmatch := llvm.InsertBasicBlock(end, "nonmatch")
+	match := llvm.InsertBasicBlock(nonmatch, "match")
+	builder.CreateCondBr(predicate, match, nonmatch)
+
+	builder.SetInsertPointAtEnd(match)
+	value := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
+	value = builder.CreateBitCast(value, result.Type(), "")
+	value = builder.CreateLoad(value, "")
+	builder.CreateStore(value, result)
+	builder.CreateBr(end)
+
+	// TODO should return {value, ok}
+	builder.SetInsertPointAtEnd(nonmatch)
+	builder.CreateStore(llvm.ConstNull(llvmtype), result)
+	builder.CreateBr(end)
+
+	//builder.SetInsertPointAtEnd(end)
+	result = builder.CreateLoad(result, "")
+	return v.compiler.NewLLVMValue(result, typ)
+}
+
+// 
+//func (v *LLVMValue) interfaceTypesEqual(
 
 // vim: set ft=go :

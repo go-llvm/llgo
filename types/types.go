@@ -40,7 +40,7 @@ const (
 	StringKind        = BasicTypeKind(reflect.String)
 	UnsafePointerKind = BasicTypeKind(reflect.UnsafePointer)
 
-	NilKind BasicTypeKind = StringKind + iota + 1
+	NilKind BasicTypeKind = UnsafePointerKind + iota + 1
 	RuneKind
 	ByteKind
 	UntypedIntKind
@@ -106,8 +106,9 @@ func (s *Slice) String() string {
 // Anonymous fields are represented by objects with empty names.
 type Struct struct {
 	ImplementsType
-	Fields ObjList  // struct fields; or nil
-	Tags   []string // corresponding tags; or nil
+	Fields       ObjList        // struct fields; or nil
+	Tags         []string       // corresponding tags; or nil
+	FieldIndices map[string]int // fast field lookup (name -> index)
 	// TODO(gri) This type needs some rethinking:
 	// - at the moment anonymous fields are marked with "" object names,
 	//   and their names have to be reconstructed

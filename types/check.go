@@ -158,15 +158,19 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 
 	case *ast.StructType:
 		fields, tags, _ := c.collectFields(token.STRUCT, t.Fields, cycleOk)
-		tagmap := make(map[*ast.Object]string)
-		for i, field := range fields {
-			tagmap[field] = tags[i]
+		indices := make(map[string]int)
+		for i, f := range fields {
+			if f.Name == "" {
+				typ := f.Type
+				if ptr, ok := typ.(*Pointer); ok {
+					typ = ptr.Base
+				}
+				indices[typ.(*Name).Obj.Name] = i
+			} else {
+				indices[f.Name] = i
+			}
 		}
-		fields.Sort()
-		for i, field := range fields {
-			tags[i] = tagmap[field]
-		}
-		return &Struct{Fields: fields, Tags: tags}
+		return &Struct{Fields: fields, Tags: tags, FieldIndices: indices}
 
 	case *ast.FuncType:
 		params, _, _ := c.collectFields(token.FUNC, t.Params, true)
