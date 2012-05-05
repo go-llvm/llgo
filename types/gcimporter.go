@@ -384,11 +384,23 @@ func (p *gcParser) parseField() (fld *ast.Object, tag string) {
 func (p *gcParser) parseStructType() Type {
 	var fields []*ast.Object
 	var tags []string
+	indices := make(map[string]uint64)
 
 	parseField := func() {
 		fld, tag := p.parseField()
 		fields = append(fields, fld)
 		tags = append(tags, tag)
+		switch fld.Name {
+		case "":
+			typ := fld.Type
+			if ptr, ok := typ.(*Pointer); ok {
+				typ = ptr.Base
+			}
+			indices[typ.(*Name).Obj.Name] = uint64(len(fields) - 1)
+		case "_": // ignore
+		default:
+			indices[fld.Name] = uint64(len(fields) - 1)
+		}
 	}
 
 	p.expectKeyword("struct")
@@ -402,7 +414,7 @@ func (p *gcParser) parseStructType() Type {
 	}
 	p.expect('}')
 
-	return &Struct{Fields: fields, Tags: tags}
+	return &Struct{Fields: fields, Tags: tags, FieldIndices: indices}
 }
 
 // Parameter = ( identifier | "?" ) [ "..." ] Type [ string_lit ] .
