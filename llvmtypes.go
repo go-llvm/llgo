@@ -47,7 +47,6 @@ type TypeMap struct {
 	module  llvm.Module
 	types   map[types.Type]llvm.Type  // compile-time LLVM type
 	runtime map[types.Type]llvm.Value // runtime/reflect type representation
-	size    map[types.Type]int        // type size, in bytes
 }
 
 func NewTypeMap(module llvm.Module) *TypeMap {

@@ -65,15 +65,20 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 		// If the value fits exactly in a pointer, then we can just
 		// bitcast it. Otherwise we need to malloc, and create a shim
 		// function to load the receiver.
-
-		// FIXME this is obviously not good enough. We'll need to generate
-		// code here to detect whether the size of the value (possibly non
-		// portable) fits into a pointer (definitely non portable).
-		if types.Identical(types.Underlying(srctyp), types.Int) {
-			ptr = builder.CreateIntToPtr(v.LLVMValue(), element_types[0], "")
+		lv := v.LLVMValue()
+		c := v.compiler
+		ptrsize := c.target.PointerSize()
+		if c.target.TypeStoreSize(lv.Type()) <= uint64(ptrsize) {
+			bits := c.target.TypeSizeInBits(lv.Type())
+			if bits > 0 {
+				lv = builder.CreateBitCast(lv, llvm.IntType(int(bits)), "")
+				ptr = builder.CreateIntToPtr(lv, element_types[0], "")
+			} else {
+				ptr = llvm.ConstNull(element_types[0])
+			}
 		} else {
 			ptr = builder.CreateMalloc(v.compiler.types.ToLLVM(srctyp), "")
-			builder.CreateStore(v.LLVMValue(), ptr)
+			builder.CreateStore(lv, ptr)
 			// TODO signal that shim functions are required. Probably later
 			// we'll have the CallExpr handler pick out the type, and check
 			// if the receiver is a pointer or a value type, and load as

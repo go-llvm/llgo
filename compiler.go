@@ -45,6 +45,7 @@ func (m Module) Dispose() {
 type compiler struct {
 	builder   llvm.Builder
 	module    *Module
+	target    llvm.TargetData
 	functions []Value
 	initfuncs []Value
 	pkg       *ast.Package
@@ -189,6 +190,7 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 	// Dispose manually, which will render the finalizer a no-op.
 	modulename := pkg.Name
 	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
+	compiler.target = llvm.NewTargetData(compiler.module.DataLayout())
 	defer func() {
 		if e := recover(); e != nil {
 			compiler.module.Dispose()

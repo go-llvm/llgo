@@ -180,21 +180,22 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		if /*rhs.value.IsConstant() &&*/ rhs.value.IsNull() {
 			var result llvm.Value
 			if op == token.EQL {
-				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
-				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 1, ""), "")
 				result = b.CreateAnd(typeNull, valueNull, "")
 			} else {
-				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 0, ""), "")
-				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 1, ""), "")
 				result = b.CreateOr(typeNotNull, valueNotNull, "")
 			}
 			return c.NewLLVMValue(result, types.Bool)
 		}
 
 		// First, check that the dynamic types are identical.
-		// FIXME provide runtime function for type identity comparison.
-		lhsType := b.CreateExtractValue(lhs.value, 0, "")
-		rhsType := b.CreateExtractValue(rhs.value, 0, "")
+		// FIXME provide runtime function for type identity comparison, and
+		// value comparisons.
+		lhsType := b.CreateExtractValue(lhs.value, 1, "")
+		rhsType := b.CreateExtractValue(rhs.value, 1, "")
 		diff := b.CreatePtrDiff(lhsType, rhsType, "")
 		zero := llvm.ConstNull(diff.Type())
 
