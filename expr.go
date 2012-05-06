@@ -52,6 +52,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return c.VisitLen(expr)
 		case "new":
 			return c.VisitNew(expr)
+		case "make":
+			return c.VisitMake(expr)
 		}
 	}
 	lhs := c.VisitExpr(expr.Fun)
