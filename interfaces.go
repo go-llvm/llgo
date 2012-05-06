@@ -165,9 +165,9 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
 		if mi >= len(methods) || methods[mi].Name != m.Name {
 			panic("Failed to locate method: " + m.Name)
 		}
-		method := builder.CreateStructGEP(vptr, mi+1, "")
+		method := builder.CreateStructGEP(vptr, mi+2, "")
 		iface_struct = builder.CreateInsertValue(
-			iface_struct, builder.CreateLoad(method, ""), i+1, "")
+			iface_struct, builder.CreateLoad(method, ""), i+2, "")
 	}
 	return v.compiler.NewLLVMValue(iface_struct, iface)
 }
