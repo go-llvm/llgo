@@ -42,9 +42,13 @@ import (
 	"strings"
 )
 
+var dumpast *bool = flag.Bool(
+	"dumpast", false,
+	"Dump the AST to stderr and exit")
+
 var dump *bool = flag.Bool(
 	"dump", false,
-	"Dump the AST to stderr instead of generating bitcode")
+	"Dump the LLVM assembly to stderr and exit")
 
 var trace *bool = flag.Bool(
 	"trace", false,
@@ -123,6 +127,11 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 	if err != nil {
 		report(err)
 		return nil, err
+	}
+
+	if *dumpast {
+		ast.Fprint(os.Stderr, fset, pkg, nil)
+		os.Exit(0)
 	}
 
 	compiler := llgo.NewCompiler()

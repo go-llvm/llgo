@@ -87,9 +87,10 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 }
 
 func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
-	name := f.Name.String()
-	fn, _ := c.Lookup(name)
-	if fn == nil {
+	var fn Value
+	if f.Name.Obj != nil {
+		fn = c.Resolve(f.Name.Obj)
+	} else {
 		fn = c.VisitFuncProtoDecl(f)
 	}
 	if f.Body == nil {
@@ -151,7 +152,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	}
 
 	// Is it an 'init' function? Then record it.
-	if name == "init" {
+	if f.Name.String() == "init" {
 		c.initfuncs = append(c.initfuncs, fn)
 	} else {
 		//if obj != nil {
