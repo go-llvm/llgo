@@ -23,6 +23,8 @@ SOFTWARE.
 package llgo
 
 import (
+	"log"
+	"os"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
@@ -42,6 +44,11 @@ func (m Module) Dispose() {
 	}
 }
 
+type Compiler interface {
+	Compile(*token.FileSet, *ast.Package) (*Module, error)
+	SetTraceEnabled(bool)
+}
+
 type compiler struct {
 	builder   llvm.Builder
 	module    *Module
@@ -54,6 +61,7 @@ type compiler struct {
 	scope     *ast.Scope
 	pkgmap    map[*ast.Object]string
 	types     *TypeMap
+	logger    *log.Logger
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -175,8 +183,21 @@ func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
+func NewCompiler() Compiler {
 	compiler := new(compiler)
+	return compiler
+}
+
+func (c *compiler) SetTraceEnabled(enabled bool) {
+	if enabled {
+		c.logger = log.New(os.Stderr, "", 0)
+	} else {
+		c.logger = nil
+	}
+}
+
+func (compiler *compiler) Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
+	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg
 	compiler.initfuncs = make([]Value, 0)
@@ -198,7 +219,7 @@ func Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
 			//err = e.(error)
 		}
 	}()
-	compiler.types = NewTypeMap(compiler.module.Module)
+	compiler.types = NewTypeMap(compiler.module.Module, compiler.target)
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.

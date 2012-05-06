@@ -320,7 +320,9 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 }
 
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
-	//fmt.Println(c.fileset.Position(stmt.Pos()))
+	if c.logger != nil {
+		c.logger.Println("Compile statement:", c.fileset.Position(stmt.Pos()))
+	}
 	switch x := stmt.(type) {
 	case *ast.ReturnStmt:
 		c.VisitReturnStmt(x)

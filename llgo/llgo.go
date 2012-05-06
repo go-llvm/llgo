@@ -46,6 +46,10 @@ var dump *bool = flag.Bool(
 	"dump", false,
 	"Dump the AST to stderr instead of generating bitcode")
 
+var trace *bool = flag.Bool(
+	"trace", false,
+	"Trace the compilation process")
+
 var exitCode = 0
 
 func report(err error) {
@@ -120,7 +124,10 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 		report(err)
 		return nil, err
 	}
-	return llgo.Compile(fset, pkg)
+
+	compiler := llgo.NewCompiler()
+	compiler.SetTraceEnabled(*trace)
+	return compiler.Compile(fset, pkg)
 }
 
 func main() {
