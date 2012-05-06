@@ -387,7 +387,9 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
 	// This is temporary. We'll return errors later, rather than panicking.
-	//fmt.Println(c.fileset.Position(decl.Pos()))
+	if c.logger != nil {
+		c.logger.Println("Compile declaration:", c.fileset.Position(decl.Pos()))
+	}
 	defer func() {
 		if e := recover(); e != nil {
 			elist := new(scanner.ErrorList)
