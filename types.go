@@ -54,6 +54,8 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
 		return c.ObjGetType(obj)
 	case *ast.FuncType:
 		return c.VisitFuncType(x)
+	case *ast.MapType:
+		return c.VisitMapType(x)
 	case *ast.ArrayType:
 		elttype := c.GetType(x.Elt)
 		if x.Len == nil {
@@ -209,6 +211,11 @@ func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *types.Interface {
 		}
 	}
 	return &iface
+}
+
+func (c *compiler) VisitMapType(m *ast.MapType) *types.Map {
+	k, v := c.GetType(m.Key), c.GetType(m.Value)
+	return &types.Map{Key: k, Elt: v}
 }
 
 // vim: set ft=go :

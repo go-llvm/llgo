@@ -358,18 +358,40 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		if _, isptr := src_typ.(*types.Pointer); isptr {
 			value := v.compiler.builder.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
 			return v.compiler.NewLLVMValue(value, dst_typ)
+		} else if src_typ == types.Uintptr {
+			return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
 		}
 	} else if src_typ == types.UnsafePointer { // unsafe.Pointer -> X
 		if _, isptr := dst_typ.(*types.Pointer); isptr {
 			value := v.compiler.builder.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
 			return v.compiler.NewLLVMValue(value, dst_typ)
+		} else if dst_typ == types.Uintptr {
+			return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
 		}
 	}
 
 	// FIXME select the appropriate cast here, depending on size, type (int/float)
 	// and sign.
-	bitcast_value := v.compiler.builder.CreateBitCast(v.LLVMValue(), llvm_type, "")
-	return v.compiler.NewLLVMValue(bitcast_value, dst_typ)
+	lv := v.LLVMValue()
+	srcType := lv.Type()
+	switch srcType.TypeKind() { // source type
+	case llvm.IntegerTypeKind:
+		switch llvm_type.TypeKind() {
+		case llvm.IntegerTypeKind:
+			srcBits := srcType.IntTypeWidth()
+			dstBits := llvm_type.IntTypeWidth()
+			delta := srcBits - dstBits
+			switch {
+			case delta < 0:
+				// TODO check if (un)signed, use S/ZExt accordingly.
+				lv = v.compiler.builder.CreateZExt(lv, llvm_type, "")
+			case delta > 0:
+				lv = v.compiler.builder.CreateTrunc(lv, llvm_type, "")
+			}
+			return v.compiler.NewLLVMValue(lv, dst_typ)
+		}
+	}
+	//bitcast_value := v.compiler.builder.CreateBitCast(lv, llvm_type, "")
 
 	/*
 	   value_type := value.Type()

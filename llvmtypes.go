@@ -30,7 +30,12 @@ import (
 	"reflect"
 )
 
-var (
+type TypeMap struct {
+	module  llvm.Module
+	target  llvm.TargetData
+	types   map[types.Type]llvm.Type  // compile-time LLVM type
+	runtime map[types.Type]llvm.Value // runtime/reflect type representation
+
 	runtimeCommonType,
 	runtimeUncommonType,
 	runtimeArrayType,
@@ -41,16 +46,15 @@ var (
 	runtimePtrType,
 	runtimeSliceType,
 	runtimeStructType llvm.Type
-)
 
-type TypeMap struct {
-	module  llvm.Module
-	types   map[types.Type]llvm.Type  // compile-time LLVM type
-	runtime map[types.Type]llvm.Value // runtime/reflect type representation
+	hashAlgFunctionType,
+	equalAlgFunctionType,
+	printAlgFunctionType,
+	copyAlgFunctionType llvm.Type
 }
 
-func NewTypeMap(module llvm.Module) *TypeMap {
-	tm := &TypeMap{module: module}
+func NewTypeMap(module llvm.Module, target llvm.TargetData) *TypeMap {
+	tm := &TypeMap{module: module, target: target}
 	tm.types = make(map[types.Type]llvm.Type)
 	tm.runtime = make(map[types.Type]llvm.Value)
 
@@ -64,16 +68,33 @@ func NewTypeMap(module llvm.Module) *TypeMap {
 		obj := pkg.Scope.Lookup(name)
 		return tm.ToLLVM(obj.Type.(types.Type))
 	}
-	runtimeCommonType = objToLLVMType("commonType")
-	runtimeUncommonType = objToLLVMType("uncommonType")
-	runtimeArrayType = objToLLVMType("arrayType")
-	runtimeChanType = objToLLVMType("chanType")
-	runtimeFuncType = objToLLVMType("funcType")
-	runtimeInterfaceType = objToLLVMType("interfaceType")
-	runtimeMapType = objToLLVMType("mapType")
-	runtimePtrType = objToLLVMType("ptrType")
-	runtimeSliceType = objToLLVMType("sliceType")
-	runtimeStructType = objToLLVMType("structType")
+	tm.runtimeCommonType = objToLLVMType("commonType")
+	tm.runtimeUncommonType = objToLLVMType("uncommonType")
+	tm.runtimeArrayType = objToLLVMType("arrayType")
+	tm.runtimeChanType = objToLLVMType("chanType")
+	tm.runtimeFuncType = objToLLVMType("funcType")
+	tm.runtimeInterfaceType = objToLLVMType("interfaceType")
+	tm.runtimeMapType = objToLLVMType("mapType")
+	tm.runtimePtrType = objToLLVMType("ptrType")
+	tm.runtimeSliceType = objToLLVMType("sliceType")
+	tm.runtimeStructType = objToLLVMType("structType")
+
+	// Types for algorithms. See 'runtime/runtime.h'.
+	uintptrType := tm.target.IntPtrType()
+	voidPtrType := llvm.PointerType(llvm.Int8Type(), 0)
+	boolType := llvm.Int1Type()
+
+	// Create runtime algorithm function types.
+	params := []llvm.Type{
+		llvm.PointerType(uintptrType, 0), uintptrType, voidPtrType}
+	tm.hashAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
+	params = []llvm.Type{
+		llvm.PointerType(boolType, 0), uintptrType, voidPtrType, voidPtrType}
+	tm.equalAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
+	params = []llvm.Type{uintptrType, voidPtrType}
+	tm.printAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
+	params = []llvm.Type{uintptrType, voidPtrType, voidPtrType}
+	tm.copyAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
 
 	return tm
 }
@@ -144,7 +165,7 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.Int8Type()
 	case types.Int16Kind, types.Uint16Kind:
 		return llvm.Int16Type()
-	case types.UnsafePointerKind, types.UintptrKind, types.Int32Kind, types.Uint32Kind: // XXX uintptr size depends on bit width
+	case types.Int32Kind, types.Uint32Kind: // XXX uintptr size depends on bit width
 		return llvm.Int32Type()
 	case types.Int64Kind, types.Uint64Kind:
 		return llvm.Int64Type()
@@ -152,6 +173,8 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.FloatType()
 	case types.Float64Kind:
 		return llvm.DoubleType()
+	case types.UnsafePointerKind, types.UintptrKind:
+		return tm.target.IntPtrType()
 	//case Complex64: TODO
 	//case Complex128:
 	//case UntypedInt:
@@ -310,12 +333,23 @@ func (tm *TypeMap) makeRuntimeType(t types.Type) llvm.Value {
 	panic("unreachable")
 }
 
+func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
+	// TODO set these to actual functions.
+	hashAlg := llvm.ConstNull(llvm.PointerType(tm.hashAlgFunctionType, 0))
+	equalAlg := llvm.ConstNull(llvm.PointerType(tm.equalAlgFunctionType, 0))
+	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
+	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
+
+	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
+	return llvm.ConstStruct(elems, false)
+}
+
 func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	// Not sure if there's an easier way to do this, but if you just
 	// use ConstStruct, you end up getting a different llvm.Type.
 	lt := tm.ToLLVM(t)
-	typ := llvm.ConstNull(runtimeCommonType)
-	elementTypes := runtimeCommonType.StructElementTypes()
+	typ := llvm.ConstNull(tm.runtimeCommonType)
+	elementTypes := tm.runtimeCommonType.StructElementTypes()
 
 	// Size.
 	size := llvm.SizeOf(lt)
@@ -336,7 +370,13 @@ func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	kind := llvm.ConstInt(llvm.Int8Type(), uint64(k), false)
 	typ = llvm.ConstInsertValue(typ, kind, []uint32{5})
 
-	// TODO alg
+	// Algorithm table.
+	alg := tm.makeAlgorithmTable(t)
+	algptr := llvm.AddGlobal(tm.module, alg.Type(), "")
+	algptr.SetInitializer(alg)
+	algptr = llvm.ConstBitCast(algptr, elementTypes[6])
+	typ = llvm.ConstInsertValue(typ, algptr, []uint32{6})
+
 	// TODO string
 	return typ
 }
@@ -348,7 +388,8 @@ func (tm *TypeMap) badRuntimeType(b *types.Bad) llvm.Value {
 func (tm *TypeMap) basicRuntimeType(b *types.Basic) llvm.Value {
 	commonType := tm.makeCommonType(b, reflect.Kind(b.Kind))
 	result := llvm.AddGlobal(tm.module, commonType.Type(), "")
-	ptr := llvm.ConstBitCast(result, runtimeCommonType.StructElementTypes()[9])
+	elementTypes := tm.runtimeCommonType.StructElementTypes()
+	ptr := llvm.ConstBitCast(result, elementTypes[9])
 	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
 	result.SetInitializer(commonType)
 	return result
@@ -363,12 +404,13 @@ func (tm *TypeMap) sliceRuntimeType(s *types.Slice) llvm.Value {
 }
 
 func (tm *TypeMap) structRuntimeType(s *types.Struct) llvm.Value {
-	result := llvm.AddGlobal(tm.module, runtimeStructType, "")
-	ptr := llvm.ConstBitCast(result, runtimeCommonType.StructElementTypes()[9])
+	result := llvm.AddGlobal(tm.module, tm.runtimeStructType, "")
+	elementTypes := tm.runtimeCommonType.StructElementTypes()
+	ptr := llvm.ConstBitCast(result, elementTypes[9])
 	commonType := tm.makeCommonType(s, reflect.Struct)
 	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
 
-	init := llvm.ConstNull(runtimeStructType)
+	init := llvm.ConstNull(tm.runtimeStructType)
 	init = llvm.ConstInsertValue(init, commonType, []uint32{0})
 	result.SetInitializer(init)
 
@@ -402,10 +444,11 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) llvm.Value {
 	underlyingRuntimeType := tm.ToRuntime(n.Underlying).Initializer()
 	result := llvm.AddGlobal(tm.module, underlyingRuntimeType.Type(), "")
 	result.SetName("__llgo.reflect." + n.Obj.Name)
-	ptr := llvm.ConstBitCast(result, runtimeCommonType.StructElementTypes()[9])
+	elementTypes := tm.runtimeCommonType.StructElementTypes()
+	ptr := llvm.ConstBitCast(result, elementTypes[9])
 	commonType := llvm.ConstInsertValue(underlyingRuntimeType, ptr, []uint32{9})
 
-	uncommonTypeInit := llvm.ConstNull(runtimeUncommonType) // TODO
+	uncommonTypeInit := llvm.ConstNull(tm.runtimeUncommonType) // TODO
 	uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 	uncommonType.SetInitializer(uncommonTypeInit)
 	commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{8})
