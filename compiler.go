@@ -23,12 +23,12 @@ SOFTWARE.
 package llgo
 
 import (
-	"log"
-	"os"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
+	"log"
+	"os"
 )
 
 type Module struct {
