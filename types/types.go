@@ -19,6 +19,10 @@ import (
 
 type BasicTypeKind reflect.Kind
 
+func (k BasicTypeKind) String() string {
+	return reflect.Kind(k).String()
+}
+
 // Constants for basic types.
 const (
 	BoolKind          = BasicTypeKind(reflect.Bool)
@@ -39,13 +43,6 @@ const (
 	Complex128Kind    = BasicTypeKind(reflect.Complex128)
 	StringKind        = BasicTypeKind(reflect.String)
 	UnsafePointerKind = BasicTypeKind(reflect.UnsafePointer)
-
-	NilKind BasicTypeKind = UnsafePointerKind + iota + 1
-	RuneKind
-	ByteKind
-	UntypedIntKind
-	UntypedFloatKind
-	UntypedComplexKind
 )
 
 // All types implement the Type interface.

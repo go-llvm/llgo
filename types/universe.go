@@ -15,6 +15,7 @@ var (
 	scope    *ast.Scope // current scope to use for initialization
 	Universe *ast.Scope
 	Unsafe   *ast.Object // package unsafe
+	Nil      *ast.Object
 )
 
 func define(kind ast.ObjKind, name string) *ast.Object {
@@ -84,7 +85,7 @@ func init() {
 	Byte = defType("byte", Uint8Kind)
 	Bool = defType("bool", BoolKind)
 	Uintptr = defType("uintptr", UintptrKind)
-	Rune = defType("rune", RuneKind)
+	Rune = defType("rune", Int32Kind)
 	String = defType("string", StringKind)
 
 	// type error interface {Error() string}
@@ -110,9 +111,7 @@ func init() {
 
 	defConst("iota")
 
-	nil_ := defConst("nil")
-	nil_.Data = &Const{}
-	nil_.Type = &Basic{Kind: NilKind}
+	Nil = defConst("nil")
 
 	defFun("append")
 	defFun("cap")

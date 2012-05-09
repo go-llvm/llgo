@@ -72,13 +72,21 @@ type LLVMValue struct {
 type ConstValue struct {
 	types.Const
 	compiler *compiler
-	typ      *types.Basic
+	//typ      *types.Basic
+	typ      types.Type
+	untype   token.Token
 }
 
 // TypeValue represents a Type result of an expression. All methods
 // other than Type() will panic when called.
 type TypeValue struct {
 	typ types.Type
+}
+
+// NilValue represents a nil value. All methods other than Convert will
+// panic when called.
+type NilValue struct {
+	compiler *compiler
 }
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
@@ -89,20 +97,12 @@ func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
 func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
-	var typ *types.Basic
+	var typ types.Type//*types.Basic
 	switch tok {
-	case token.INT:
-		typ = &types.Basic{Kind: types.UntypedIntKind}
-	case token.FLOAT:
-		typ = &types.Basic{Kind: types.UntypedFloatKind}
-	case token.IMAG:
-		typ = &types.Basic{Kind: types.UntypedComplexKind}
-	case token.CHAR:
-		typ = types.Rune.Underlying.(*types.Basic)
-	case token.STRING:
-		typ = types.String.Underlying.(*types.Basic)
+	case token.CHAR:   typ = types.Rune//.Underlying.(*types.Basic)
+	case token.STRING: typ = types.String//.Underlying.(*types.Basic)
 	}
-	return ConstValue{*types.MakeConst(tok, lit), c, typ}
+	return ConstValue{*types.MakeConst(tok, lit), c, typ, tok}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -123,22 +123,18 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	var rhs *LLVMValue
 	switch rhs_ := rhs_.(type) {
 	case *LLVMValue:
-		// Deref rhs, if it's indirect.
-		if rhs_.indirect {
-			rhs = rhs_.Deref()
-		} else {
-			rhs = rhs_
+		rhs = rhs_
+	case NilValue:
+		switch rhs_ := rhs_.Convert(lhs.Type()).(type) {
+		case ConstValue: rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
+		case *LLVMValue: rhs = rhs_
 		}
 	case ConstValue:
-		switch rhs_.typ.Kind {
-		case types.NilKind:
-			rhs = rhs_.Convert(lhs.Type()).(*LLVMValue)
-		case types.UntypedIntKind, types.UntypedFloatKind, types.UntypedComplexKind:
-			rhs_ = rhs_.Convert(lhs.Type()).(ConstValue)
-			fallthrough
-		default:
-			rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
-		}
+		value := rhs_.Convert(lhs.Type())
+		rhs = c.NewLLVMValue(value.LLVMValue(), value.Type())
+	}
+	if rhs.indirect {
+		rhs = rhs.Deref()
 	}
 
 	// Special case for structs.
@@ -265,6 +261,12 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LEQ: // TODO signed/unsigned
 		result = b.CreateICmp(llvm.IntULE, lhs.value, rhs.value, "")
+		return lhs.compiler.NewLLVMValue(result, types.Bool)
+	case token.GTR:
+		result = b.CreateICmp(llvm.IntUGT, lhs.value, rhs.value, "")
+		return lhs.compiler.NewLLVMValue(result, types.Bool)
+	case token.GEQ:
+		result = b.CreateICmp(llvm.IntUGE, lhs.value, rhs.value, "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LAND:
 		result = b.CreateAnd(lhs.value, rhs.value, "")
@@ -442,11 +444,9 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 
 		// Cast untyped lhs to rhs type.
-		switch lhs.typ.Kind {
-		case types.UntypedIntKind, types.UntypedFloatKind, types.UntypedComplexKind:
+		if lhs.typ == nil {
 			lhs = lhs.Convert(rhs.Type()).(ConstValue)
 		}
-
 		lhs_ := rhs.compiler.NewLLVMValue(lhs.LLVMValue(), lhs.Type())
 		return lhs_.BinaryOp(op, rhs)
 
@@ -455,13 +455,14 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// type.
 		c := lhs.compiler
 		typ := lhs.typ
-		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ}
+		tok := lhs.untype
+		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ, tok}
 	}
 	panic("unimplemented")
 }
 
 func (v ConstValue) UnaryOp(op token.Token) Value {
-	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ}
+	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ, v.untype}
 }
 
 func (v ConstValue) Convert(dst_typ types.Type) Value {
@@ -472,20 +473,18 @@ func (v ConstValue) Convert(dst_typ types.Type) Value {
 
 	if !types.Identical(v.typ, dst_typ) {
 		// Get the Basic type.
-		if name, isname := dst_typ.(*types.Name); isname {
-			dst_typ = name.Underlying
+		isBasic := false
+		if name, isname := types.Underlying(dst_typ).(*types.Name); isname {
+			_, isBasic = name.Underlying.(*types.Basic)
 		}
 
 		compiler := v.compiler
-		if basic, ok := dst_typ.(*types.Basic); ok {
-			return ConstValue{*v.Const.Convert(&dst_typ), compiler, basic}
+		if isBasic {
+			tok := token.INT // FIXME
+			return ConstValue{*v.Const.Convert(&dst_typ), compiler, dst_typ, tok}
 		} else {
-			// Special case for 'nil'
-			if v.typ.Kind == types.NilKind {
-				zero := llvm.ConstNull(compiler.types.ToLLVM(dst_typ))
-				return compiler.NewLLVMValue(zero, dst_typ)
-			}
-			panic("unhandled conversion")
+			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(dst_typ)
+			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dst_typ))
 		}
 	} else {
 		// TODO convert to dst type. ConstValue may need to change to allow
@@ -495,50 +494,69 @@ func (v ConstValue) Convert(dst_typ types.Type) Value {
 }
 
 func (v ConstValue) LLVMValue() llvm.Value {
-	// From the language spec:
-	//   If the type is absent and the corresponding expression evaluates to
-	//   an untyped constant, the type of the declared variable is bool, int,
-	//   float64, or string respectively, depending on whether the value is
-	//   a boolean, integer, floating-point, or string constant.
-
-	switch v.typ.Kind {
-	case types.UntypedIntKind:
+	typ := v.Type()
+	switch typ {
+	case types.Int:
 		// TODO 32/64bit
 		int_val := v.Val.(*big.Int)
 		if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
 			panic(fmt.Sprint("const ", int_val, " overflows int"))
 		}
+		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
+
+	case types.Int8:
+		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)
+	case types.Uint8, types.Byte:
+		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), false)
+
+	case types.Int16:
+		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), true)
+	case types.Uint16:
+		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
+
+	case types.Int32, types.Rune:
+		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
+	case types.Uint32:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
-	case types.UntypedFloatKind:
-		fallthrough
-	case types.UntypedComplexKind:
-		panic("Attempting to take LLVM value of untyped constant")
-	case types.Int32Kind, types.Uint32Kind, types.RuneKind:
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
-	case types.UnsafePointerKind, types.UintptrKind:
+
+	case types.Int64:
+		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
+	case types.Uint64:
+		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
+
+	case types.UnsafePointer, types.Uintptr:
 		inttype := v.compiler.target.IntPtrType()
 		return llvm.ConstInt(inttype, uint64(v.Int64()), false)
-	case types.Int16Kind, types.Uint16Kind:
-		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
-	case types.StringKind:
+
+	case types.String:
 		strval := (v.Val).(string)
 		ptr := v.compiler.builder.CreateGlobalStringPtr(strval, "")
 		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(strval)), false)
 		return llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
-	case types.BoolKind:
+
+	case types.Bool:
 		if v := v.Val.(bool); v {
 			return llvm.ConstAllOnes(llvm.Int1Type())
 		}
 		return llvm.ConstNull(llvm.Int1Type())
 	}
-	panic(fmt.Errorf("Unhandled type: %v", v.typ.Kind))
+	panic(fmt.Errorf("Unhandled type: %v", typ)) //v.typ.Kind))
 }
 
 func (v ConstValue) Type() types.Type {
-	// TODO convert untyped to typed?
-	switch v.typ.Kind {
-	case types.UntypedIntKind:
-		return types.Int
+	// From the language spec:
+	//   If the type is absent and the corresponding expression evaluates to
+	//   an untyped constant, the type of the declared variable is bool, int,
+	//   float64, or string respectively, depending on whether the value is
+	//   a boolean, integer, floating-point, or string constant.
+	if v.typ == nil {
+		switch v.untype {
+		case token.INT:	   return types.Int
+		case token.FLOAT:  return types.Float64
+		case token.IMAG:   return types.Complex128
+		case token.CHAR:   return types.Rune
+		case token.STRING: return types.String
+		}
 	}
 	return v.typ
 }
@@ -549,12 +567,25 @@ func (v ConstValue) Int64() int64 {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// 
+// TypeValue
 
 func (TypeValue) BinaryOp(op token.Token, rhs Value) Value { panic("this should not be called") }
 func (TypeValue) UnaryOp(op token.Token) Value             { panic("this should not be called") }
 func (TypeValue) Convert(typ types.Type) Value             { panic("this should not be called") }
 func (TypeValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
 func (t TypeValue) Type() types.Type                       { return t.typ }
+
+///////////////////////////////////////////////////////////////////////////////
+// NilValue
+
+func (NilValue) BinaryOp(op token.Token, rhs Value) Value { panic("this should not be called") }
+func (NilValue) UnaryOp(op token.Token) Value             { panic("this should not be called") }
+func (NilValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
+func (NilValue) Type() types.Type                         { panic("this should not be called") }
+func (n NilValue) Convert(typ types.Type) Value {
+	// TODO handle basic types specially, generating ConstValue's.
+	zero := llvm.ConstNull(n.compiler.types.ToLLVM(typ))
+	return n.compiler.NewLLVMValue(zero, typ)
+}
 
 // vim: set ft=go :

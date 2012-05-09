@@ -94,6 +94,8 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			valspec := obj.Decl.(*ast.ValueSpec)
 			c.VisitValueSpec(valspec, true)
 			value = (obj.Data).(Value)
+		} else if obj == types.Nil {
+			return NilValue{c}
 		} else {
 			var typ *types.Basic
 			switch x := obj.Type.(type) {
@@ -102,7 +104,8 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			case *types.Name:
 				typ = x.Underlying.(*types.Basic)
 			}
-			value = ConstValue{*(obj.Data.(*types.Const)), c, typ}
+			untype := token.INT // FIXME
+			value = ConstValue{*(obj.Data.(*types.Const)), c, typ, untype}
 			obj.Data = value
 		}
 

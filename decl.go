@@ -258,7 +258,6 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		if isconst {
 			if iota_, isint := (name_.Obj.Data).(int); isint {
 				iota_value := c.NewConstValue(token.INT, strconv.Itoa(iota_))
-				iota_value.typ.Kind = types.UntypedIntKind
 				iota_obj.Data = iota_value
 
 				// Con objects with an iota have an embedded ValueSpec
