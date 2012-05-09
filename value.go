@@ -72,7 +72,6 @@ type LLVMValue struct {
 type ConstValue struct {
 	types.Const
 	compiler *compiler
-	//typ      *types.Basic
 	typ      types.Type
 	untype   token.Token
 }
@@ -97,10 +96,12 @@ func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
 func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
-	var typ types.Type//*types.Basic
+	var typ types.Type //*types.Basic
 	switch tok {
-	case token.CHAR:   typ = types.Rune//.Underlying.(*types.Basic)
-	case token.STRING: typ = types.String//.Underlying.(*types.Basic)
+	case token.CHAR:
+		typ = types.Rune //.Underlying.(*types.Basic)
+	case token.STRING:
+		typ = types.String //.Underlying.(*types.Basic)
 	}
 	return ConstValue{*types.MakeConst(tok, lit), c, typ, tok}
 }
@@ -126,8 +127,10 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		rhs = rhs_
 	case NilValue:
 		switch rhs_ := rhs_.Convert(lhs.Type()).(type) {
-		case ConstValue: rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
-		case *LLVMValue: rhs = rhs_
+		case ConstValue:
+			rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
+		case *LLVMValue:
+			rhs = rhs_
 		}
 	case ConstValue:
 		value := rhs_.Convert(lhs.Type())
@@ -551,11 +554,16 @@ func (v ConstValue) Type() types.Type {
 	//   a boolean, integer, floating-point, or string constant.
 	if v.typ == nil {
 		switch v.untype {
-		case token.INT:	   return types.Int
-		case token.FLOAT:  return types.Float64
-		case token.IMAG:   return types.Complex128
-		case token.CHAR:   return types.Rune
-		case token.STRING: return types.String
+		case token.INT:
+			return types.Int
+		case token.FLOAT:
+			return types.Float64
+		case token.IMAG:
+			return types.Complex128
+		case token.CHAR:
+			return types.Rune
+		case token.STRING:
+			return types.String
 		}
 	}
 	return v.typ
