@@ -153,9 +153,9 @@ func isIntType(t types.Type) bool {
 			case types.Int32Kind:
 				fallthrough
 			case types.Int64Kind:
-				fallthrough
-			case types.UntypedIntKind:
 				return true
+			default:
+				return false
 			}
 		default:
 			return false
@@ -165,8 +165,10 @@ func isIntType(t types.Type) bool {
 }
 
 func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
-	value := c.VisitExpr(expr.X)
-	// TODO handle maps, strings, slices.
+	value := c.VisitExpr(expr.X).(*LLVMValue)
+	if value.indirect {
+		value = value.Deref()
+	}
 
 	index := c.VisitExpr(expr.Index)
 	if llvm_value, ok := index.(*LLVMValue); ok {
@@ -175,42 +177,45 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		}
 	}
 
-	if !isIntType(index.Type()) {
-		panic("Array index expression must evaluate to an integer")
+	typ := value.Type()
+	if typ == types.String {
+		// TODO
+		panic("unimplemented")
 	}
 
-	// Is it an array? Then let's get the address of the array so we can
-	// get an element.
-	// TODO
-	//if value.Type().TypeKind() == llvm.ArrayTypeKind {
-	//    value = value.Metadata(llvm.MDKindID("address"))
-	//}
+	switch value.Type().(type) {
+	case *types.Array, *types.Slice:
+		if !isIntType(index.Type()) {
+			panic("Array index expression must evaluate to an integer")
+		}
+		gep_indices := []llvm.Value{}
 
-	gep_indices := []llvm.Value{}
-
-	var ptr llvm.Value
-	var result_type types.Type
-	typ := value.Type()
-	if typ, ok := typ.(*types.Pointer); ok {
-		switch typ := types.Deref(typ).(type) {
+		var ptr llvm.Value
+		var result_type types.Type
+		switch typ := value.Type().(type) {
 		case *types.Array:
 			result_type = typ.Elt
-			ptr = value.LLVMValue()
+			ptr = value.address.LLVMValue()
 			gep_indices = append(gep_indices, llvm.ConstNull(llvm.Int32Type()))
 		case *types.Slice:
 			result_type = typ.Elt
-			ptr = c.builder.CreateStructGEP(value.LLVMValue(), 0, "")
+			ptr = c.builder.CreateStructGEP(value.address.LLVMValue(), 0, "")
 			ptr = c.builder.CreateLoad(ptr, "")
 		default:
 			panic("unimplemented")
 		}
-	}
 
-	gep_indices = append(gep_indices, index.LLVMValue())
-	element := c.builder.CreateGEP(ptr, gep_indices, "")
-	result := c.NewLLVMValue(element, &types.Pointer{Base: result_type})
-	result.indirect = true
-	return result
+		gep_indices = append(gep_indices, index.LLVMValue())
+		element := c.builder.CreateGEP(ptr, gep_indices, "")
+		result := c.NewLLVMValue(element, &types.Pointer{Base: result_type})
+		result.indirect = true
+		return result
+
+	case *types.Map:
+		// FIXME we need to differentiate between insertion and lookup.
+		return c.mapInsert(value, index)
+	}
+	panic("unreachable")
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {

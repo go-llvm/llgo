@@ -161,7 +161,7 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 	switch b.Kind {
 	case types.BoolKind:
 		return llvm.Int1Type()
-	case types.ByteKind, types.Int8Kind, types.Uint8Kind:
+	case types.Int8Kind, types.Uint8Kind:
 		return llvm.Int8Type()
 	case types.Int16Kind, types.Uint16Kind:
 		return llvm.Int16Type()
@@ -184,8 +184,6 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		elements := []llvm.Type{i8ptr, llvm.Int32Type()}
 		return llvm.StructType(elements, false)
-	case types.RuneKind:
-		return tm.basicLLVMType(types.Int.Underlying.(*types.Basic))
 	}
 	panic(fmt.Sprint("unhandled kind: ", b.Kind))
 }
@@ -433,7 +431,19 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) llvm.Value {
 }
 
 func (tm *TypeMap) mapRuntimeType(m *types.Map) llvm.Value {
-	panic("unimplemented")
+	result := llvm.AddGlobal(tm.module, tm.runtimeMapType, "")
+	elementTypes := tm.runtimeCommonType.StructElementTypes()
+	ptr := llvm.ConstBitCast(result, elementTypes[9])
+	commonType := tm.makeCommonType(m, reflect.Map)
+	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
+
+	init := llvm.ConstNull(tm.runtimeMapType)
+	init = llvm.ConstInsertValue(init, commonType, []uint32{0})
+	result.SetInitializer(init)
+
+	// TODO set key, elem
+
+	return result
 }
 
 func (tm *TypeMap) chanRuntimeType(c *types.Chan) llvm.Value {
