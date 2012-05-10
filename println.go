@@ -41,6 +41,28 @@ func getprintf(module llvm.Module) llvm.Value {
 	return printf
 }
 
+func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
+	startBlock := c.builder.GetInsertBlock()
+	resultBlock := llvm.InsertBasicBlock(startBlock, "")
+	resultBlock.MoveAfter(startBlock)
+	falseBlock := llvm.InsertBasicBlock(resultBlock, "")
+
+	CharPtr := llvm.PointerType(llvm.Int8Type(), 0)
+	falseString := c.builder.CreateGlobalStringPtr("false", "")
+	falseString = c.builder.CreateBitCast(falseString, CharPtr, "")
+	trueString := c.builder.CreateGlobalStringPtr("true", "")
+	trueString = c.builder.CreateBitCast(trueString, CharPtr, "")
+
+	c.builder.CreateCondBr(v, resultBlock, falseBlock)
+	c.builder.SetInsertPointAtEnd(falseBlock)
+	c.builder.CreateBr(resultBlock)
+	c.builder.SetInsertPointAtEnd(resultBlock)
+	result := c.builder.CreatePHI(CharPtr, "")
+	result.AddIncoming([]llvm.Value{trueString, falseString},
+	                   []llvm.BasicBlock{startBlock, falseBlock})
+	return result
+}
+
 func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 	var args []llvm.Value = nil
 	if expr.Args != nil {
@@ -87,10 +109,9 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 					llvm_value = ptrval
 					args = append(args, lenval)
 					format += "%.*s"
-
 				case types.BoolKind:
-					format += "%d"
-					llvm_value = c.builder.CreateZExt(llvm_value, llvm.Int32Type(), "")
+					format += "%s"
+					llvm_value = c.getBoolString(llvm_value)
 				default:
 					panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
 				}

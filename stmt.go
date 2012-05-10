@@ -319,6 +319,74 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 	c.builder.CreateRetVoid()
 }
 
+func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
+	if stmt.Init != nil {
+		c.PushScope()
+		defer c.PopScope()
+		c.VisitStmt(stmt.Init)
+	}
+
+	var tag Value
+	if stmt.Tag != nil {
+		tag = c.VisitExpr(stmt.Tag)
+	} else {
+		True := types.Universe.Lookup("true")
+		tag = c.Resolve(True)
+	}
+	if len(stmt.Body.List) == 0 {
+		return
+	}
+
+	// Create a BasicBlock for each case clause and each associated
+	// statement body. Each case clause will branch to either its
+	// statement body (success) or to the next case (failure), or the
+	// end block if there are no remaining cases.
+	startBlock := c.builder.GetInsertBlock()
+	endBlock := llvm.AddBasicBlock(startBlock.Parent(), "end")
+	endBlock.MoveAfter(startBlock)
+	caseBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
+	stmtBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
+	for _ = range stmt.Body.List {
+		caseBlocks = append(caseBlocks, llvm.InsertBasicBlock(endBlock, ""))
+	}
+	for _ = range stmt.Body.List {
+		stmtBlocks = append(stmtBlocks, llvm.InsertBasicBlock(endBlock, ""))
+	}
+
+	c.builder.CreateBr(caseBlocks[0])
+	for i, stmt := range stmt.Body.List {
+		c.builder.SetInsertPointAtEnd(caseBlocks[i])
+		clause := stmt.(*ast.CaseClause)
+		value := c.VisitExpr(clause.List[0])
+		result := value.BinaryOp(token.EQL, tag)
+		for _, expr := range clause.List[1:] {
+			value = c.compileLogicalOp(token.LOR, result, expr)
+		}
+
+		stmtBlock := stmtBlocks[i]
+		nextBlock := endBlock
+		if i+1 < len(caseBlocks) {
+			nextBlock = caseBlocks[i+1]
+		}
+		c.builder.CreateCondBr(result.LLVMValue(), stmtBlock, nextBlock)
+
+		c.builder.SetInsertPointAtEnd(stmtBlock)
+		branchBlock := endBlock
+		for _, stmt := range clause.Body {
+			if br, isbr := stmt.(*ast.BranchStmt); isbr && br.Tok == token.FALLTHROUGH {
+				if i+1 < len(stmtBlocks) {
+					branchBlock = stmtBlocks[i+1]
+				}
+			} else {
+				c.VisitStmt(stmt)
+			}
+		}
+		c.builder.CreateBr(branchBlock)
+	}
+
+	c.builder.SetInsertPointAtEnd(endBlock)
+}
+
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.logger != nil {
 		c.logger.Println("Compile statement:", reflect.TypeOf(stmt),
@@ -343,6 +411,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitDecl(x.Decl)
 	case *ast.GoStmt:
 		c.VisitGoStmt(x)
+	case *ast.SwitchStmt:
+		c.VisitSwitchStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}

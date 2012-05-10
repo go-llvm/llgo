@@ -27,12 +27,59 @@ import (
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/token"
 	"reflect"
 	"sort"
 )
 
+// Binary logical operators are handled specially, outside of the Value
+// type, because of the need to perform lazy evaluation.
+//
+// Binary logical operators are implemented using a Phi node, which takes
+// on the appropriate value depending on which basic blocks branch to it.
+func (c *compiler) compileLogicalOp(op token.Token,
+                                    lhs Value,
+									rhsExpr ast.Expr) Value {
+	lhsBlock := c.builder.GetInsertBlock()
+	resultBlock := llvm.AddBasicBlock(lhsBlock.Parent(), "")
+	resultBlock.MoveAfter(lhsBlock)
+	rhsBlock := llvm.InsertBasicBlock(resultBlock, "")
+	falseBlock := llvm.InsertBasicBlock(resultBlock, "")
+
+	if op == token.LOR {
+		c.builder.CreateCondBr(lhs.LLVMValue(), resultBlock, rhsBlock)
+	} else {
+		c.builder.CreateCondBr(lhs.LLVMValue(), rhsBlock, falseBlock)
+	}
+	c.builder.SetInsertPointAtEnd(rhsBlock)
+	rhs := c.VisitExpr(rhsExpr)
+	c.builder.CreateCondBr(rhs.LLVMValue(), resultBlock, falseBlock)
+	c.builder.SetInsertPointAtEnd(falseBlock)
+	c.builder.CreateBr(resultBlock)
+	c.builder.SetInsertPointAtEnd(resultBlock)
+
+	result := c.builder.CreatePHI(llvm.Int1Type(), "")
+	trueValue := llvm.ConstAllOnes(llvm.Int1Type())
+	falseValue := llvm.ConstNull(llvm.Int1Type())
+	var values []llvm.Value
+	var blocks []llvm.BasicBlock
+	if op == token.LOR {
+		values = []llvm.Value{trueValue, trueValue, falseValue}
+		blocks = []llvm.BasicBlock{lhsBlock, rhsBlock, falseBlock}
+	} else {
+		values = []llvm.Value{trueValue, falseValue}
+		blocks = []llvm.BasicBlock{rhsBlock, falseBlock}
+	}
+	result.AddIncoming(values, blocks)
+	return c.NewLLVMValue(result, types.Bool)
+}
+
 func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
 	lhs := c.VisitExpr(expr.X)
+	switch expr.Op {
+	case token.LOR, token.LAND:
+		return c.compileLogicalOp(expr.Op, lhs, expr.Y)
+	}
 	rhs := c.VisitExpr(expr.Y)
 	return lhs.BinaryOp(expr.Op, rhs)
 }
