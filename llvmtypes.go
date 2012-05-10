@@ -35,6 +35,7 @@ type TypeMap struct {
 	target  llvm.TargetData
 	types   map[types.Type]llvm.Type  // compile-time LLVM type
 	runtime map[types.Type]llvm.Value // runtime/reflect type representation
+	expr    map[ast.Expr]types.Type   // expression types
 
 	runtimeCommonType,
 	runtimeUncommonType,
@@ -53,8 +54,8 @@ type TypeMap struct {
 	copyAlgFunctionType llvm.Type
 }
 
-func NewTypeMap(module llvm.Module, target llvm.TargetData) *TypeMap {
-	tm := &TypeMap{module: module, target: target}
+func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Expr]types.Type) *TypeMap {
+	tm := &TypeMap{module: module, target: target, expr: exprTypes}
 	tm.types = make(map[types.Type]llvm.Type)
 	tm.runtime = make(map[types.Type]llvm.Value)
 

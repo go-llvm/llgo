@@ -213,8 +213,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		return c.NewLLVMValue(result, types.Bool)
 	}
 
-	if types.Underlying(lhs.typ) == types.String.Underlying {
-		if types.Underlying(rhs.typ) == types.String.Underlying {
+	if types.Underlying(lhs.typ) == types.String {
+		if types.Underlying(rhs.typ) == types.String {
 			switch op {
 			case token.ADD:
 				return c.concatenateStrings(lhs, rhs)
@@ -272,9 +272,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		result = b.CreateICmp(llvm.IntUGE, lhs.value, rhs.value, "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LAND:
+		// FIXME change this to branch
 		result = b.CreateAnd(lhs.value, rhs.value, "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LOR:
+		// FIXME change this to branch
 		result = b.CreateOr(lhs.value, rhs.value, "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	default:

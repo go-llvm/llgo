@@ -45,7 +45,7 @@ func (m Module) Dispose() {
 }
 
 type Compiler interface {
-	Compile(*token.FileSet, *ast.Package) (*Module, error)
+	Compile(*token.FileSet, *ast.Package, map[ast.Expr]types.Type) (*Module, error)
 	SetTraceEnabled(bool)
 }
 
@@ -97,12 +97,21 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 		} else if obj == types.Nil {
 			return NilValue{c}
 		} else {
-			var typ *types.Basic
-			switch x := obj.Type.(type) {
-			case *types.Basic:
-				typ = x
-			case *types.Name:
-				typ = x.Underlying.(*types.Basic)
+			var typ types.Type
+			if obj.Type == nil {
+				switch obj.Name {
+				case "true", "false":
+					typ = types.Bool
+				default:
+					panic(obj.Name)
+				}
+			} else {
+				switch x := obj.Type.(type) {
+				case *types.Basic:
+					typ = x
+				case *types.Name:
+					typ = x.Underlying.(*types.Basic)
+				}
 			}
 			untype := token.INT // FIXME
 			value = ConstValue{*(obj.Data.(*types.Const)), c, typ, untype}
@@ -199,7 +208,9 @@ func (c *compiler) SetTraceEnabled(enabled bool) {
 	}
 }
 
-func (compiler *compiler) Compile(fset *token.FileSet, pkg *ast.Package) (m *Module, err error) {
+func (compiler *compiler) Compile(fset *token.FileSet,
+                                  pkg *ast.Package,
+								  exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg
@@ -222,7 +233,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, pkg *ast.Package) (m *Mod
 			//err = e.(error)
 		}
 	}()
-	compiler.types = NewTypeMap(compiler.module.Module, compiler.target)
+	compiler.types = NewTypeMap(compiler.module.Module, compiler.target, exprTypes)
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.

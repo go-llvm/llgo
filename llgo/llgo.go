@@ -123,7 +123,8 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 		report(err)
 		return nil, err
 	}
-	_, err = types.Check(fset, pkg)
+
+	exprTypes, err := types.Check(fset, pkg)
 	if err != nil {
 		report(err)
 		return nil, err
@@ -136,7 +137,7 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 
 	compiler := llgo.NewCompiler()
 	compiler.SetTraceEnabled(*trace)
-	return compiler.Compile(fset, pkg)
+	return compiler.Compile(fset, pkg, exprTypes)
 }
 
 func main() {
