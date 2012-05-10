@@ -251,6 +251,10 @@ func binaryBoolOp(x bool, op token.Token, y bool) interface{} {
 		return x == y
 	case token.NEQ:
 		return x != y
+	case token.LAND:
+		return x && y
+	case token.LOR:
+		return x || y
 	}
 	panic("unreachable")
 }
