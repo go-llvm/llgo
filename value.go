@@ -110,6 +110,11 @@ func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
 // LLVMValue methods
 
 func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
+	if op == token.NEQ {
+		result := lhs.BinaryOp(token.EQL, rhs_)
+		return result.UnaryOp(token.NOT)
+	}
+
 	// Deref lhs, if it's indirect.
 	if lhs.indirect {
 		lhs = lhs.Deref()
@@ -218,12 +223,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			switch op {
 			case token.ADD:
 				return c.concatenateStrings(lhs, rhs)
-			//case token.EQL:
-			//	return c.compareStringsEqual(lhs.value, rhs.value)
-			//case token.LSS:
-			//	return c.compareStringsLess(lhs.value, rhs.value)
-			//case token.LEQ:
-			//	return c.compareStringsLessEqual(lhs.value, rhs.value)
+			case token.EQL, token.LSS, token.GTR, token.LEQ, token.GEQ:
+				return c.compareStrings(lhs, rhs, op)
 			default:
 				panic(fmt.Sprint("Unimplemented operator: ", op))
 			}
@@ -302,6 +303,12 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		}
 		return v.compiler.NewLLVMValue(v.address.LLVMValue(),
 			&types.Pointer{Base: v.typ})
+	case token.NOT:
+		if v.indirect {
+			return v.compiler.NewLLVMValue(v.value, v.typ)
+		}
+		value := b.CreateNot(v.LLVMValue(), "")
+		return v.compiler.NewLLVMValue(value, v.typ)
 	default:
 		panic("Unhandled operator: ") // + expr.Op)
 	}
@@ -459,9 +466,17 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// TODO Check if either one is untyped, and convert to the other's
 		// type.
 		c := lhs.compiler
-		typ := lhs.typ
-		tok := lhs.untype
-		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ, tok}
+		var typ types.Type = lhs.typ
+		var untype token.Token = lhs.untype
+
+		switch op {
+		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
+			typ = types.Bool
+		// TODO deduce type from other types of operations.
+		// XXX or are they always the same type as the operands?
+		}
+
+		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ, untype}
 	}
 	panic("unimplemented")
 }

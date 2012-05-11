@@ -53,5 +53,31 @@ func strcat(a, b str) str {
 	return a
 }
 
+func strcmp(a, b str) int32 {
+	sz := a.size
+	if b.size < sz {
+		sz = b.size
+	}
+	aptr, bptr := a.ptr, b.ptr
+	for i := 0; i < sz; i++ {
+		c1, c2 := *aptr, *bptr
+		switch {
+		case c1 < c2:
+			return -1
+		case c1 > c2:
+			return 1
+		}
+		aptr = (*uint8)(unsafe.Pointer(aptr)+1)
+		bptr = (*uint8)(unsafe.Pointer(bptr)+1)
+	}
+	switch {
+	case a.size < b.size:
+		return -1
+	case a.size > b.size:
+		return 1
+	}
+	return 0
+}
+
 // vim: set ft=go:
 

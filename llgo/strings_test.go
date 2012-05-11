@@ -11,4 +11,11 @@ func TestStringConcatenation(t *testing.T) {
 	}
 }
 
+func TestStringComparison(t *testing.T) {
+	err := runAndCheckMain(testdata("strings/compare.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // vim: set ft=go:

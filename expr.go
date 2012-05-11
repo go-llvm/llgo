@@ -80,8 +80,7 @@ func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
 	case token.LOR, token.LAND:
 		return c.compileLogicalOp(expr.Op, lhs, expr.Y)
 	}
-	rhs := c.VisitExpr(expr.Y)
-	return lhs.BinaryOp(expr.Op, rhs)
+	return lhs.BinaryOp(expr.Op, c.VisitExpr(expr.Y))
 }
 
 func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {

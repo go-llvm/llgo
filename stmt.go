@@ -381,7 +381,9 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 				c.VisitStmt(stmt)
 			}
 		}
-		c.builder.CreateBr(branchBlock)
+		if in := stmtBlock.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
+			c.builder.CreateBr(branchBlock)
+		}
 	}
 
 	c.builder.SetInsertPointAtEnd(endBlock)
