@@ -71,16 +71,16 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 				}
 			}
 
-			//cur_fn := c.functions[len(c.functions)-1]
-			//fn_type := cur_fn.Type()
-
-			// TODO Convert value to the function's return type.
-			result := value
+			// Convert value to the function's return type.
+			cur_fn := c.functions[len(c.functions)-1]
+			fn_type := cur_fn.Type().(*types.Func)
+			result := value.Convert(c.ObjGetType(fn_type.Results[0]))
 
 			c.builder.CreateRet(result.LLVMValue())
 		} else {
 			// TODO handle multi-return value functions in
 			// result expressions.
+			// TODO convert to function's return type.
 			values := make([]llvm.Value, len(stmt.Results))
 			for i, expr := range stmt.Results {
 				values[i] = c.VisitExpr(expr).LLVMValue()
