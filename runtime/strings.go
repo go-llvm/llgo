@@ -67,8 +67,8 @@ func strcmp(a, b str) int32 {
 		case c1 > c2:
 			return 1
 		}
-		aptr = (*uint8)(unsafe.Pointer(aptr)+1)
-		bptr = (*uint8)(unsafe.Pointer(bptr)+1)
+		aptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(aptr))+1)))
+		bptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(bptr))+1)))
 	}
 	switch {
 	case a.size < b.size:

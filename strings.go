@@ -23,9 +23,9 @@ SOFTWARE.
 package llgo
 
 import (
-	"go/token"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
+	"go/token"
 )
 
 func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
@@ -42,14 +42,14 @@ func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-    strcmp := c.module.Module.NamedFunction("runtime.strcmp")
-    if strcmp.IsNil() {
-        string_type := c.types.ToLLVM(types.String)
-        param_types := []llvm.Type{string_type, string_type}
-        func_type := llvm.FunctionType(llvm.Int32Type(), param_types, false)
-        strcmp = llvm.AddFunction(c.module.Module, "runtime.strcmp", func_type)
-    }
-    args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
+	strcmp := c.module.Module.NamedFunction("runtime.strcmp")
+	if strcmp.IsNil() {
+		string_type := c.types.ToLLVM(types.String)
+		param_types := []llvm.Type{string_type, string_type}
+		func_type := llvm.FunctionType(llvm.Int32Type(), param_types, false)
+		strcmp = llvm.AddFunction(c.module.Module, "runtime.strcmp", func_type)
+	}
+	args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
 	result := c.builder.CreateCall(strcmp, args, "")
 	zero := llvm.ConstNull(llvm.Int32Type())
 	var pred llvm.IntPredicate
@@ -70,7 +70,7 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 		panic("unreachable")
 	}
 	result = c.builder.CreateICmp(pred, result, zero, "")
-    return c.NewLLVMValue(result, types.Bool)
+	return c.NewLLVMValue(result, types.Bool)
 }
 
 // vim: set ft=go:
