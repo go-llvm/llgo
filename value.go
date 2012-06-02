@@ -472,8 +472,8 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		switch op {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
 			typ = types.Bool
-		// TODO deduce type from other types of operations.
-		// XXX or are they always the same type as the operands?
+			// TODO deduce type from other types of operations.
+			// XXX or are they always the same type as the operands?
 		}
 
 		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ, untype}
@@ -522,7 +522,7 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
 			panic(fmt.Sprint("const ", int_val, " overflows int"))
 		}
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
+		return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
 
 	case types.Int8:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)

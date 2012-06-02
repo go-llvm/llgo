@@ -38,8 +38,8 @@ import (
 // Binary logical operators are implemented using a Phi node, which takes
 // on the appropriate value depending on which basic blocks branch to it.
 func (c *compiler) compileLogicalOp(op token.Token,
-                                    lhs Value,
-									rhsExpr ast.Expr) Value {
+	lhs Value,
+	rhsExpr ast.Expr) Value {
 	lhsBlock := c.builder.GetInsertBlock()
 	resultBlock := llvm.AddBasicBlock(lhsBlock.Parent(), "")
 	resultBlock.MoveAfter(lhsBlock)
@@ -184,21 +184,10 @@ func isIntType(t types.Type) bool {
 			t = x.Underlying
 		case *types.Basic:
 			switch x.Kind {
-			case types.Uint8Kind:
-				fallthrough
-			case types.Uint16Kind:
-				fallthrough
-			case types.Uint32Kind:
-				fallthrough
-			case types.Uint64Kind:
-				fallthrough
-			case types.Int8Kind:
-				fallthrough
-			case types.Int16Kind:
-				fallthrough
-			case types.Int32Kind:
-				fallthrough
-			case types.Int64Kind:
+			case types.UintKind, types.Uint8Kind, types.Uint16Kind,
+				types.Uint32Kind, types.Uint64Kind, types.IntKind,
+				types.Int8Kind, types.Int16Kind, types.Int32Kind,
+				types.Int64Kind:
 				return true
 			default:
 				return false
@@ -361,8 +350,8 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		}
 
 		// Check if it's a pointer-receiver method.
-		method_type := method_obj.Type.(*types.Func)
-		recv_type := method_type.Recv.Type.(types.Type)
+		method_type := c.ObjGetType(method_obj).(*types.Func)
+		recv_type := c.ObjGetType(method_type.Recv).(types.Type)
 		is_ptr_method := !types.Identical(recv_type, typ)
 
 		method := c.Resolve(method_obj).(*LLVMValue)

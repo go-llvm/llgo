@@ -23,6 +23,7 @@ SOFTWARE.
 package llgo
 
 import (
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
@@ -47,21 +48,25 @@ func (m Module) Dispose() {
 type Compiler interface {
 	Compile(*token.FileSet, *ast.Package, map[ast.Expr]types.Type) (*Module, error)
 	SetTraceEnabled(bool)
+	SetTargetArch(string)
+	SetTargetOs(string)
 }
 
 type compiler struct {
-	builder   llvm.Builder
-	module    *Module
-	target    llvm.TargetData
-	functions []Value
-	initfuncs []Value
-	pkg       *ast.Package
-	fileset   *token.FileSet
-	filescope *ast.Scope
-	scope     *ast.Scope
-	pkgmap    map[*ast.Object]string
-	types     *TypeMap
-	logger    *log.Logger
+	builder    llvm.Builder
+	module     *Module
+	targetArch string
+	targetOs   string
+	target     llvm.TargetData
+	functions  []Value
+	initfuncs  []Value
+	pkg        *ast.Package
+	fileset    *token.FileSet
+	filescope  *ast.Scope
+	scope      *ast.Scope
+	pkgmap     map[*ast.Object]string
+	types      *TypeMap
+	logger     *log.Logger
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -208,9 +213,51 @@ func (c *compiler) SetTraceEnabled(enabled bool) {
 	}
 }
 
+// SetTargetArch sets the target architecture, which must be either one of the
+// architecture names recognised by the gc compiler, or an LLVM architecture
+// name.
+func (c *compiler) SetTargetArch(arch string) {
+	switch arch {
+	case "386":
+		c.targetArch = "x86"
+	case "amd64", "x86_64":
+		c.targetArch = "x86-64"
+	default:
+		c.targetArch = arch
+	}
+}
+
+// SetTargetOs sets the target OS, which must be either one of the OS names
+// recognised by the gc compiler, or an LLVM OS name.
+func (c *compiler) SetTargetOs(os string) {
+	if os == "windows" {
+		c.targetOs = "win32"
+	} else {
+		c.targetOs = os
+	}
+}
+
+// Convert the architecture name to the string used in LLVM triples.
+// See: llvm::Triple::getArchTypeName.
+//
+// TODO move this into the LLVM C API.
+func getTripleArchName(llvmArch string) string {
+	switch llvmArch {
+	case "x86":
+		return "i386"
+	case "x86-64":
+		return "x86_64"
+	case "ppc32":
+		return "powerpc"
+	case "ppc64":
+		return "powerpc64"
+	}
+	return llvmArch
+}
+
 func (compiler *compiler) Compile(fset *token.FileSet,
-                                  pkg *ast.Package,
-								  exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
+	pkg *ast.Package,
+	exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg
@@ -220,12 +267,34 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
+	// Create a TargetMachine from the OS & Arch.
+	triple := fmt.Sprintf("%s-unknown-%s",
+		getTripleArchName(compiler.targetArch),
+		compiler.targetOs)
+	var machine llvm.TargetMachine
+	for target := llvm.FirstTarget(); target.C != nil && machine.C == nil; target = target.NextTarget() {
+		if target.Name() == compiler.targetArch {
+			machine = target.CreateTargetMachine(triple, "", "",
+				llvm.CodeGenLevelDefault,
+				llvm.RelocDefault,
+				llvm.CodeModelDefault)
+			defer machine.Dispose()
+		}
+	}
+
+	if machine.C == nil {
+		err = fmt.Errorf("Invalid target triple: %s", triple)
+		return
+	}
+
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
 	// Dispose manually, which will render the finalizer a no-op.
 	modulename := pkg.Name
+	compiler.target = machine.TargetData()
 	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
-	compiler.target = llvm.NewTargetData(compiler.module.DataLayout())
+	compiler.module.SetTarget(triple)
+	compiler.module.SetDataLayout(compiler.target.String())
 	defer func() {
 		if e := recover(); e != nil {
 			compiler.module.Dispose()
@@ -245,7 +314,6 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		compiler.filescope = file.Scope
 		compiler.scope = file.Scope
 		compiler.fixConstDecls(file)
-		compiler.fixMethodDecls(file)
 		for _, decl := range file.Decls {
 			compiler.VisitDecl(decl)
 		}

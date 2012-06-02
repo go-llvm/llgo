@@ -59,7 +59,7 @@ func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
 	c.builder.SetInsertPointAtEnd(resultBlock)
 	result := c.builder.CreatePHI(CharPtr, "")
 	result.AddIncoming([]llvm.Value{trueString, falseString},
-	                   []llvm.BasicBlock{startBlock, falseBlock})
+		[]llvm.BasicBlock{startBlock, falseBlock})
 	return result
 }
 
@@ -91,12 +91,16 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 			switch typ := typ.(type) {
 			case *types.Basic:
 				switch typ.Kind {
+				case types.UintKind:
+					format += "%lu"
 				case types.Uint16Kind:
 					format += "%hu"
 				case types.Uint32Kind, types.UintptrKind: // FIXME uintptr to become bitwidth dependent
 					format += "%u"
 				case types.Uint64Kind:
 					format += "%llu" // FIXME windows
+				case types.IntKind:
+					format += "%ld"
 				case types.Int16Kind:
 					format += "%hd"
 				case types.Int32Kind:

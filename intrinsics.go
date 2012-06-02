@@ -24,6 +24,7 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
+	"strconv"
 )
 
 func (c *compiler) defineRuntimeIntrinsics() {
@@ -58,11 +59,13 @@ func (c *compiler) defineMemcpyFunction(fn llvm.Value) {
 	dst = c.builder.CreateIntToPtr(dst, pint8, "")
 	src = c.builder.CreateIntToPtr(src, pint8, "")
 
-	memcpyName := "llvm.memcpy.p0i8.p0i8.i32"
+	sizeType := size.Type()
+	sizeBits := sizeType.IntTypeWidth()
+	memcpyName := "llvm.memcpy.p0i8.p0i8.i" + strconv.Itoa(sizeBits)
 	memcpy := c.module.NamedFunction(memcpyName)
 	if memcpy.IsNil() {
 		paramtypes := []llvm.Type{
-			pint8, pint8, llvm.Int32Type(), llvm.Int32Type(), llvm.Int1Type()}
+			pint8, pint8, size.Type(), llvm.Int32Type(), llvm.Int1Type()}
 		memcpyType := llvm.FunctionType(llvm.VoidType(), paramtypes, false)
 		memcpy = llvm.AddFunction(c.module.Module, memcpyName, memcpyType)
 	}

@@ -70,10 +70,12 @@ func init() {
 	scope = ast.NewScope(nil)
 	Universe = scope
 
+	Uint = defType("uint", UintKind)
 	Uint8 = defType("uint8", Uint8Kind)
 	Uint16 = defType("uint16", Uint16Kind)
 	Uint32 = defType("uint32", Uint32Kind)
 	Uint64 = defType("uint64", Uint64Kind)
+	Int = defType("int", IntKind)
 	Int8 = defType("int8", Int8Kind)
 	Int16 = defType("int16", Int16Kind)
 	Int32 = defType("int32", Int32Kind)
@@ -95,16 +97,6 @@ func init() {
 	Error := &Name{Underlying: &Interface{
 		Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
 	obj.Type = Error
-
-	// TODO
-	is32bit := true
-	if is32bit {
-		Uint = defType("uint", Uint32Kind)
-		Int = defType("int", Int32Kind)
-	} else {
-		Uint = defType("uint", Uint64Kind)
-		Int = defType("int", Int64Kind)
-	}
 
 	defConst("true").Data = &Const{true}
 	defConst("false").Data = &Const{false}

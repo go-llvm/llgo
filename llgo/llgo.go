@@ -39,6 +39,8 @@ import (
 	"go/scanner"
 	"go/token"
 	"os"
+	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -53,6 +55,13 @@ var dump *bool = flag.Bool(
 var trace *bool = flag.Bool(
 	"trace", false,
 	"Trace the compilation process")
+
+var version *bool = flag.Bool(
+	"version", false,
+	"Display version information and exit")
+
+var os_ *string = flag.String("os", runtime.GOOS, "Set the target OS")
+var arch *string = flag.String("arch", runtime.GOARCH, "Set the target architecture")
 
 var exitCode = 0
 
@@ -137,11 +146,47 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 
 	compiler := llgo.NewCompiler()
 	compiler.SetTraceEnabled(*trace)
+	compiler.SetTargetArch(*arch)
+	compiler.SetTargetOs(*os_)
 	return compiler.Compile(fset, pkg, exprTypes)
 }
 
+func displayVersion() {
+	fmt.Println("llgo version", llgo.LLGOVersion)
+	fmt.Println()
+
+	fmt.Println("  Available targets:")
+	longestTargetName := 0
+	targetDescriptions := make(map[string]string)
+	targetNames := make([]string, 0)
+	for target := llvm.FirstTarget(); target.C != nil; target = target.NextTarget() {
+		targetName := target.Name()
+		targetNames = append(targetNames, targetName)
+		targetDescriptions[targetName] = target.Description()
+		if len(targetName) > longestTargetName {
+			longestTargetName = len(targetName)
+		}
+	}
+	sort.Strings(targetNames)
+	for _, targetName := range targetNames {
+		var paddingLen int = longestTargetName - len(targetName)
+		fmt.Printf("    %s %*s %s\n", targetName, paddingLen+1, "-",
+			targetDescriptions[targetName])
+	}
+	fmt.Println()
+
+	os.Exit(0)
+}
+
 func main() {
+	llvm.InitializeAllTargets()
+	llvm.InitializeAllTargetMCs()
+	llvm.InitializeAllTargetInfos()
 	flag.Parse()
+	if *version {
+		displayVersion()
+	}
+
 	module, err := compileFiles(flag.Args())
 	if err == nil {
 		defer module.Dispose()

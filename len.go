@@ -66,7 +66,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		ptr := value.(*LLVMValue).address
 		len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
 		len_value := c.builder.CreateLoad(len_field, "")
-		return c.NewLLVMValue(len_value, types.Int32)
+		return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
 
 	case *types.Array:
 		v := strconv.FormatUint(typ.Len, 10)
@@ -79,14 +79,14 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		// can't call ZExtValue on it. Not sure how best to tackle
 		// this, so for now returning this as a non-const value.
 		//return c.NewConstValue(token.INT, string(sz.ZExtValue()))
-		return c.NewLLVMValue(sz, types.Int32)
+		return c.NewLLVMValue(sz, types.Int)
 
 	case *types.Basic:
 		if typ == types.String.Underlying {
 			ptr := value.(*LLVMValue).address
 			len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
 			len_value := c.builder.CreateLoad(len_field, "")
-			return c.NewLLVMValue(len_value, types.Int32)
+			return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
 		}
 	}
 	panic(fmt.Sprint("Unhandled value type: ", value.Type()))
