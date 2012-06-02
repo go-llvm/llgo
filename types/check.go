@@ -17,9 +17,10 @@ import (
 const debug = false
 
 type checker struct {
-	fset   *token.FileSet
-	errors scanner.ErrorList
-	types  map[ast.Expr]Type
+	fset    *token.FileSet
+	errors  scanner.ErrorList
+	types   map[ast.Expr]Type
+	methods map[*ast.Object]ObjList
 }
 
 func (c *checker) errorf(pos token.Pos, format string, args ...interface{}) string {
@@ -80,6 +81,31 @@ func (c *checker) collectFields(tok token.Token, list *ast.FieldList, cycleOk bo
 		}
 	}
 	return
+}
+
+// collectMethods collects the method declarations from an AST File and
+// returns a mapping from receiver types to their method FuncDecl's.
+func (c *checker) collectMethods(file *ast.File) {
+	for _, decl := range file.Decls {
+		if funcdecl, ok := decl.(*ast.FuncDecl); ok && funcdecl.Recv != nil {
+			recvField := funcdecl.Recv.List[0]
+			var recv *ast.Ident
+			switch typ := recvField.Type.(type) {
+			case *ast.StarExpr:
+				recv = typ.X.(*ast.Ident)
+			case *ast.Ident:
+				recv = typ
+			default:
+				panic("bad receiver type expression")
+			}
+
+			// The Obj field of the funcdecl wll be nil, so we'll have to
+			// create a new one.
+			funcdecl.Name.Obj = ast.NewObj(ast.Fun, funcdecl.Name.String())
+			funcdecl.Name.Obj.Decl = funcdecl
+			c.methods[recv.Obj] = append(c.methods[recv.Obj], funcdecl.Name.Obj)
+		}
+	}
 }
 
 // makeType makes a new type for an AST type specification x or returns
@@ -173,8 +199,8 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 		return &Struct{Fields: fields, Tags: tags, FieldIndices: indices}
 
 	case *ast.FuncType:
-		params, _, _ := c.collectFields(token.FUNC, t.Params, true)
-		results, _, isVariadic := c.collectFields(token.FUNC, t.Results, true)
+		params, _, isVariadic := c.collectFields(token.FUNC, t.Params, true)
+		results, _, _ := c.collectFields(token.FUNC, t.Results, true)
 		return &Func{Recv: nil, Params: params, Results: results, IsVariadic: isVariadic}
 
 	case *ast.InterfaceType:
@@ -211,11 +237,30 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		obj.Type = typ // "mark" object so recursion terminates
 		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
 
+		if methobjs := c.methods[obj]; methobjs != nil {
+			for _, methobj := range methobjs {
+				c.checkObj(methobj, ref)
+			}
+			methobjs.Sort()
+			typ.Methods = methobjs
+		}
+
 	case ast.Var:
 		// TODO(gri) complete this
 
 	case ast.Fun:
-		// TODO(gri) complete this
+		fndecl := obj.Decl.(*ast.FuncDecl)
+		obj.Type = c.makeType(fndecl.Type, ref)
+		fn := obj.Type.(*Func)
+		if fndecl.Recv != nil {
+			recvField := fndecl.Recv.List[0]
+			if id, ok := recvField.Type.(*ast.Ident); ok {
+				fn.Recv = id.Obj
+			} else {
+				fn.Recv = ast.NewObj(ast.Var, "_")
+				fn.Recv.Type = c.makeType(recvField.Type, ref)
+			}
+		}
 
 	default:
 		panic("unreachable")
@@ -231,6 +276,11 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	var c checker
 	c.fset = fset
 	c.types = make(map[ast.Expr]Type)
+	c.methods = make(map[*ast.Object]ObjList)
+
+	for _, file := range pkg.Files {
+		c.collectMethods(file)
+	}
 
 	for _, obj := range pkg.Scope.Objects {
 		c.checkObj(obj, false)
