@@ -254,8 +254,8 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		fn := obj.Type.(*Func)
 		if fndecl.Recv != nil {
 			recvField := fndecl.Recv.List[0]
-			if id, ok := recvField.Type.(*ast.Ident); ok {
-				fn.Recv = id.Obj
+			if len(recvField.Names) > 0 {
+				fn.Recv = recvField.Names[0].Obj
 			} else {
 				fn.Recv = ast.NewObj(ast.Var, "_")
 				fn.Recv.Type = c.makeType(recvField.Type, ref)

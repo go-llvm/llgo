@@ -143,6 +143,9 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			// No-op. Fields will be yielded for function
 			// arg/recv/ret. We update the .Data field of the
 			// object when we enter the function definition.
+			if obj.Data == nil {
+				panic("unexpected obj.Data value")
+			}
 		}
 
 		// If it's an external variable, we'll need to create a global

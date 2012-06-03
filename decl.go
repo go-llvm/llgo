@@ -34,44 +34,26 @@ import (
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
-	// Get the function type. The function type will be cached in f.Name.Obj,
-	// so check that first.
 	var fn_type *types.Func
-	if f.Name.Obj != nil {
-		if result, isvalue := f.Name.Obj.Data.(Value); isvalue {
-			return result
-		}
-		type_ := c.ObjGetType(f.Name.Obj)
-		if type_ != nil {
-			fn_type = type_.(*types.Func)
-		}
-	}
-	if fn_type == nil {
-		fn_type = c.VisitFuncType(f.Type)
-	}
 	fn_name := f.Name.String()
 
-	// Add receiver.
-	if fn_type.Recv == nil && f.Recv != nil {
-		if len(f.Recv.List) > 0 && len(f.Recv.List[0].Names) > 0 {
-			ident := f.Recv.List[0].Names[0]
-			fn_type.Recv = ident.Obj
-		} else {
-			fn_type.Recv = ast.NewObj(ast.Var, "_")
-		}
-		fn_type.Recv.Type = c.GetType(f.Recv.List[0].Type)
-	}
-
-	// Make "init" functions anonymous.
 	exported := ast.IsExported(fn_name)
 	if fn_name == "init" {
+		// Make "init" functions anonymous.
 		fn_name = ""
-	} else if c.module.Name == "main" && fn_name == "main" {
-		exported = true
+		// "init" functions aren't recorded by the parser, so f.Name.Obj is
+		// not set.
+		fn_type = &types.Func{/* no params or result */}
 	} else {
-		pkgname := c.pkgmap[f.Name.Obj]
-		fn_name = pkgname + "." + fn_name
+		fn_type = f.Name.Obj.Type.(*types.Func)
+		if c.module.Name == "main" && fn_name == "main" {
+			exported = true
+		} else {
+			pkgname := c.pkgmap[f.Name.Obj]
+			fn_name = pkgname + "." + fn_name
+		}
 	}
+
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
 	if exported {
