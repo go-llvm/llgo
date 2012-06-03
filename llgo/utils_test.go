@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"path"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
 	"go/build"
 	"os/exec"
+	"path"
 	"reflect"
 	"strings"
 	"syscall"
@@ -74,9 +74,7 @@ func addRuntime(m *llgo.Module) (err error) {
 	if err != nil {
 		return
 	}
-	// TODO link runtime into target module.
-	// This requires an addition to the LLVM-C API.
-	runtimeModule.Dispose()
+	llvm.LinkModules(m.Module, runtimeModule, llvm.LinkerDestroySource)
 	return
 }
 
