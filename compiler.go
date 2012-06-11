@@ -103,23 +103,15 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			return NilValue{c}
 		} else {
 			var typ types.Type
-			if obj.Type == nil {
-				switch obj.Name {
-				case "true", "false":
-					typ = types.Bool
-				default:
-					panic(obj.Name)
-				}
-			} else {
-				switch x := obj.Type.(type) {
-				case *types.Basic:
-					typ = x
-				case *types.Name:
-					typ = x.Underlying.(*types.Basic)
-				}
+			switch x := obj.Type.(type) {
+			case *types.Basic:
+				typ = x
+			case *types.Name:
+				typ = x.Underlying.(*types.Basic)
+			default:
+				panic(fmt.Sprintf("unreachable (%T)", x))
 			}
-			untype := token.INT // FIXME
-			value = ConstValue{*(obj.Data.(*types.Const)), c, typ, untype}
+			value = ConstValue{*(obj.Data.(*types.Const)), c, typ}
 			obj.Data = value
 		}
 
@@ -144,7 +136,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			// arg/recv/ret. We update the .Data field of the
 			// object when we enter the function definition.
 			if obj.Data == nil {
-				panic("unexpected obj.Data value")
+				panic("expected obj.Data value")
 			}
 		}
 

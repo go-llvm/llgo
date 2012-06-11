@@ -71,7 +71,6 @@ func (b *Bad) String() string {
 type Basic struct {
 	ImplementsType
 	Kind BasicTypeKind
-	// TODO(gri) need a field specifying the exact basic type
 }
 
 func (b *Basic) String() string {
@@ -109,7 +108,6 @@ type Struct struct {
 	// TODO(gri) This type needs some rethinking:
 	// - at the moment anonymous fields are marked with "" object names,
 	//   and their names have to be reconstructed
-	// - there is no scope for fast lookup (but the parser creates one)
 }
 
 func (s *Struct) String() string {

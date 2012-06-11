@@ -98,10 +98,14 @@ func init() {
 		Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
 	obj.Type = Error
 
-	defConst("true").Data = &Const{true}
-	defConst("false").Data = &Const{false}
+	true_ := defConst("true")
+	true_.Data = &Const{true}
+	true_.Type = Bool.Underlying
+	false_ := defConst("false")
+	false_.Data = &Const{false}
+	false_.Type = Bool.Underlying
 
-	defConst("iota")
+	defConst("iota").Type = Int.Underlying
 
 	Nil = defConst("nil")
 

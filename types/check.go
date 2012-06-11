@@ -108,6 +108,269 @@ func (c *checker) collectMethods(file *ast.File) {
 	}
 }
 
+// decomposeRepeatConsts looks for each instance of a constant list, and
+// for constants without a value, associates the preceding constant's
+// value and type (if any).
+func (c *checker) decomposeRepeatConsts(file *ast.File) {
+	for _, decl := range file.Decls {
+		gendecl, ok := decl.(*ast.GenDecl)
+		if ok && gendecl.Tok == token.CONST {
+			var predValueSpec *ast.ValueSpec
+			for _, spec := range gendecl.Specs {
+				valspec := spec.(*ast.ValueSpec)
+				if len(valspec.Values) > 0 {
+					predValueSpec = valspec
+				} else {
+					valspec.Type = predValueSpec.Type
+					valspec.Values = predValueSpec.Values
+				}
+			}
+		}
+	}
+}
+
+// untypedPriority eturns an integer priority value that corresponds
+// to the given type's position in the sequence:
+//     integer, character, floating-point, complex.
+func untypedPriority(t Type) int {
+	switch t {
+	case Int.Underlying:
+		return 0
+	case Rune.Underlying:
+		return 1
+	case Float64.Underlying:
+		return 2
+	case Complex128.Underlying:
+		return 3
+	}
+	panic(fmt.Sprintf("unhandled (%T, %v)", t, t))
+}
+
+// checkExpr type checks an expression and returns its type.
+func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
+	if typ, ok := c.types[x]; ok {
+		return typ
+	}
+	defer func() {
+		if typ != nil {
+			c.types[x] = typ
+		}
+	}()
+	// multi-value assignment handled within CallExpr.
+	if len(assignees) == 1 {
+		defer func() {
+			a := assignees[0]
+			if a.Obj.Type == nil {
+				a.Obj.Type = typ
+			} else {
+				// TODO convert rhs type to lhs.
+			}
+		}()
+	}
+
+	switch x := x.(type) {
+	case *ast.Ident:
+		// type name
+		obj := x.Obj
+		if obj == nil {
+			// unresolved identifier (error has been reported before)
+			return &Bad{Msg: "unresolved identifier"}
+		}
+		if obj.Kind != ast.Var && obj.Kind != ast.Con && obj.Kind != ast.Fun {
+			msg := c.errorf(x.Pos(),
+				"%s is neither function, variable nor constant",
+				x.Name)
+			return &Bad{Msg: msg}
+		}
+		c.checkObj(obj, false)
+		return obj.Type.(Type)
+
+	case *ast.BasicLit:
+		switch x.Kind {
+		case token.INT:
+			return Int.Underlying
+		case token.FLOAT:
+			return Float64.Underlying
+		case token.IMAG:
+			return Complex128.Underlying
+		case token.CHAR:
+			return Rune.Underlying
+		case token.STRING:
+			return String.Underlying
+		}
+
+	case *ast.CompositeLit:
+		// TODO do this properly.
+		return c.makeType(x.Type, false)
+
+	case *ast.BinaryExpr:
+		xType := c.checkExpr(x.X, nil)
+		yType := c.checkExpr(x.Y, nil)
+		_, xUntyped := xType.(*Basic)
+		_, yUntyped := yType.(*Basic)
+		switch x.Op {
+		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
+			// TODO check the operands are comparable.
+			// TODO check when to use untyped bool.
+			return Bool
+		case token.SHL, token.SHR:
+			// TODO check right operand is unsigned integer, or untyped
+			// constant convertible to unsigned integer.
+
+			// If the left operand of a non-constant shift expression is an
+			// untyped constant, the type of the constant is what it would
+			// be if the shift expression were replaced by its left operand
+			// alone; the type is int if it cannot be determined from thexi
+			// context
+			// TODO check if rhs is non-const.
+			//if xUntyped && !isConst(x.Y) {
+			//}
+			return Int
+		default:
+			if xUntyped && yUntyped {
+				// Except for shift operations, if the operands of a binary
+				// operation are different kinds of untyped constants, the
+				// operation and, for non-boolean operations, the result use
+				// the kind that appears later in this list:
+				//     integer, character, floating-point, complex.
+				switch x := untypedPriority(xType) - untypedPriority(yType); {
+				case x <= 0:
+					return xType
+				case x > 0:
+					return yType
+				}
+			} else if xUntyped {
+				// Convert x.X's type to x.Y's.
+				c.types[x.X] = yType
+				return yType
+			} else if yUntyped {
+				// Convert x.Y's type to x.X's.
+				c.types[x.Y] = xType
+				return xType
+			}
+			return xType
+		}
+		panic("unreachable")
+
+	case *ast.UnaryExpr:
+		optype := c.checkExpr(x.X, nil)
+		for {
+			u := Underlying(optype)
+			if u == optype {
+				break
+			}
+		}
+
+		switch x.Op {
+		case token.ADD, token.SUB: // +, -
+			// TODO allow int, float (complex?)
+			return optype
+		case token.NOT: // !
+			// TODO Make sure it's a bool.
+			return optype
+		case token.XOR: // ^
+			// TODO allow int
+			return optype
+		case token.MUL: // *
+			if ptr, ok := optype.(*Pointer); ok {
+				return ptr.Base
+			}
+			msg := c.errorf(x.Pos(), "cannot dereference non-pointer")
+			return &Bad{Msg: msg}
+		case token.AND: // &
+			// TODO check operand is addressable
+			return &Pointer{Base: optype}
+		case token.ARROW: // <-
+			// TODO check channel direction
+			if ch, ok := optype.(*Chan); ok {
+				if len(assignees) > 0 {
+					assignees[0].Obj.Type = ch.Elt
+					if len(assignees) == 2 {
+						assignees[1].Obj.Type = Bool
+					}
+				}
+				return ch.Elt
+			}
+			msg := c.errorf(x.Pos(), "cannot receive from non-channel")
+			return &Bad{Msg: msg}
+		}
+		panic("unreachable")
+
+	case *ast.CallExpr:
+		args := x.Args
+
+		// check for unsafe functions.
+		if x, ok := x.Fun.(*ast.SelectorExpr); ok {
+			if ident, ok := x.X.(*ast.Ident); ok && ident.Obj.Data == Unsafe.Data {
+				switch x.Sel.Name {
+				case "Offsetof":
+					if len(args) > 0 {
+						if _, ok := args[0].(*ast.SelectorExpr); !ok {
+							// TODO format args
+							return &Bad{Msg: fmt.Sprintf("invalid expression %s.%s", x.X, x.Sel)}
+						}
+						// TODO check arg is a struct field selector.
+					}
+					fallthrough
+				case "Alignof":
+					fallthrough
+				case "Sizeof":
+					if len(args) < 1 {
+						return &Bad{Msg: fmt.Sprintf("missing argument for %s.%s", x.X, x.Sel)}
+					} else if len(args) > 1 {
+						return &Bad{Msg: fmt.Sprintf("extra arguments for %s.%s", x.X, x.Sel)}
+					}
+				default:
+					return &Bad{Msg: fmt.Sprintf("undefined: %s.%s", x.X, x.Sel)}
+				}
+				return Uintptr
+			}
+		}
+
+		// TODO check arg types
+		fntype := c.checkExpr(x.Fun, nil).(*Func)
+		for _, obj := range fntype.Results {
+			c.checkObj(obj, false)
+		}
+		if len(assignees) > 1 {
+			for i, obj := range fntype.Results {
+				if assignees[i].Obj.Type == nil {
+					assignees[i].Obj.Type = obj.Type
+				} else {
+					// TODO convert rhs type to lhs.
+				}
+			}
+		}
+		if len(fntype.Results) == 1 {
+			return fntype.Results[0].Type.(Type)
+		}
+		return nil // nil or multi-value
+
+	case *ast.SelectorExpr:
+		if ident, ok := x.X.(*ast.Ident); ok {
+			// qualified identifier
+			if obj := ident.Obj; obj != nil && obj.Kind == ast.Pkg {
+				pkgscope := obj.Data.(*ast.Scope)
+				x.Sel.Obj = pkgscope.Lookup(x.Sel.Name)
+				return c.checkExpr(x.Sel, nil)
+			}
+		}
+
+		t := c.checkExpr(x.X, nil)
+		panic(fmt.Sprintf("beep %T", t))
+		switch t.(type) {
+		case *Interface:
+		}
+		//if lhs, isstruct, 
+
+		// TODO(gri) can this really happen (the parser should have excluded this)?
+		//msg := c.errorf(t.Pos(), "expected qualified identifier")
+		//return &Bad{Msg: msg}
+	}
+
+	panic(fmt.Sprintf("unreachable (%T)", x))
+}
+
 // makeType makes a new type for an AST type specification x or returns
 // the type referred to by a type name x. If cycleOk is set, a type may
 // refer to itself directly or indirectly; otherwise cycles are errors.
@@ -162,10 +425,6 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 				pkgscope := obj.Data.(*ast.Scope)
 				t.Sel.Obj = pkgscope.Lookup(t.Sel.Name)
 				return c.makeType(t.Sel, cycleOk)
-				// TODO(gri) we have a package name but don't
-				// have the mapping from package name to package
-				// scope anymore (created in ast.NewPackage).
-				//return &Bad{} // for now
 			}
 		}
 		// TODO(gri) can this really happen (the parser should have excluded this)?
@@ -230,7 +489,18 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		// ignore
 
 	case ast.Con:
-		// TODO(gri) complete this
+		valspec := obj.Decl.(*ast.ValueSpec)
+		if valspec.Type != nil {
+			obj.Type = c.makeType(valspec.Type, ref)
+			for _, name := range valspec.Names {
+				name.Obj.Type = obj.Type
+			}
+		}
+		if valspec.Values != nil {
+			for i, name := range valspec.Names {
+				c.checkExpr(valspec.Values[i], []*ast.Ident{name})
+			}
+		}
 
 	case ast.Typ:
 		typ := &Name{Obj: obj}
@@ -246,7 +516,39 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		}
 
 	case ast.Var:
-		// TODO(gri) complete this
+		var names []*ast.Ident
+		var values []ast.Expr
+		var typexpr ast.Expr
+		switch x := obj.Decl.(type) {
+		case *ast.ValueSpec:
+			names = x.Names
+			values = x.Values
+			typexpr = x.Type
+		case *ast.Field:
+			names = x.Names
+			typexpr = x.Type
+		default:
+			panic("unimplemented")
+		}
+		if names != nil { // nil for anonymous field
+			var typ Type
+			if typexpr != nil {
+				typ = c.makeType(typexpr, ref)
+				for _, name := range names {
+					if name.Obj != nil {
+						name.Obj.Type = typ
+					}
+				}
+			}
+			if len(values) == 1 && len(names) > 1 {
+				// multi-value assignment
+				c.checkExpr(values[0], names)
+			} else if len(values) == len(names) {
+				for i, name := range names {
+					c.checkExpr(values[i], []*ast.Ident{name})
+				}
+			}
+		}
 
 	case ast.Fun:
 		fndecl := obj.Decl.(*ast.FuncDecl)
@@ -256,6 +558,7 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 			recvField := fndecl.Recv.List[0]
 			if len(recvField.Names) > 0 {
 				fn.Recv = recvField.Names[0].Obj
+				c.checkObj(fn.Recv, ref)
 			} else {
 				fn.Recv = ast.NewObj(ast.Var, "_")
 				fn.Recv.Type = c.makeType(recvField.Type, ref)
@@ -279,6 +582,7 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	c.methods = make(map[*ast.Object]ObjList)
 
 	for _, file := range pkg.Files {
+		c.decomposeRepeatConsts(file)
 		c.collectMethods(file)
 	}
 

@@ -43,7 +43,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 		fn_name = ""
 		// "init" functions aren't recorded by the parser, so f.Name.Obj is
 		// not set.
-		fn_type = &types.Func{/* no params or result */}
+		fn_type = &types.Func{ /* no params or result */}
 	} else {
 		fn_type = f.Name.Obj.Type.(*types.Func)
 		if c.module.Name == "main" && fn_name == "main" {

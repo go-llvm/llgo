@@ -73,7 +73,6 @@ type ConstValue struct {
 	types.Const
 	compiler *compiler
 	typ      types.Type
-	untype   token.Token
 }
 
 // TypeValue represents a Type result of an expression. All methods
@@ -96,14 +95,20 @@ func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
 // Create a new constant value from a literal with accompanying type, as
 // provided by ast.BasicLit.
 func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
-	var typ types.Type //*types.Basic
+	var typ types.Type
 	switch tok {
+	case token.INT:
+		typ = types.Int.Underlying
+	case token.FLOAT:
+		typ = types.Float64.Underlying
+	case token.IMAG:
+		typ = types.Complex128.Underlying
 	case token.CHAR:
-		typ = types.Rune //.Underlying.(*types.Basic)
+		typ = types.Rune.Underlying
 	case token.STRING:
-		typ = types.String //.Underlying.(*types.Basic)
+		typ = types.String.Underlying
 	}
-	return ConstValue{*types.MakeConst(tok, lit), c, typ, tok}
+	return ConstValue{*types.MakeConst(tok, lit), c, typ}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -467,7 +472,6 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// type.
 		c := lhs.compiler
 		var typ types.Type = lhs.typ
-		var untype token.Token = lhs.untype
 
 		switch op {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
@@ -476,13 +480,13 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			// XXX or are they always the same type as the operands?
 		}
 
-		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ, untype}
+		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ}
 	}
 	panic("unimplemented")
 }
 
 func (v ConstValue) UnaryOp(op token.Token) Value {
-	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ, v.untype}
+	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ}
 }
 
 func (v ConstValue) Convert(dst_typ types.Type) Value {
@@ -500,8 +504,7 @@ func (v ConstValue) Convert(dst_typ types.Type) Value {
 
 		compiler := v.compiler
 		if isBasic {
-			tok := token.INT // FIXME
-			return ConstValue{*v.Const.Convert(&dst_typ), compiler, dst_typ, tok}
+			return ConstValue{*v.Const.Convert(&dst_typ), compiler, dst_typ}
 		} else {
 			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(dst_typ)
 			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dst_typ))
@@ -569,18 +572,20 @@ func (v ConstValue) Type() types.Type {
 	//   an untyped constant, the type of the declared variable is bool, int,
 	//   float64, or string respectively, depending on whether the value is
 	//   a boolean, integer, floating-point, or string constant.
-	if v.typ == nil {
-		switch v.untype {
-		case token.INT:
-			return types.Int
-		case token.FLOAT:
-			return types.Float64
-		case token.IMAG:
-			return types.Complex128
-		case token.CHAR:
-			return types.Rune
-		case token.STRING:
-			return types.String
+	if _, ok := v.typ.(*types.Basic); ok {
+		switch v.typ {
+		case types.Int.Underlying:
+			v.typ = types.Int
+		case types.Float64.Underlying:
+			v.typ = types.Float64
+		case types.Complex128.Underlying:
+			v.typ = types.Complex128
+		case types.Rune.Underlying:
+			v.typ = types.Rune
+		case types.String.Underlying:
+			v.typ = types.String
+		case types.Bool.Underlying:
+			v.typ = types.Bool
 		}
 	}
 	return v.typ
