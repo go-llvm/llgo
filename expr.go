@@ -253,7 +253,13 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	panic("unreachable")
 }
 
+type selectorCandidate struct {
+	Indices []uint64
+	Type	types.Type
+}
+
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
+	/* TODO use expr.Sel.Obj, set during type checking.
 	lhs := c.VisitExpr(expr.X)
 	if lhs == nil {
 		// The only time we should get a nil result is if the object is
@@ -270,110 +276,117 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		}
 		return c.Resolve(obj)
 	}
+	*/
 
-	// TODO when we support embedded types, we'll need to do a breadth-first
-	// search for the name, since the specification says to take the shallowest
-	// field with the specified name.
+	// TODO(?) record path to field/method during typechecking, so we don't
+	// have to search again here.
 
-	// Map name to an index.
-	zero_value := llvm.ConstInt(llvm.Int32Type(), 0, false)
-	indexes := make([]llvm.Value, 0)
-
-	// If it's an indirect value, for example, a stack-allocated copy of a
-	// parameter, take the base type and add a GEP index, but don't dereference
-	// the value.
-	indirect := false
-	typ := lhs.Type()
-	if lhs_, isllvm := lhs.(*LLVMValue); isllvm && lhs_.indirect {
-		typ = types.Deref(typ)
-		indexes = append(indexes, zero_value)
-		indirect = true
-	}
-
-	var ptr_type types.Type
-	if _, isptr := typ.(*types.Pointer); isptr {
-		ptr_type = typ
-		typ = types.Deref(typ)
-		if indirect {
-			lhs = lhs.(*LLVMValue).Deref()
-			indirect = false
-		} else {
-			indexes = append(indexes, zero_value)
-		}
-	}
-
-	// If it's a struct, look to see if it has a field with the specified name.
-	name := expr.Sel.String()
-	underlying := typ.(*types.Name).Underlying
-	switch x := underlying.(type) {
-	case *types.Struct:
-		if i, exists := x.FieldIndices[name]; exists {
-			index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
-			indexes = append(indexes, index)
-			llvm_value := c.builder.CreateGEP(lhs.LLVMValue(), indexes, "")
-			elt_typ := x.Fields[i].Type.(types.Type)
-			value := c.NewLLVMValue(llvm_value, &types.Pointer{Base: elt_typ})
-			value.indirect = true
-			return value
-		}
-	case *types.Interface:
-		iface := x
+	lhs := c.VisitExpr(expr.X)
+	name := expr.Sel.Name
+	if iface, ok := types.Underlying(lhs.Type()).(*types.Interface); ok {
+		// validity checked during typechecking.
 		i := sort.Search(len(iface.Methods), func(i int) bool {
 			return iface.Methods[i].Name >= name
 		})
-		if i < len(iface.Methods) && iface.Methods[i].Name == name {
-			struct_value := lhs.LLVMValue()
-			receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
-			fn_value := c.builder.CreateStructGEP(struct_value, i+2, "")
-			method_type := c.ObjGetType(iface.Methods[i]).(*types.Func)
-			method := c.NewLLVMValue(
-				c.builder.CreateBitCast(
-					c.builder.CreateLoad(fn_value, ""),
-					c.types.ToLLVM(method_type), ""), method_type)
-			method.receiver = c.NewLLVMValue(
-				c.builder.CreateLoad(receiver_value, ""),
-				method_type.Recv.Type.(types.Type))
-			return method
-		}
-	}
-
-	// Look up a method with receiver T.
-	namedtype := typ.(*types.Name)
-	i := sort.Search(len(namedtype.Methods), func(i int) bool {
-		return namedtype.Methods[i].Name >= name
-	})
-	if i < len(namedtype.Methods) && namedtype.Methods[i].Name == name {
-		method_obj := namedtype.Methods[i]
-		receiver := lhs.(*LLVMValue)
-		if indirect {
-			receiver = receiver.Deref()
-		}
-
-		// Check if it's a pointer-receiver method.
-		method_type := c.ObjGetType(method_obj).(*types.Func)
-		recv_type := c.ObjGetType(method_type.Recv).(types.Type)
-		is_ptr_method := !types.Identical(recv_type, typ)
-
-		method := c.Resolve(method_obj).(*LLVMValue)
-		if is_ptr_method {
-			// From the language spec:
-			//     If x is addressable and &x's method set contains m,
-			//     x.m() is shorthand for (&x).m()
-			if ptr_type == nil && receiver.address != nil {
-				receiver = receiver.address
-			}
-			method.receiver = receiver
-		} else {
-			if ptr_type != nil {
-				method.receiver = receiver.Deref()
-			} else {
-				method.receiver = receiver
-			}
-		}
+		struct_value := lhs.LLVMValue()
+		receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
+		fn_value := c.builder.CreateStructGEP(struct_value, i+2, "")
+		method_type := c.ObjGetType(iface.Methods[i]).(*types.Func)
+		method := c.NewLLVMValue(
+			c.builder.CreateBitCast(
+				c.builder.CreateLoad(fn_value, ""),
+				c.types.ToLLVM(method_type), ""), method_type)
+		method.receiver = c.NewLLVMValue(
+			c.builder.CreateLoad(receiver_value, ""),
+			method_type.Recv.Type.(types.Type))
 		return method
 	}
 
-	panic("Shouldn't reach here (looking for " + name + ")")
+	// Search through embedded types for field/method.
+	var result selectorCandidate
+	curr := []selectorCandidate{{nil, lhs.Type()}}
+	for result.Type == nil && len(curr) > 0 {
+		var next []selectorCandidate
+		for _, candidate := range curr {
+			indices := candidate.Indices[0:]
+			t := candidate.Type
+
+			if p, ok := types.Underlying(t).(*types.Pointer); ok {
+				if _, ok := types.Underlying(p.Base).(*types.Struct); ok {
+					indices = append(indices, 0)
+					t = p.Base
+				}
+			}
+
+			if n, ok := t.(*types.Name); ok {
+				i := sort.Search(len(n.Methods), func(i int) bool {
+					return n.Methods[i].Name >= name
+				})
+				if i < len(n.Methods) && n.Methods[i].Name == name {
+					result.Indices = indices
+					result.Type = t
+				}
+			}
+
+			if t, ok := types.Underlying(t).(*types.Struct); ok {
+				if i, ok := t.FieldIndices[name]; ok {
+					result.Indices = append(indices, i)
+					result.Type = t
+				} else {
+					// Add embedded types to the next set of types
+					// to check.
+					for i, field := range t.Fields {
+						if field.Name == "" {
+							indices = append(indices[0:], uint64(i))
+							t := field.Type.(types.Type)
+							candidate := selectorCandidate{indices, t}
+							next = append(next, candidate)
+						}
+					}
+				}
+			}
+		}
+		curr = next
+	}
+
+	// Get a pointer to the field/struct for field/method invocation.
+	indices := make([]llvm.Value, len(result.Indices))
+	for i, v := range result.Indices {
+		indices[i] = llvm.ConstInt(llvm.Int32Type(), v, false)
+	}
+
+	// Method?
+	if expr.Sel.Obj.Kind == ast.Fun {
+		method := c.Resolve(expr.Sel.Obj).(*LLVMValue)
+		methodType := expr.Sel.Obj.Type.(*types.Func)
+		receiverType := methodType.Recv.Type.(types.Type)
+		if len(indices) > 0 {
+			receiverValue := c.builder.CreateGEP(lhs.LLVMValue(), indices, "")
+			if types.Identical(result.Type, receiverType) {
+				receiverValue = c.builder.CreateLoad(receiverValue, "")
+			}
+			method.receiver = c.NewLLVMValue(receiverValue, receiverType)
+		} else {
+			method.receiver = lhs.(*LLVMValue)
+			if !types.Identical(result.Type, receiverType) {
+				if !method.receiver.indirect {
+					method.receiver = method.receiver.address
+				}
+			} else {
+				if method.receiver.indirect {
+					method.receiver = method.receiver.Deref()
+				}
+			}
+		}
+		return method
+	} else {
+		fieldValue := c.builder.CreateGEP(lhs.LLVMValue(), indices, "")
+		fieldType := expr.Sel.Obj.Type.(types.Type)
+		ptr := c.NewLLVMValue(fieldValue, fieldType)
+		ptr.indirect = true
+		return ptr
+	}
+	panic("unreachable")
 }
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
