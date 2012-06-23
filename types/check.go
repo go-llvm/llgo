@@ -41,6 +41,9 @@ func (c *checker) collectFields(tok token.Token, list *ast.FieldList, cycleOk bo
 				isVariadic = true
 			}
 			typ := c.makeType(ftype, cycleOk)
+			//if isVariadic {
+			//	typ = &Slice{Elt: typ}
+			//}
 			tag := ""
 			if field.Tag != nil {
 				assert(field.Tag.Kind == token.STRING)
@@ -148,6 +151,9 @@ func untypedPriority(t Type) int {
 }
 
 // checkExpr type checks an expression and returns its type.
+//
+// TODO get rid of the assignee crap, and keep a context stack.
+// We'll also need context for ReturnStmt (in checkStmt).
 func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 	if typ, ok := c.types[x]; ok {
 		return typ
@@ -343,7 +349,12 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				//case "cap":
 				//case "close":
 				//case "complex":
-				//case "copy":
+				case "copy":
+					/*dst := */ c.checkExpr(args[0], nil)
+					/*src := */ c.checkExpr(args[1], nil)
+					// TODO check src, dst have same elt T and assignable to []T.
+					// (or) src is string, dst is assignable to byte[]
+					return Int
 				case "delete":
 					m := c.checkExpr(args[0], nil)
 					if _, ok := Underlying(m).(*Map); !ok {
@@ -369,7 +380,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 						}
 					*/
 					return t
-				//case "new":
+				case "new":
+					t := c.makeType(args[0], true)
+					return &Pointer{Base: t}
 				case "println":
 					fallthrough
 				case "print":
@@ -390,7 +403,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			}
 		}
 
-		// TODO check arg types
 		var fntype *Func
 		switch t := c.checkExpr(x.Fun, nil).(type) {
 		case *Func:
@@ -399,6 +411,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			return t
 		default:
 			// TODO
+		}
+
+		// TODO check arg types
+		for _, arg := range x.Args {
+			c.checkExpr(arg, nil)
 		}
 
 		for _, obj := range fntype.Results {
@@ -494,7 +511,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			}
 		}
 
-		// TODO return error if x.Sel.Obj still nil here.
 		if x.Sel.Obj == nil {
 			msg := c.errorf(x.Pos(),
 				"failed to resolve selector %s.%s", x.X, x.Sel)
@@ -538,9 +554,22 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			}
 			return t.Elt
 		case *Name:
+			// If we receive a Name here, then we must have a named basic
+			// type. The only basic type supporting indexing is string.
+			if t.Underlying == String.Underlying {
+				return Byte
+			}
+			msg := c.errorf(x.Pos(), "%s type does not support indexing", t)
+			return &Bad{Msg: msg}
 		case *Basic:
+			if t == String.Underlying {
+				return Byte
+			}
+			msg := c.errorf(x.Pos(), "%s type does not support indexing", t)
+			return &Bad{Msg: msg}
 		}
-		panic(fmt.Sprintf("unreachable (%T)", containerType))
+		fmt.Println(c.fset.Position(x.Pos()))
+		panic(c.errorf(x.Pos(), "unreachable (%T)", containerType))
 
 	case *ast.ParenExpr:
 		return c.checkExpr(x.X, assignees)
@@ -566,6 +595,38 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			}
 		}
 		return to
+
+	case *ast.SliceExpr:
+		// TODO check indices are appropriately typed.
+		if x.Low != nil {
+			c.checkExpr(x.Low, nil)
+		}
+		if x.High != nil {
+			c.checkExpr(x.High, nil)
+		}
+
+		lhs := c.checkExpr(x.X, nil)
+		switch t := Underlying(lhs).(type) {
+		case *Pointer:
+			if t, ok := t.Base.(*Array); ok {
+				return &Slice{Elt: t.Elt}
+			}
+		case *Array:
+			// TODO check array is addressable.
+			return &Slice{Elt: t.Elt}
+		case *Slice:
+			return lhs
+		case *Name:
+			if Underlying(t) == Underlying(String) {
+				return lhs
+			}
+		case *Basic:
+			if t == String.Underlying {
+				return lhs
+			}
+		}
+		msg := c.errorf(x.Pos(), "invalid type for slice expression")
+		return &Bad{Msg: msg}
 	}
 
 	panic(fmt.Sprintf("unreachable (%T)", x))
@@ -667,7 +728,7 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 		return &Interface{Methods: methods}
 
 	case *ast.MapType:
-		return &Map{Key: c.makeType(t.Key, true), Elt: c.makeType(t.Key, true)}
+		return &Map{Key: c.makeType(t.Key, true), Elt: c.makeType(t.Value, true)}
 
 	case *ast.ChanType:
 		return &Chan{Dir: t.Dir, Elt: c.makeType(t.Value, true)}
@@ -735,28 +796,141 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				}
 			}
 		}
+
 	case *ast.BlockStmt:
 		for _, s := range s.List {
 			c.checkStmt(s)
 		}
-	// TODO
-	case *ast.BranchStmt:
-	case *ast.DeclStmt:
-	case *ast.DeferStmt:
-	case *ast.EmptyStmt:
+
 	case *ast.ExprStmt:
 		c.checkExpr(s.X, nil)
+
+	case *ast.BranchStmt:
+		// no-op
+
+	case *ast.DeclStmt:
+		// Only a GenDecl/ValueSpec is permissible in a statement.
+		decl := s.Decl.(*ast.GenDecl)
+		for _, spec := range decl.Specs {
+			spec := spec.(*ast.ValueSpec)
+			for _, name := range spec.Names {
+				c.checkObj(name.Obj, true)
+			}
+		}
+	//case *ast.DeferStmt:
+	//case *ast.EmptyStmt:
+
 	case *ast.ForStmt:
-	case *ast.GoStmt:
+		if s.Init != nil {
+			c.checkStmt(s.Init)
+		}
+		// TODO make sure cond expr is some sort of bool.
+		c.checkExpr(s.Cond, nil)
+		if s.Post != nil {
+			c.checkStmt(s.Post)
+		}
+		c.checkStmt(s.Body)
+
+	//case *ast.IncDecStmt:
+	//case *ast.GoStmt:
+
 	case *ast.IfStmt:
+		if s.Init != nil {
+			c.checkStmt(s.Init)
+		}
+		// TODO make sure cond expr is some sort of bool.
+		c.checkExpr(s.Cond, nil)
+		c.checkStmt(s.Body)
+		if s.Else != nil {
+			c.checkStmt(s.Else)
+		}
+
 	case *ast.IncDecStmt:
+		// TODO check operand is addressable.
+		// TODO check operand type is suitable for inc/dec.
+		c.checkExpr(s.X, nil)
+
 	case *ast.LabeledStmt:
+		c.checkStmt(s.Stmt)
+
 	case *ast.RangeStmt:
+		var k, v Type
+		switch x := Underlying(c.checkExpr(s.X, nil)).(type) {
+		case *Pointer:
+			if x, ok := Underlying(x.Base).(*Array); ok {
+				k, v = Int, x.Elt
+			} else {
+				c.errorf(s.Pos(), "invalid type for range")
+				return
+			}
+		case *Array:
+			k, v = Int, x.Elt
+		case *Slice:
+			k, v = Int, x.Elt
+		case *Map:
+			k, v = x.Key, x.Elt
+		case *Chan:
+			k = x.Elt
+			if s.Value != nil {
+				c.errorf(s.Pos(), "too many variables in range")
+				return
+			}
+		default:
+			c.errorf(s.Pos(), "invalid type for range")
+			return
+		}
+
+		// TODO check key, value are addressable and assignable from range
+		// values.
+		if ident, ok := s.Key.(*ast.Ident); ok && ident.Obj.Type == nil {
+			ident.Obj.Type = k
+		} else {
+			c.checkExpr(s.Key, nil)
+		}
+		if s.Value != nil {
+			if ident, ok := s.Value.(*ast.Ident); ok && ident.Obj.Type == nil {
+				ident.Obj.Type = v
+			} else {
+				c.checkExpr(s.Value, nil)
+			}
+		}
+		c.checkStmt(s.Body)
+
 	case *ast.ReturnStmt:
-	case *ast.SelectStmt:
-	case *ast.SendStmt:
+		// TODO we need to check the result type(s) against the
+		// current function's declared return type(s). We need
+		// context for that.
+		for _, e := range s.Results {
+			c.checkExpr(e, nil)
+		}
+
+	//case *ast.SelectStmt:
+	//case *ast.SendStmt:
+
 	case *ast.SwitchStmt:
-	case *ast.TypeSwitchStmt:
+		if s.Init != nil {
+			c.checkStmt(s.Init)
+		}
+		tag := Bool.Underlying // omitted tag == "true"
+		if s.Tag != nil {
+			tag = c.checkExpr(s.Tag, nil)
+		}
+		for _, s_ := range s.Body.List {
+			cc := s_.(*ast.CaseClause)
+			for _, e := range cc.List {
+				// TODO check type is comparable to tag.
+				t := c.checkExpr(e, nil)
+				_, _ = t, tag
+			}
+			for _, s := range cc.Body {
+				c.checkStmt(s)
+			}
+		}
+
+	//case *ast.TypeSwitchStmt:
+
+	default:
+		panic(fmt.Sprintf("unimplemented %T", s))
 	}
 }
 
