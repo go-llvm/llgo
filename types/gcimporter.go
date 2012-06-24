@@ -429,6 +429,9 @@ func (p *gcParser) parseParameter() (par *ast.Object, isVariadic bool) {
 		isVariadic = true
 	}
 	ptyp := p.parseType()
+	if isVariadic {
+		ptyp = &Slice{Elt: ptyp}
+	}
 	// ignore argument tag
 	if p.tok == scanner.String {
 		p.expect(scanner.String)

@@ -41,9 +41,9 @@ func (c *checker) collectFields(tok token.Token, list *ast.FieldList, cycleOk bo
 				isVariadic = true
 			}
 			typ := c.makeType(ftype, cycleOk)
-			//if isVariadic {
-			//	typ = &Slice{Elt: typ}
-			//}
+			if isVariadic {
+				typ = &Slice{Elt: typ}
+			}
 			tag := ""
 			if field.Tag != nil {
 				assert(field.Tag.Kind == token.STRING)
@@ -366,7 +366,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 						// TODO check key is assignable to map's key type.
 						return nil
 					}
-				//case "imag":
 				case "len":
 					return Int
 				case "make":
@@ -388,7 +387,17 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				case "print":
 					// TODO check args are expressions.
 					return nil
-				//case "real":
+				case "imag", "real":
+					arg := c.checkExpr(args[0], nil)
+					switch Underlying(arg) {
+					case Complex64:
+						return Float32
+					case Complex128:
+						return Float64
+					default:
+						msg := c.errorf(x.Pos(), "%s must be called with a complex type", x.Name)
+						return &Bad{Msg: msg}
+					}
 				case "panic":
 					// TODO check arg is an expression.
 					return nil
@@ -523,6 +532,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 	case *ast.IndexExpr:
 		// TODO check index type is suitable for indexing.
 		//indexType := c.checkExpr(x.Index, nil)
+		c.checkExpr(x.Index, nil)
 		containerType := c.checkExpr(x.X, nil)
 
 		switch t := Underlying(containerType).(type) {
@@ -627,6 +637,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 		msg := c.errorf(x.Pos(), "invalid type for slice expression")
 		return &Bad{Msg: msg}
+
+	case *ast.FuncLit:
+		t := c.makeType(x.Type, false)
+		c.checkStmt(x.Body)
+		return t
 	}
 
 	panic(fmt.Sprintf("unreachable (%T)", x))
@@ -782,6 +797,8 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			for i, e := range s.Lhs {
 				if ident, ok := e.(*ast.Ident); ok {
 					idents[i] = ident
+				} else {
+					c.checkExpr(e, nil)
 				}
 			}
 			c.checkExpr(s.Rhs[0], idents)
