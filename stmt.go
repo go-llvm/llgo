@@ -32,7 +32,7 @@ import (
 )
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
-	ptr := c.VisitExpr(stmt.X)
+	ptr := c.VisitExpr(stmt.X).(*LLVMValue).pointer
 	value := c.builder.CreateLoad(ptr.LLVMValue(), "")
 	one := llvm.ConstInt(value.Type(), 1, false)
 
@@ -65,11 +65,6 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	} else {
 		if len(stmt.Results) == 1 {
 			value := c.VisitExpr(stmt.Results[0])
-			if llvm_value, ok := value.(*LLVMValue); ok {
-				if llvm_value.indirect {
-					value = llvm_value.Deref()
-				}
-			}
 
 			// Convert value to the function's return type.
 			cur_fn := c.functions[len(c.functions)-1]
@@ -104,11 +99,6 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	} else {
 		for i, expr := range stmt.Rhs {
 			values[i] = c.VisitExpr(expr)
-			if value_, isllvm := values[i].(*LLVMValue); isllvm {
-				if value_.indirect {
-					values[i] = value_.Deref()
-				}
-			}
 		}
 	}
 	for i, expr := range stmt.Lhs {
@@ -123,16 +113,15 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 					c.builder.CreateStore(value.LLVMValue(), ptr)
 					llvm_value := c.NewLLVMValue(
 						ptr, &types.Pointer{Base: value.Type()})
-					llvm_value.indirect = true
-					obj.Data = llvm_value
+					obj.Data = llvm_value.makePointee()
 				} else {
-					ptr, _ := (obj.Data).(Value)
+					ptr := (obj.Data).(*LLVMValue).pointer
 					value = value.Convert(types.Deref(ptr.Type()))
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 				}
 			}
 		default:
-			ptr := c.VisitExpr(expr)
+			ptr := c.VisitExpr(expr).(*LLVMValue).pointer
 			value = value.Convert(types.Deref(ptr.Type()))
 			c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 		}
@@ -162,12 +151,6 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	}
 
 	cond_val := c.VisitExpr(stmt.Cond)
-	if llvm_value, ok := cond_val.(*LLVMValue); ok {
-		if llvm_value.indirect {
-			cond_val = llvm_value.Deref()
-		}
-	}
-
 	c.builder.CreateCondBr(cond_val.LLVMValue(), if_block, else_block)
 	c.builder.SetInsertPointAtEnd(if_block)
 	c.VisitBlockStmt(stmt.Body)
@@ -263,11 +246,6 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 		args_mem = c.builder.CreateAlloca(args_struct_type, "")
 		for i, expr := range stmt.Call.Args {
 			value_i := c.VisitExpr(expr)
-			if llvm_value, isllvm := value_i.(*LLVMValue); isllvm {
-				if llvm_value.indirect {
-					value_i = llvm_value.Deref()
-				}
-			}
 			value_i = value_i.Convert(fn_type.Params[i].Type.(types.Type))
 			arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
 				llvm.ConstInt(llvm.Int32Type(), 0, false),

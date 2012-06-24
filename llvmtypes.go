@@ -234,11 +234,8 @@ func (tm *TypeMap) funcLLVMType(f *types.Func) llvm.Type {
 		param_types = append(param_types, tm.ToLLVM(recv_type))
 	}
 
-	for i, param := range f.Params {
+	for _, param := range f.Params {
 		param_type := param.Type.(types.Type)
-		if f.IsVariadic && i == len(f.Params)-1 {
-			param_type = &types.Slice{Elt: param_type}
-		}
 		param_types = append(param_types, tm.ToLLVM(param_type))
 	}
 

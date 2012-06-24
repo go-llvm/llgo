@@ -66,18 +66,12 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
 				key := c.VisitExpr(kv.Key)
 				value = c.VisitExpr(kv.Value)
-				if lv, islv := value.(*LLVMValue); islv && lv.indirect {
-					value = lv.Deref()
-				}
 				if valuemap == nil {
 					valuemap = make(map[Value]Value)
 				}
 				valuemap[key] = value
 			} else {
 				value = c.VisitExpr(elt)
-				if lv, islv := value.(*LLVMValue); islv && lv.indirect {
-					value = lv.Deref()
-				}
 				valuelist = append(valuelist, value)
 			}
 		}
@@ -142,8 +136,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			}
 		}
 		m := c.NewLLVMValue(ptr, &types.Pointer{Base: origtyp})
-		m.indirect = true
-		return m
+		return m.makePointee()
 
 	case *types.Struct:
 		values := valuelist
@@ -170,8 +163,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			c.builder.CreateStore(llvm_value, ptr)
 		}
 		m := c.NewLLVMValue(struct_value, &types.Pointer{Base: origtyp})
-		m.indirect = true
-		return m
+		return m.makePointee()
 
 	case *types.Map:
 		value := llvm.ConstNull(c.types.ToLLVM(typ))

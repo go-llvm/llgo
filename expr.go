@@ -115,10 +115,6 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 
 	// Not a type conversion, so must be a function call.
 	fn := lhs.(*LLVMValue)
-	if fn.indirect {
-		fn = fn.Deref()
-	}
-
 	fn_type := fn.Type().(*types.Func)
 	args := make([]llvm.Value, 0)
 	if fn_type.Recv != nil {
@@ -133,24 +129,14 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		}
 		for i := 0; i < nparams; i++ {
 			value := c.VisitExpr(expr.Args[i])
-			if value_, isllvm := value.(*LLVMValue); isllvm {
-				if value_.indirect {
-					value = value_.Deref()
-				}
-			}
 			param_type := fn_type.Params[i].Type.(types.Type)
 			args = append(args, value.Convert(param_type).LLVMValue())
 		}
 		if fn_type.IsVariadic {
-			param_type := fn_type.Params[nparams].Type.(types.Type)
+			param_type := fn_type.Params[nparams].Type.(*types.Slice).Elt
 			varargs := make([]llvm.Value, 0)
 			for i := nparams; i < len(expr.Args); i++ {
 				value := c.VisitExpr(expr.Args[i])
-				if value_, isllvm := value.(*LLVMValue); isllvm {
-					if value_.indirect {
-						value = value_.Deref()
-					}
-				}
 				value = value.Convert(param_type)
 				varargs = append(varargs, value.LLVMValue())
 			}
@@ -201,16 +187,7 @@ func isIntType(t types.Type) bool {
 
 func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	value := c.VisitExpr(expr.X).(*LLVMValue)
-	if value.indirect {
-		value = value.Deref()
-	}
-
 	index := c.VisitExpr(expr.Index)
-	if llvm_value, ok := index.(*LLVMValue); ok {
-		if llvm_value.indirect {
-			index = llvm_value.Deref()
-		}
-	}
 
 	typ := value.Type()
 	if typ == types.String {
@@ -230,11 +207,11 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		switch typ := value.Type().(type) {
 		case *types.Array:
 			result_type = typ.Elt
-			ptr = value.address.LLVMValue()
+			ptr = value.pointer.LLVMValue()
 			gep_indices = append(gep_indices, llvm.ConstNull(llvm.Int32Type()))
 		case *types.Slice:
 			result_type = typ.Elt
-			ptr = c.builder.CreateStructGEP(value.address.LLVMValue(), 0, "")
+			ptr = c.builder.CreateStructGEP(value.pointer.LLVMValue(), 0, "")
 			ptr = c.builder.CreateLoad(ptr, "")
 		default:
 			panic("unimplemented")
@@ -243,8 +220,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		gep_indices = append(gep_indices, index.LLVMValue())
 		element := c.builder.CreateGEP(ptr, gep_indices, "")
 		result := c.NewLLVMValue(element, &types.Pointer{Base: result_type})
-		result.indirect = true
-		return result
+		return result.makePointee()
 
 	case *types.Map:
 		// FIXME we need to differentiate between insertion and lookup.
@@ -259,29 +235,20 @@ type selectorCandidate struct {
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
-	/* TODO use expr.Sel.Obj, set during type checking.
 	lhs := c.VisitExpr(expr.X)
 	if lhs == nil {
 		// The only time we should get a nil result is if the object is
 		// a package.
-		pkgident := (expr.X).(*ast.Ident)
-		pkgscope := (pkgident.Obj.Data).(*ast.Scope)
-		obj := pkgscope.Lookup(expr.Sel.String())
-		if obj == nil {
-			panic(fmt.Errorf("Failed to locate object: %v.%v",
-				pkgident.Name, expr.Sel.String()))
-		}
+		obj := expr.Sel.Obj
 		if obj.Kind == ast.Typ {
 			return TypeValue{obj.Type.(types.Type)}
 		}
 		return c.Resolve(obj)
 	}
-	*/
 
 	// TODO(?) record path to field/method during typechecking, so we don't
 	// have to search again here.
 
-	lhs := c.VisitExpr(expr.X)
 	name := expr.Sel.Name
 	if iface, ok := types.Underlying(lhs.Type()).(*types.Interface); ok {
 		// validity checked during typechecking.
@@ -367,44 +334,46 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			}
 			method.receiver = c.NewLLVMValue(receiverValue, receiverType)
 		} else {
-			method.receiver = lhs.(*LLVMValue)
-			if !types.Identical(result.Type, receiverType) {
-				if !method.receiver.indirect {
-					method.receiver = method.receiver.address
-				}
-			} else {
-				if method.receiver.indirect {
-					method.receiver = method.receiver.Deref()
-				}
+			lhs := lhs.(*LLVMValue)
+			if types.Identical(result.Type, receiverType) {
+				method.receiver = lhs
+			} else if types.Identical(result.Type, &types.Pointer{Base: receiverType}) {
+				method.receiver = lhs.makePointee()
+			} else if types.Identical(&types.Pointer{Base: result.Type}, receiverType) {
+				method.receiver = lhs.pointer
 			}
 		}
 		return method
 	} else {
-		fieldValue := c.builder.CreateGEP(lhs.LLVMValue(), indices, "")
-		fieldType := expr.Sel.Obj.Type.(types.Type)
-		ptr := c.NewLLVMValue(fieldValue, fieldType)
-		ptr.indirect = true
-		return ptr
+		var ptr llvm.Value
+		if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); ok {
+			ptr = lhs.LLVMValue()
+		} else {
+			if lhs, ok := lhs.(*LLVMValue); ok && lhs.pointer != nil {
+				ptr = lhs.pointer.LLVMValue()
+				zero := llvm.ConstNull(llvm.Int32Type())
+				indices = append([]llvm.Value{zero}, indices...)
+			} else {
+				// TODO handle struct literal selectors.
+				panic("selectors on struct literals unimplemented")
+			}
+		}
+		fieldValue := c.builder.CreateGEP(ptr, indices, "")
+		fieldType := &types.Pointer{Base: expr.Sel.Obj.Type.(types.Type)}
+		return c.NewLLVMValue(fieldValue, fieldType).makePointee()
 	}
 	panic("unreachable")
 }
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
-	// Are we dereferencing a pointer that's on the stack? Then load the stack
-	// value.
 	switch operand := c.VisitExpr(expr.X).(type) {
 	case TypeValue:
 		return TypeValue{&types.Pointer{Base: operand.Type()}}
 	case *LLVMValue:
-		if operand.indirect {
-			operand = operand.Deref()
-		}
-
 		// We don't want to immediately load the value, as we might be doing an
-		// assignment rather than an evaluation. Instead, we return the pointer and
-		// tell the caller to load it on demand.
-		operand.indirect = true
-		return operand
+		// assignment rather than an evaluation. Instead, we return the pointer
+		// and tell the caller to load it on demand.
+		return operand.makePointee()
 	}
 	panic("unreachable")
 }

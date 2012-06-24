@@ -41,14 +41,10 @@ func (c *compiler) mapInsert(m *LLVMValue, key Value) *LLVMValue {
 	}
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
-	args[1] = c.builder.CreatePtrToInt(m.address.LLVMValue(), ptrType, "")
+	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
 
-	if lv, islv := key.(*LLVMValue); islv {
-		if lv.indirect {
-			args[2] = c.builder.CreatePtrToInt(key.LLVMValue(), ptrType, "")
-		} else if lv.address != nil {
-			args[2] = c.builder.CreatePtrToInt(lv.address.LLVMValue(), ptrType, "")
-		}
+	if lv, islv := key.(*LLVMValue); islv && lv.pointer != nil {
+		args[2] = c.builder.CreatePtrToInt(lv.pointer.LLVMValue(), ptrType, "")
 	}
 	if args[2].IsNil() {
 		// Create global constant, so we can take its address.
@@ -62,8 +58,7 @@ func (c *compiler) mapInsert(m *LLVMValue, key Value) *LLVMValue {
 	result := c.builder.CreateCall(mapinsert, args, "")
 	result = c.builder.CreateIntToPtr(result, c.types.ToLLVM(eltPtrType), "")
 	value := c.NewLLVMValue(result, eltPtrType)
-	value.indirect = true
-	return value
+	return value.makePointee()
 }
 
 // vim: set ft=go:

@@ -38,12 +38,6 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	}
 
 	value := c.VisitExpr(expr.Args[0])
-	if llvmvalue, isllvmvalue := value.(*LLVMValue); isllvmvalue {
-		if llvmvalue.indirect {
-			value = llvmvalue.Deref()
-		}
-	}
-
 	typ := value.Type()
 	if name, ok := typ.(*types.Name); ok {
 		typ = name.Underlying
@@ -63,7 +57,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		return c.NewConstValue(token.INT, v)
 
 	case *types.Slice:
-		ptr := value.(*LLVMValue).address
+		ptr := value.(*LLVMValue).pointer
 		len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
 		len_value := c.builder.CreateLoad(len_field, "")
 		return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
@@ -83,7 +77,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 
 	case *types.Basic:
 		if typ == types.String.Underlying {
-			ptr := value.(*LLVMValue).address
+			ptr := value.(*LLVMValue).pointer
 			len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
 			len_value := c.builder.CreateLoad(len_field, "")
 			return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)

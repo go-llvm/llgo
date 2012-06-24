@@ -70,13 +70,6 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 		args = make([]llvm.Value, 0, len(expr.Args)+1)
 		for i, expr := range expr.Args {
 			value := c.VisitExpr(expr)
-			// Is it a global variable or non-constant? Then we'll need to load
-			// it if it's not a pointer to an array.
-			if llvm_value, isllvm := value.(*LLVMValue); isllvm {
-				if llvm_value.indirect {
-					value = llvm_value.Deref()
-				}
-			}
 			llvm_value := value.LLVMValue()
 
 			// If it's a named type, get the underlying type.

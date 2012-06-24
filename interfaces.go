@@ -30,8 +30,7 @@ import (
 
 // convertV2I converts a value to an interface.
 func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
-	// TODO deref indirect value, then use 'address' as pointer
-	// value.
+	// TODO deref indirect value, then use 'pointer' as pointer value.
 	var srcname *types.Name
 	srctyp := v.Type()
 	if name, isname := srctyp.(*types.Name); isname {
@@ -131,14 +130,8 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 // convertI2I converts an interface to another interface.
 func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
 	builder := v.compiler.builder
-	src_typ := v.typ
-	var vptr llvm.Value
-	if v.indirect {
-		src_typ = types.Deref(src_typ)
-		vptr = v.LLVMValue()
-	} else {
-		vptr = v.address.LLVMValue()
-	}
+	src_typ := v.Type()
+	vptr := v.pointer.LLVMValue()
 	src_typ = src_typ.(*types.Name).Underlying
 
 	iface_struct_type := v.compiler.types.ToLLVM(iface)
@@ -177,13 +170,7 @@ func (v *LLVMValue) convertI2V(typ types.Type) Value {
 	typptrType := llvm.PointerType(llvm.Int8Type(), 0)
 	runtimeType := v.compiler.types.ToRuntime(typ)
 	runtimeType = llvm.ConstBitCast(runtimeType, typptrType)
-
-	var vptr llvm.Value
-	if v.indirect {
-		vptr = v.LLVMValue()
-	} else {
-		vptr = v.address.LLVMValue()
-	}
+	vptr := v.pointer.LLVMValue()
 
 	builder := v.compiler.builder
 	ifaceType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")

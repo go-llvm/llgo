@@ -88,7 +88,6 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	// Bind receiver, arguments and return values to their identifiers/objects.
 	// We'll store each parameter on the stack so they're addressable.
 	param_i := 0
-	param_count := llvm_fn.ParamsCount()
 	if f.Recv != nil {
 		param_0 := llvm_fn.Param(0)
 		recv_obj := fn_type.Recv
@@ -97,25 +96,19 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 			c.types.ToLLVM(recv_type), recv_obj.Name)
 		c.builder.CreateStore(param_0, stack_value)
 		value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
-		value.indirect = true
-		recv_obj.Data = value
+		recv_obj.Data = value.makePointee()
 		param_i++
 	}
 	for _, param := range fn_type.Params {
 		name := param.Name
 		if name != "_" {
 			param_type := param.Type.(types.Type)
-			if fn_type.IsVariadic && param_i == param_count-1 {
-				param_type = &types.Slice{Elt: param_type}
-			}
-
 			param_value := llvm_fn.Param(param_i)
 			stack_value := c.builder.CreateAlloca(c.types.ToLLVM(param_type), name)
 			c.builder.CreateStore(param_value, stack_value)
 			value := c.NewLLVMValue(stack_value,
 				&types.Pointer{Base: param_type})
-			value.indirect = true
-			param.Data = value
+			param.Data = value.makePointee()
 		}
 		param_i++
 	}
@@ -157,7 +150,9 @@ func (c *compiler) createGlobal(e ast.Expr,
 	if e == nil {
 		gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-		g.indirect = !isArray(t)
+		if !isArray(t) {
+			return g.makePointee()
+		}
 		return g
 	}
 
@@ -173,14 +168,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 	// Visit the expression. Dereference if necessary, and generalise
 	// the type if one hasn't been specified.
 	init_ := c.VisitExpr(e)
-	isconst := false
-	if value, isllvm := init_.(*LLVMValue); isllvm {
-		if value.indirect {
-			init_ = value.Deref()
-		}
-	} else {
-		isconst = true
-	}
+	_, isconst := init_.(ConstValue)
 	if t == nil {
 		t = init_.Type()
 	} else {
@@ -199,7 +187,9 @@ func (c *compiler) createGlobal(e ast.Expr,
 	// function.
 	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
 	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-	g.indirect = !isArray(t)
+	if !isArray(t) {
+		g = g.makePointee()
+	}
 	if isconst {
 		// Initialiser is constant; discard function and return
 		// global now.
@@ -267,11 +257,6 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				var init_ Value
 				if expr != nil {
 					init_ = c.VisitExpr(expr)
-					if value, isllvm := init_.(*LLVMValue); isllvm {
-						if value.indirect {
-							init_ = value.Deref()
-						}
-					}
 					if value_type == nil {
 						value_type = init_.Type()
 					}
@@ -291,8 +276,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				}
 				c.builder.CreateStore(llvm_init, stack_value)
 				llvm_value := c.NewLLVMValue(stack_value, &types.Pointer{Base: value_type})
-				llvm_value.indirect = true
-				value = llvm_value
+				value = llvm_value.makePointee()
 			} else { // ispackagelevel
 				// Set the initialiser. If it's a non-const value, then
 				// we'll have to do the assignment in a global constructor

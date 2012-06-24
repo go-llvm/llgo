@@ -62,9 +62,8 @@ type LLVMValue struct {
 	compiler *compiler
 	value    llvm.Value
 	typ      types.Type
-	indirect bool
-	address  *LLVMValue // Value that dereferenced to this value.
-	receiver *LLVMValue
+	pointer	 *LLVMValue // Pointer value that dereferenced to this value.
+	receiver *LLVMValue // Transient; only guaranteed to exist at call point.
 }
 
 // ConstValue represents a constant value produced as the result of an
@@ -89,7 +88,7 @@ type NilValue struct {
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
 func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, v, t, false, nil, nil}
+	return &LLVMValue{c, v, t, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as
@@ -120,11 +119,6 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		return result.UnaryOp(token.NOT)
 	}
 
-	// Deref lhs, if it's indirect.
-	if lhs.indirect {
-		lhs = lhs.Deref()
-	}
-
 	var result llvm.Value
 	c := lhs.compiler
 	b := lhs.compiler.builder
@@ -146,22 +140,19 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		value := rhs_.Convert(lhs.Type())
 		rhs = c.NewLLVMValue(value.LLVMValue(), value.Type())
 	}
-	if rhs.indirect {
-		rhs = rhs.Deref()
-	}
 
 	// Special case for structs.
 	// TODO handle strings as an even more special case.
 	if struct_type, ok := types.Underlying(lhs.typ).(*types.Struct); ok {
 		// TODO check types are the same.
 
-		element_types_count := lhs.value.Type().StructElementTypesCount()
+		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		struct_fields := struct_type.Fields
 
 		if element_types_count > 0 {
 			t := c.ObjGetType(struct_fields[0])
-			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, 0, ""), t)
-			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, 0, ""), t)
+			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
+			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
 
 			logical_op := token.LAND
@@ -172,8 +163,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result := first
 			for i := 1; i < element_types_count; i++ {
 				t := c.ObjGetType(struct_fields[i])
-				next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.value, i, ""), t)
-				next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.value, i, ""), t)
+				next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+				next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
 				next := next_lhs.BinaryOp(op, next_rhs)
 				result = result.BinaryOp(logical_op, next)
 			}
@@ -186,15 +177,15 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// TODO check for interface/interface comparison vs. interface/value comparison.
 
 		// nil comparison
-		if /*rhs.value.IsConstant() &&*/ rhs.value.IsNull() {
+		if /*rhs.LLVMValue().IsConstant() &&*/ rhs.LLVMValue().IsNull() {
 			var result llvm.Value
 			if op == token.EQL {
-				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
-				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
 				result = b.CreateAnd(typeNull, valueNull, "")
 			} else {
-				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 0, ""), "")
-				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.value, 1, ""), "")
+				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
 				result = b.CreateOr(typeNotNull, valueNotNull, "")
 			}
 			return c.NewLLVMValue(result, types.Bool)
@@ -203,8 +194,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// First, check that the dynamic types are identical.
 		// FIXME provide runtime function for type identity comparison, and
 		// value comparisons.
-		lhsType := b.CreateExtractValue(lhs.value, 1, "")
-		rhsType := b.CreateExtractValue(rhs.value, 1, "")
+		lhsType := b.CreateExtractValue(lhs.LLVMValue(), 1, "")
+		rhsType := b.CreateExtractValue(rhs.LLVMValue(), 1, "")
 		diff := b.CreatePtrDiff(lhsType, rhsType, "")
 		zero := llvm.ConstNull(diff.Type())
 
@@ -244,46 +235,46 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 	switch op {
 	case token.MUL:
-		result = b.CreateMul(lhs.value, rhs.value, "")
+		result = b.CreateMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.QUO:
-		result = b.CreateUDiv(lhs.value, rhs.value, "")
+		result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.ADD:
-		result = b.CreateAdd(lhs.value, rhs.value, "")
+		result = b.CreateAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SUB:
-		result = b.CreateSub(lhs.value, rhs.value, "")
+		result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
 		if isfp {
-			result = b.CreateFCmp(llvm.FloatONE, lhs.value, rhs.value, "")
+			result = b.CreateFCmp(llvm.FloatONE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
-			result = b.CreateICmp(llvm.IntNE, lhs.value, rhs.value, "")
+			result = b.CreateICmp(llvm.IntNE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.EQL:
-		result = b.CreateICmp(llvm.IntEQ, lhs.value, rhs.value, "")
+		result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LSS:
-		result = b.CreateICmp(llvm.IntULT, lhs.value, rhs.value, "")
+		result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LEQ: // TODO signed/unsigned
-		result = b.CreateICmp(llvm.IntULE, lhs.value, rhs.value, "")
+		result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GTR:
-		result = b.CreateICmp(llvm.IntUGT, lhs.value, rhs.value, "")
+		result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GEQ:
-		result = b.CreateICmp(llvm.IntUGE, lhs.value, rhs.value, "")
+		result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LAND:
 		// FIXME change this to branch
-		result = b.CreateAnd(lhs.value, rhs.value, "")
+		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LOR:
 		// FIXME change this to branch
-		result = b.CreateOr(lhs.value, rhs.value, "")
+		result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	default:
 		panic(fmt.Sprint("Unimplemented operator: ", op))
@@ -295,23 +286,12 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	b := v.compiler.builder
 	switch op {
 	case token.SUB:
-		if v.indirect {
-			v2 := v.Deref()
-			return v.compiler.NewLLVMValue(b.CreateNeg(v2.value, ""), v2.typ)
-		}
-		return v.compiler.NewLLVMValue(b.CreateNeg(v.value, ""), v.typ)
+		return v.compiler.NewLLVMValue(b.CreateNeg(v.LLVMValue(), ""), v.typ)
 	case token.ADD:
 		return v // No-op
 	case token.AND:
-		if v.indirect {
-			return v.compiler.NewLLVMValue(v.value, v.typ)
-		}
-		return v.compiler.NewLLVMValue(v.address.LLVMValue(),
-			&types.Pointer{Base: v.typ})
+		return v.pointer
 	case token.NOT:
-		if v.indirect {
-			return v.compiler.NewLLVMValue(v.value, v.typ)
-		}
 		value := b.CreateNot(v.LLVMValue(), "")
 		return v.compiler.NewLLVMValue(value, v.typ)
 	default:
@@ -324,9 +304,6 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// If it's a stack allocated value, we'll want to compare the
 	// value type, not the pointer type.
 	src_typ := v.typ
-	if v.indirect {
-		src_typ = types.Deref(src_typ)
-	}
 
 	// Get the underlying type, if any.
 	orig_dst_typ := dst_typ
@@ -342,13 +319,8 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.Identical(src_typ, dst_typ) {
 		dst_typ = orig_dst_typ
-		if v.indirect {
-			dst_typ = &types.Pointer{Base: dst_typ}
-		}
-		// XXX do we need to copy address/receiver here?
-		newv := v.compiler.NewLLVMValue(v.value, dst_typ)
-		newv.indirect = true
-		return newv
+		// TODO avoid load here by reusing pointer value, if exists.
+		return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
 	}
 
 	// Convert from an interface type.
@@ -366,11 +338,7 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	}
 
 	// TODO other special conversions, e.g. int->string.
-
 	llvm_type := v.compiler.types.ToLLVM(dst_typ)
-	if v.indirect {
-		v = v.Deref()
-	}
 
 	// Unsafe pointer conversions.
 	if dst_typ == types.UnsafePointer { // X -> unsafe.Pointer
@@ -434,6 +402,9 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
+	if v.pointer != nil {
+		return v.compiler.builder.CreateLoad(v.pointer.LLVMValue(), "")
+	}
 	return v.value
 }
 
@@ -441,12 +412,10 @@ func (v *LLVMValue) Type() types.Type {
 	return v.typ
 }
 
-// Dereference an LLVMValue, producing a new LLVMValue.
-func (v *LLVMValue) Deref() *LLVMValue {
-	llvm_value := v.compiler.builder.CreateLoad(v.value, "")
-	value := v.compiler.NewLLVMValue(llvm_value, types.Deref(v.typ))
-	value.address = v
-	return value
+func (v *LLVMValue) makePointee() *LLVMValue {
+	t := v.compiler.NewLLVMValue(llvm.Value{}, types.Deref(v.typ))
+	t.pointer = v
+	return t
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -455,21 +424,17 @@ func (v *LLVMValue) Deref() *LLVMValue {
 func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	switch rhs := rhs_.(type) {
 	case *LLVMValue:
-		// Deref rhs, if it's indirect.
-		if rhs.indirect {
-			rhs = rhs.Deref()
-		}
-
 		// Cast untyped lhs to rhs type.
-		if lhs.typ == nil {
+		if _, ok := lhs.typ.(*types.Basic); ok {
 			lhs = lhs.Convert(rhs.Type()).(ConstValue)
 		}
 		lhs_ := rhs.compiler.NewLLVMValue(lhs.LLVMValue(), lhs.Type())
 		return lhs_.BinaryOp(op, rhs)
 
 	case ConstValue:
-		// TODO Check if either one is untyped, and convert to the other's
-		// type.
+		// TODO Check if either one is untyped, and convert to the
+		// other's type.
+		// TODO use type from typechecking here.
 		c := lhs.compiler
 		var typ types.Type = lhs.typ
 
