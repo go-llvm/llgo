@@ -119,10 +119,10 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	}
 	c.functions = c.functions[0 : len(c.functions)-1]
 
-	last_block := llvm_fn.LastBasicBlock()
-	lasti := last_block.LastInstruction()
-	if lasti.IsNil() || lasti.IsATerminatorInst().IsNil() {
+	last := llvm_fn.LastBasicBlock()
+	if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
 		// Assume nil return type, AST should be checked first.
+		c.builder.SetInsertPointAtEnd(last)
 		c.builder.CreateRetVoid()
 	}
 

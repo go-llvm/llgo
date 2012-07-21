@@ -127,7 +127,7 @@ func compileFiles(filenames []string) (*llgo.Module, error) {
 
 func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Module, error) {
 	// make a package (resolve all identifiers)
-	pkg, err := ast.NewPackage(fset, files, types.GcImporter, types.Universe)
+	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
 	if err != nil {
 		report(err)
 		return nil, err
@@ -190,12 +190,14 @@ func main() {
 	module, err := compileFiles(flag.Args())
 	if err == nil {
 		defer module.Dispose()
-		if *dump {
-			module.Dump()
-		} else {
-			err := llvm.WriteBitcodeToFile(module.Module, os.Stdout)
-			if err != nil {
-				fmt.Println(err)
+		if exitCode == 0 {
+			if *dump {
+				module.Dump()
+			} else {
+				err := llvm.WriteBitcodeToFile(module.Module, os.Stdout)
+				if err != nil {
+					fmt.Println(err)
+				}
 			}
 		}
 	} else {
@@ -204,5 +206,3 @@ func main() {
 	}
 	os.Exit(exitCode)
 }
-
-// vim: set ft=go :

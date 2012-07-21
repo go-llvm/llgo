@@ -63,13 +63,12 @@ func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
 	return result
 }
 
-func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
+func (c *compiler) printValues(values ...Value) Value {
 	var args []llvm.Value = nil
-	if expr.Args != nil {
+	if len(values) > 0 {
 		format := ""
-		args = make([]llvm.Value, 0, len(expr.Args)+1)
-		for i, expr := range expr.Args {
-			value := c.VisitExpr(expr)
+		args = make([]llvm.Value, 0, len(values)+1)
+		for i, value := range values {
 			llvm_value := value.LLVMValue()
 
 			// If it's a named type, get the underlying type.
@@ -113,6 +112,13 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 					panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
 				}
 
+			case *types.Interface:
+				format += "(%p %p)"
+				ival := c.builder.CreateExtractValue(llvm_value, 0, "")
+				itype := c.builder.CreateExtractValue(llvm_value, 1, "")
+				args = append(args, ival)
+				llvm_value = itype
+
 			case *types.Slice, *types.Array:
 				// If we see a constant array, we either:
 				//     Create an internal constant if it's a constant array, or
@@ -149,9 +155,16 @@ func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
 	} else {
 		args = []llvm.Value{c.builder.CreateGlobalStringPtr("\n", "")}
 	}
-
 	printf := getprintf(c.module.Module)
 	return c.NewLLVMValue(c.builder.CreateCall(printf, args, ""), types.Int32)
+}
+
+func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
+	var values []Value
+	for _, arg := range expr.Args {
+		values = append(values, c.VisitExpr(arg))
+	}
+	return c.printValues(values...)
 }
 
 // vim: set ft=go :

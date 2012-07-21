@@ -24,59 +24,16 @@ package runtime
 
 import "unsafe"
 
-type str struct {
-	ptr  *uint8
-	size int
+// This is based on commonType from src/pkg/reflect/type.go.
+type commonType struct {
+	size       uintptr
+	hash       uint32
+	_          uint8
+	align      uint8
+	fieldAlign uint8
+	kind       uint8
+	alg        *uintptr
+	string     *string
+	_          uintptr // *uncommonType
+	_          uintptr // *runtimeType
 }
-
-func malloc(int) unsafe.Pointer
-func memcpy(dst, src unsafe.Pointer, size int)
-
-func strcat(a, b str) str {
-	if a.size == 0 {
-		return b
-	} else if b.size == 0 {
-		return a
-	}
-
-	mem := malloc(a.size + b.size)
-	if mem == unsafe.Pointer(uintptr(0)) {
-		// TODO panic? abort?
-	}
-
-	memcpy(mem, unsafe.Pointer(a.ptr), a.size)
-	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.size)),
-		unsafe.Pointer(b.ptr), b.size)
-
-	a.ptr = (*uint8)(mem)
-	a.size = a.size + b.size
-	return a
-}
-
-func strcmp(a, b str) int32 {
-	sz := a.size
-	if b.size < sz {
-		sz = b.size
-	}
-	aptr, bptr := a.ptr, b.ptr
-	for i := 0; i < sz; i++ {
-		c1, c2 := *aptr, *bptr
-		switch {
-		case c1 < c2:
-			return -1
-		case c1 > c2:
-			return 1
-		}
-		aptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(aptr)) + 1)))
-		bptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(bptr)) + 1)))
-	}
-	switch {
-	case a.size < b.size:
-		return -1
-	case a.size > b.size:
-		return 1
-	}
-	return 0
-}
-
-// vim: set ft=go:

@@ -24,7 +24,6 @@ package llgo
 
 import (
 	"fmt"
-	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
@@ -65,15 +64,6 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	case *types.Array:
 		v := strconv.FormatUint(typ.Len, 10)
 		return c.NewConstValue(token.INT, v)
-
-	case *types.Struct:
-		sz := llvm.SizeOf(c.types.ToLLVM(typ))
-		// FIXME
-		// SizeOf returns a Constant, but not a ConstantInt, so we
-		// can't call ZExtValue on it. Not sure how best to tackle
-		// this, so for now returning this as a non-const value.
-		//return c.NewConstValue(token.INT, string(sz.ZExtValue()))
-		return c.NewLLVMValue(sz, types.Int)
 
 	case *types.Basic:
 		if typ == types.String.Underlying {

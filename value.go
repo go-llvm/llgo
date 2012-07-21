@@ -62,7 +62,7 @@ type LLVMValue struct {
 	compiler *compiler
 	value    llvm.Value
 	typ      types.Type
-	pointer	 *LLVMValue // Pointer value that dereferenced to this value.
+	pointer  *LLVMValue // Pointer value that dereferenced to this value.
 	receiver *LLVMValue // Transient; only guaranteed to exist at call point.
 }
 
@@ -107,7 +107,7 @@ func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
 	case token.STRING:
 		typ = types.String.Underlying
 	}
-	return ConstValue{*types.MakeConst(tok, lit), c, typ}
+	return ConstValue{types.MakeConst(tok, lit), c, typ}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -190,28 +190,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			}
 			return c.NewLLVMValue(result, types.Bool)
 		}
-
-		// First, check that the dynamic types are identical.
-		// FIXME provide runtime function for type identity comparison, and
-		// value comparisons.
-		lhsType := b.CreateExtractValue(lhs.LLVMValue(), 1, "")
-		rhsType := b.CreateExtractValue(rhs.LLVMValue(), 1, "")
-		diff := b.CreatePtrDiff(lhsType, rhsType, "")
-		zero := llvm.ConstNull(diff.Type())
-
-		var result llvm.Value
-		if op == token.EQL {
-			typesIdentical := b.CreateICmp(llvm.IntEQ, diff, zero, "")
-			//valuesEqual := ...
-			//result = b.CreateAnd(typesIdentical, valuesEqual, "")
-			result = typesIdentical
-		} else {
-			typesDifferent := b.CreateICmp(llvm.IntNE, diff, zero, "")
-			//valuesUnequal := ...
-			//result = b.CreateOr(typesDifferent, valuesUnequal, "")
-			result = typesDifferent
+		value := lhs.compareI2I(rhs)
+		if op == token.NEQ {
+			value = value.UnaryOp(token.NOT)
 		}
-		return c.NewLLVMValue(result, types.Bool)
+		return value
 	}
 
 	if types.Underlying(lhs.typ) == types.String {
@@ -445,34 +428,34 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			// XXX or are they always the same type as the operands?
 		}
 
-		return ConstValue{*lhs.Const.BinaryOp(op, &rhs.Const), c, typ}
+		return ConstValue{lhs.Const.BinaryOp(op, rhs.Const), c, typ}
 	}
 	panic("unimplemented")
 }
 
 func (v ConstValue) UnaryOp(op token.Token) Value {
-	return ConstValue{*v.Const.UnaryOp(op), v.compiler, v.typ}
+	return ConstValue{v.Const.UnaryOp(op), v.compiler, v.typ}
 }
 
-func (v ConstValue) Convert(dst_typ types.Type) Value {
+func (v ConstValue) Convert(dstTyp types.Type) Value {
 	// Get the underlying type, if any.
-	if name, isname := dst_typ.(*types.Name); isname {
-		dst_typ = types.Underlying(name)
+	if name, isname := dstTyp.(*types.Name); isname {
+		dstTyp = types.Underlying(name)
 	}
 
-	if !types.Identical(v.typ, dst_typ) {
+	if !types.Identical(v.typ, dstTyp) {
 		// Get the Basic type.
 		isBasic := false
-		if name, isname := types.Underlying(dst_typ).(*types.Name); isname {
+		if name, isname := types.Underlying(dstTyp).(*types.Name); isname {
 			_, isBasic = name.Underlying.(*types.Basic)
 		}
 
 		compiler := v.compiler
 		if isBasic {
-			return ConstValue{*v.Const.Convert(&dst_typ), compiler, dst_typ}
+			return ConstValue{v.Const.Convert(&dstTyp), compiler, dstTyp}
 		} else {
-			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(dst_typ)
-			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dst_typ))
+			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(dstTyp)
+			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dstTyp))
 		}
 	} else {
 		// TODO convert to dst type. ConstValue may need to change to allow
@@ -557,8 +540,7 @@ func (v ConstValue) Type() types.Type {
 }
 
 func (v ConstValue) Int64() int64 {
-	int_val := v.Val.(*big.Int)
-	return int_val.Int64()
+	return v.Val.(*big.Int).Int64()
 }
 
 ///////////////////////////////////////////////////////////////////////////////

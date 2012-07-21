@@ -40,7 +40,8 @@ func defConst(name string) *ast.Object {
 
 func defFun(name string) *ast.Object {
 	obj := define(ast.Fun, name)
-	return obj // TODO(gri) fill in other properties
+	obj.Type = &Func{}
+	return obj
 }
 
 var (
@@ -99,10 +100,10 @@ func init() {
 	obj.Type = Error
 
 	true_ := defConst("true")
-	true_.Data = &Const{true}
+	true_.Data = Const{true}
 	true_.Type = Bool.Underlying
 	false_ := defConst("false")
-	false_.Data = &Const{false}
+	false_.Data = Const{false}
 	false_.Type = Bool.Underlying
 
 	defConst("iota").Type = Int.Underlying
@@ -131,9 +132,16 @@ func init() {
 
 	UnsafePointer = defType("Pointer", UnsafePointerKind)
 
-	defFun("Alignof")
-	defFun("Offsetof")
-	defFun("Sizeof")
+	uintptrResult := ast.NewObj(ast.Var, "_")
+	uintptrResult.Type = Int
+	alignof := defFun("Alignof").Type.(*Func)
+	alignof.Results = append(alignof.Results, uintptrResult)
+
+	offsetof := defFun("Offsetof").Type.(*Func)
+	offsetof.Results = alignof.Results
+
+	sizeof := defFun("Sizeof").Type.(*Func)
+	sizeof.Results = alignof.Results
 }
 
 // vim: set ft=go :

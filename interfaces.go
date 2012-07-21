@@ -204,7 +204,35 @@ func (v *LLVMValue) convertI2V(typ types.Type) Value {
 	return v.compiler.NewLLVMValue(result, typ)
 }
 
-// 
-//func (v *LLVMValue) interfaceTypesEqual(
+// interfacesEqual compares two interfaces for equality, returning
+// a dynamic boolean value.
+func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
+	c := lhs.compiler
+	b := c.builder
+
+	lhsValue := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
+	rhsValue := b.CreateExtractValue(rhs.LLVMValue(), 0, "")
+	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 1, "")
+	rhsType := b.CreateExtractValue(rhs.LLVMValue(), 1, "")
+
+	llvmUintptr := c.target.IntPtrType()
+	runtimeCompareI2I := c.module.Module.NamedFunction("runtime.compareI2I")
+	if runtimeCompareI2I.IsNil() {
+		args := []llvm.Type{llvmUintptr, llvmUintptr, llvmUintptr, llvmUintptr}
+		functype := llvm.FunctionType(llvm.Int1Type(), args, false)
+		runtimeCompareI2I = llvm.AddFunction(
+			c.module.Module, "runtime.compareI2I", functype)
+	}
+
+	args := []llvm.Value{
+		c.builder.CreatePtrToInt(lhsType, llvmUintptr, ""),
+		c.builder.CreatePtrToInt(rhsType, llvmUintptr, ""),
+		c.builder.CreatePtrToInt(lhsValue, llvmUintptr, ""),
+		c.builder.CreatePtrToInt(rhsValue, llvmUintptr, ""),
+	}
+
+	result := c.builder.CreateCall(runtimeCompareI2I, args, "")
+	return c.NewLLVMValue(result, types.Bool)
+}
 
 // vim: set ft=go :

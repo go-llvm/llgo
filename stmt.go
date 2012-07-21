@@ -31,6 +31,25 @@ import (
 	"reflect"
 )
 
+// maybeImplicitBranch creates a branch from the current position to the
+// specifies basic block, if and only if the current basic block's last
+// instruction is not a terminator.
+//
+// If dest is nil, then branch to the next basic block, if any.
+func (c *compiler) maybeImplicitBranch(dest llvm.BasicBlock) {
+	currBlock := c.builder.GetInsertBlock()
+	if in := currBlock.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
+		if dest.IsNil() {
+			dest = llvm.NextBasicBlock(currBlock)
+			if !dest.IsNil() {
+				c.builder.CreateBr(dest)
+			}
+		} else {
+			c.builder.CreateBr(dest)
+		}
+	}
+}
+
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 	ptr := c.VisitExpr(stmt.X).(*LLVMValue).pointer
 	value := c.builder.CreateLoad(ptr.LLVMValue(), "")
@@ -129,19 +148,20 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 }
 
 func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
-	curr_block := c.builder.GetInsertBlock()
-	resume_block := llvm.AddBasicBlock(curr_block.Parent(), "endif")
-	resume_block.MoveAfter(curr_block)
+	currBlock := c.builder.GetInsertBlock()
+	resumeBlock := llvm.AddBasicBlock(currBlock.Parent(), "endif")
+	resumeBlock.MoveAfter(currBlock)
+	defer c.builder.SetInsertPointAtEnd(resumeBlock)
 
-	var if_block, else_block llvm.BasicBlock
+	var ifBlock, elseBlock llvm.BasicBlock
 	if stmt.Else != nil {
-		else_block = llvm.InsertBasicBlock(resume_block, "else")
-		if_block = llvm.InsertBasicBlock(else_block, "if")
+		elseBlock = llvm.InsertBasicBlock(resumeBlock, "else")
+		ifBlock = llvm.InsertBasicBlock(elseBlock, "if")
 	} else {
-		if_block = llvm.InsertBasicBlock(resume_block, "if")
+		ifBlock = llvm.InsertBasicBlock(resumeBlock, "if")
 	}
 	if stmt.Else == nil {
-		else_block = resume_block
+		elseBlock = resumeBlock
 	}
 
 	if stmt.Init != nil {
@@ -151,38 +171,34 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	}
 
 	cond_val := c.VisitExpr(stmt.Cond)
-	c.builder.CreateCondBr(cond_val.LLVMValue(), if_block, else_block)
-	c.builder.SetInsertPointAtEnd(if_block)
+	c.builder.CreateCondBr(cond_val.LLVMValue(), ifBlock, elseBlock)
+	c.builder.SetInsertPointAtEnd(ifBlock)
 	c.VisitBlockStmt(stmt.Body)
-	if in := if_block.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-		c.builder.CreateBr(resume_block)
-	}
+	c.maybeImplicitBranch(resumeBlock)
 
 	if stmt.Else != nil {
-		c.builder.SetInsertPointAtEnd(else_block)
+		c.builder.SetInsertPointAtEnd(elseBlock)
 		c.VisitStmt(stmt.Else)
-		if in := else_block.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-			c.builder.CreateBr(resume_block)
-		}
-	}
-
-	// If there's a block after the "resume" block (i.e. a nested control
-	// statement), then create a branch to it as the last instruction.
-	c.builder.SetInsertPointAtEnd(resume_block)
-	if last := resume_block.Parent().LastBasicBlock(); last != resume_block {
-		c.builder.CreateBr(last)
-		c.builder.SetInsertPointBefore(resume_block.FirstInstruction())
+		c.maybeImplicitBranch(resumeBlock)
 	}
 }
 
 func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
-	curr_block := c.builder.GetInsertBlock()
-	var cond_block, loop_block, done_block llvm.BasicBlock
+	currBlock := c.builder.GetInsertBlock()
+	doneBlock := llvm.AddBasicBlock(currBlock.Parent(), "done")
+	doneBlock.MoveAfter(currBlock)
+	loopBlock := llvm.InsertBasicBlock(doneBlock, "loop")
+	defer c.builder.SetInsertPointAtEnd(doneBlock)
+
+	condBlock := loopBlock
 	if stmt.Cond != nil {
-		cond_block = llvm.AddBasicBlock(curr_block.Parent(), "cond")
+		condBlock = llvm.InsertBasicBlock(loopBlock, "cond")
 	}
-	loop_block = llvm.AddBasicBlock(curr_block.Parent(), "loop")
-	done_block = llvm.AddBasicBlock(curr_block.Parent(), "done")
+
+	postBlock := condBlock
+	if stmt.Post != nil {
+		postBlock = llvm.InsertBasicBlock(doneBlock, "post")
+	}
 
 	// Is there an initializer? Create a new scope and visit the statement.
 	if stmt.Init != nil {
@@ -193,27 +209,25 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 
 	// Start the loop.
 	if stmt.Cond != nil {
-		c.builder.CreateBr(cond_block)
-		c.builder.SetInsertPointAtEnd(cond_block)
-		cond_val := c.VisitExpr(stmt.Cond)
-		c.builder.CreateCondBr(
-			cond_val.LLVMValue(), loop_block, done_block)
+		c.builder.CreateBr(condBlock)
+		c.builder.SetInsertPointAtEnd(condBlock)
+		condVal := c.VisitExpr(stmt.Cond)
+		c.builder.CreateCondBr(condVal.LLVMValue(), loopBlock, doneBlock)
 	} else {
-		c.builder.CreateBr(loop_block)
+		c.builder.CreateBr(loopBlock)
+	}
+
+	// Post.
+	if stmt.Post != nil {
+		c.builder.SetInsertPointAtEnd(postBlock)
+		c.VisitStmt(stmt.Post)
+		c.builder.CreateBr(condBlock)
 	}
 
 	// Loop body.
-	c.builder.SetInsertPointAtEnd(loop_block)
+	c.builder.SetInsertPointAtEnd(loopBlock)
 	c.VisitBlockStmt(stmt.Body)
-	if stmt.Post != nil {
-		c.VisitStmt(stmt.Post)
-	}
-	if stmt.Cond != nil {
-		c.builder.CreateBr(cond_block)
-	} else {
-		c.builder.CreateBr(loop_block)
-	}
-	c.builder.SetInsertPointAtEnd(done_block)
+	c.maybeImplicitBranch(postBlock)
 }
 
 func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
@@ -322,6 +336,8 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	startBlock := c.builder.GetInsertBlock()
 	endBlock := llvm.AddBasicBlock(startBlock.Parent(), "end")
 	endBlock.MoveAfter(startBlock)
+	defer c.builder.SetInsertPointAtEnd(endBlock)
+
 	caseBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
 	stmtBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
 	for _ = range stmt.Body.List {
@@ -359,12 +375,8 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 				c.VisitStmt(stmt)
 			}
 		}
-		if in := stmtBlock.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-			c.builder.CreateBr(branchBlock)
-		}
+		c.maybeImplicitBranch(branchBlock)
 	}
-
-	c.builder.SetInsertPointAtEnd(endBlock)
 }
 
 func (c *compiler) VisitStmt(stmt ast.Stmt) {

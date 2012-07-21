@@ -42,48 +42,48 @@ func assert(cond bool) {
 
 // MakeConst makes an ideal constant from a literal
 // token and the corresponding literal string.
-func MakeConst(tok token.Token, lit string) *Const {
+func MakeConst(tok token.Token, lit string) Const {
 	switch tok {
 	case token.INT:
 		var x big.Int
 		_, ok := x.SetString(lit, 0)
 		assert(ok)
-		return &Const{&x}
+		return Const{&x}
 	case token.FLOAT:
 		var y big.Rat
 		_, ok := y.SetString(lit)
 		assert(ok)
-		return &Const{&y}
+		return Const{&y}
 	case token.IMAG:
 		assert(lit[len(lit)-1] == 'i')
 		var im big.Rat
 		_, ok := im.SetString(lit[0 : len(lit)-1])
 		assert(ok)
-		return &Const{cmplx{big.NewRat(0, 1), &im}}
+		return Const{cmplx{big.NewRat(0, 1), &im}}
 	case token.CHAR:
 		assert(lit[0] == '\'' && lit[len(lit)-1] == '\'')
 		code, _, _, err := strconv.UnquoteChar(lit[1:len(lit)-1], '\'')
 		assert(err == nil)
-		return &Const{big.NewInt(int64(code))}
+		return Const{big.NewInt(int64(code))}
 	case token.STRING:
 		s, err := strconv.Unquote(lit)
 		assert(err == nil)
-		return &Const{s}
+		return Const{s}
 	}
 	panic("unreachable")
 }
 
 // MakeZero returns the zero constant for the given type.
-func MakeZero(typ *Type) *Const {
+func MakeZero(typ *Type) Const {
 	// TODO(gri) fix this
-	return &Const{0}
+	return Const{0}
 }
 
 // Match attempts to match the internal constant representations of x and y.
 // If the attempt is successful, the result is the values of x and y,
 // if necessary converted to have the same internal representation; otherwise
 // the results are invalid.
-func (x *Const) Match(y *Const) (u, v *Const) {
+func (x Const) Match(y Const) (u, v Const) {
 	switch a := x.Val.(type) {
 	case bool:
 		if _, ok := y.Val.(bool); ok {
@@ -96,11 +96,11 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 		case *big.Rat:
 			var z big.Rat
 			z.SetInt(a)
-			u, v = &Const{&z}, y
+			u, v = Const{&z}, y
 		case cmplx:
 			var z big.Rat
 			z.SetInt(a)
-			u, v = &Const{cmplx{&z, big.NewRat(0, 1)}}, y
+			u, v = Const{cmplx{&z, big.NewRat(0, 1)}}, y
 		}
 	case *big.Rat:
 		switch y.Val.(type) {
@@ -109,7 +109,7 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 		case *big.Rat:
 			u, v = x, y
 		case cmplx:
-			u, v = &Const{cmplx{a, big.NewRat(0, 0)}}, y
+			u, v = Const{cmplx{a, big.NewRat(0, 0)}}, y
 		}
 	case cmplx:
 		switch y.Val.(type) {
@@ -131,7 +131,7 @@ func (x *Const) Match(y *Const) (u, v *Const) {
 // Convert attempts to convert the constant x to a given type.
 // If the attempt is successful, the result is the new constant;
 // otherwise the result is invalid.
-func (x *Const) Convert(typ *Type) *Const {
+func (x Const) Convert(typ *Type) Const {
 	// TODO(gri) implement this
 	/*
 			switch x := x.Val.(type) {
@@ -146,7 +146,7 @@ func (x *Const) Convert(typ *Type) *Const {
 	return x
 }
 
-func (x *Const) String() string {
+func (x Const) String() string {
 	switch x := x.Val.(type) {
 	case nil:
 		return "nil"
@@ -169,7 +169,7 @@ func (x *Const) String() string {
 	panic("unreachable")
 }
 
-func (x *Const) UnaryOp(op token.Token) *Const {
+func (x Const) UnaryOp(op token.Token) Const {
 	var z interface{}
 	switch x := x.Val.(type) {
 	case bool:
@@ -183,7 +183,7 @@ func (x *Const) UnaryOp(op token.Token) *Const {
 	default:
 		panic("unreachable")
 	}
-	return &Const{z}
+	return Const{z}
 }
 
 func unaryBoolOp(x bool, op token.Token) interface{} {
@@ -226,7 +226,7 @@ func unaryCmplxOp(x cmplx, op token.Token) interface{} {
 	panic("unimplemented")
 }
 
-func (x *Const) BinaryOp(op token.Token, y *Const) *Const {
+func (x Const) BinaryOp(op token.Token, y Const) Const {
 	var z interface{}
 	switch x := x.Val.(type) {
 	case bool:
@@ -242,7 +242,7 @@ func (x *Const) BinaryOp(op token.Token, y *Const) *Const {
 	default:
 		panic("unreachable")
 	}
-	return &Const{z}
+	return Const{z}
 }
 
 func binaryBoolOp(x bool, op token.Token, y bool) interface{} {

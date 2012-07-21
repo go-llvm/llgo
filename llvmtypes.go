@@ -86,12 +86,10 @@ func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Ex
 	boolType := llvm.Int1Type()
 
 	// Create runtime algorithm function types.
-	params := []llvm.Type{
-		llvm.PointerType(uintptrType, 0), uintptrType, voidPtrType}
-	tm.hashAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
-	params = []llvm.Type{
-		llvm.PointerType(boolType, 0), uintptrType, voidPtrType, voidPtrType}
-	tm.equalAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
+	params := []llvm.Type{uintptrType, voidPtrType}
+	tm.hashAlgFunctionType = llvm.FunctionType(uintptrType, params, false)
+	params = []llvm.Type{uintptrType, voidPtrType, voidPtrType}
+	tm.equalAlgFunctionType = llvm.FunctionType(boolType, params, false)
 	params = []llvm.Type{uintptrType, voidPtrType}
 	tm.printAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
 	params = []llvm.Type{uintptrType, voidPtrType, voidPtrType}
@@ -333,9 +331,15 @@ func (tm *TypeMap) makeRuntimeType(t types.Type) llvm.Value {
 func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	// TODO set these to actual functions.
 	hashAlg := llvm.ConstNull(llvm.PointerType(tm.hashAlgFunctionType, 0))
-	equalAlg := llvm.ConstNull(llvm.PointerType(tm.equalAlgFunctionType, 0))
 	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
 	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
+
+	equalAlgName := "runtime.memequal"
+	equalAlg := tm.module.NamedFunction(equalAlgName)
+	if equalAlg.IsNil() {
+		equalAlg = llvm.AddFunction(
+			tm.module, equalAlgName, tm.equalAlgFunctionType)
+	}
 
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)

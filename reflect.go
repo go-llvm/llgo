@@ -87,7 +87,7 @@ func doParseReflect() {
 		return
 	}
 
-	pkg, err := ast.NewPackage(fset, files, types.GcImporter, types.Universe)
+	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
 	if err != nil {
 		parseReflectResult, parseReflectError = nil, err
 		return

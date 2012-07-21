@@ -190,9 +190,13 @@ func (n *Name) String() string {
 	return fmt.Sprint("Name(", n.Obj.Name, ", ...)")
 }
 
-// typ must be a pointer type; Deref returns the pointer's base type.
+// If typ is a pointer type, Deref returns the pointer's base type;
+// otherwise it returns typ.
 func Deref(typ Type) Type {
-	return typ.(*Pointer).Base
+	if typ, ok := typ.(*Pointer); ok {
+		return typ.Base
+	}
+	return typ
 }
 
 // Underlying returns the underlying type of a type.

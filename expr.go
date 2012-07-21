@@ -30,6 +30,7 @@ import (
 	"go/token"
 	"reflect"
 	"sort"
+	"strconv"
 )
 
 // Binary logical operators are handled specially, outside of the Value
@@ -101,6 +102,22 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		case "make":
 			return c.VisitMake(expr)
 		}
+
+	case *ast.SelectorExpr:
+		// Handle unsafe functions specially.
+		if pkgobj, ok := x.X.(*ast.Ident); ok && pkgobj.Obj.Data == types.Unsafe.Data {
+			var value int
+			switch x.Sel.Name {
+			case "Alignof", "Offsetof":
+				panic("unimplemented")
+			case "Sizeof":
+				argtype := c.types.expr[expr.Args[0]]
+				value = c.sizeofType(argtype)
+				value := c.NewConstValue(token.INT, strconv.Itoa(value))
+				value.typ = types.Uintptr
+				return value
+			}
+		}
 	}
 	lhs := c.VisitExpr(expr.Fun)
 
@@ -115,7 +132,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 
 	// Not a type conversion, so must be a function call.
 	fn := lhs.(*LLVMValue)
-	fn_type := fn.Type().(*types.Func)
+	fn_type := types.Underlying(fn.Type()).(*types.Func)
 	args := make([]llvm.Value, 0)
 	if fn_type.Recv != nil {
 		// Don't dereference the receiver here. It'll have been worked out in
@@ -231,7 +248,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 type selectorCandidate struct {
 	Indices []uint64
-	Type	types.Type
+	Type    types.Type
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {

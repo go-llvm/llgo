@@ -47,17 +47,17 @@ var tests = []struct {
 
 var fset = token.NewFileSet()
 
-// TODO(gri) This functionality should be in token.Fileset.
-func getFile(filename string) *token.File {
-	for f := range fset.Files() {
+func getFile(filename string) (file *token.File) {
+	fset.Iterate(func(f *token.File) bool {
 		if f.Name() == filename {
-			return f
+			file = f
+			return false // end iteration
 		}
-	}
-	return nil
+		return true
+	})
+	return file
 }
 
-// TODO(gri) This functionality should be in token.Fileset.
 func getPos(filename string, offset int) token.Pos {
 	if f := getFile(filename); f != nil {
 		return f.Pos(offset)
@@ -65,9 +65,7 @@ func getPos(filename string, offset int) token.Pos {
 	return token.NoPos
 }
 
-// TODO(gri) Need to revisit parser interface. We should be able to use parser.ParseFiles
-//           or a similar function instead.
-func parseFiles(t *testing.T, testname string, filenames []string) (map[string]*ast.File, os.Error) {
+func parseFiles(t *testing.T, testname string, filenames []string) (map[string]*ast.File, error) {
 	files := make(map[string]*ast.File)
 	var errors scanner.ErrorList
 	for _, filename := range filenames {
@@ -111,7 +109,7 @@ func expectedErrors(t *testing.T, testname string, files map[string]*ast.File) m
 		// set otherwise the position information returned here will
 		// not match the position information collected by the parser
 		s.Init(getFile(filename), src, nil, scanner.ScanComments)
-		var prev token.Pos // position of last non-comment token
+		var prev token.Pos // position of last non-comment, non-semicolon token
 
 	scanFile:
 		for {
@@ -124,6 +122,12 @@ func expectedErrors(t *testing.T, testname string, files map[string]*ast.File) m
 				if len(s) == 2 {
 					errors[prev] = string(s[1])
 				}
+			case token.SEMICOLON:
+				// ignore automatically inserted semicolon
+				if lit == "\n" {
+					break
+				}
+				fallthrough
 			default:
 				prev = pos
 			}
@@ -132,15 +136,13 @@ func expectedErrors(t *testing.T, testname string, files map[string]*ast.File) m
 	return errors
 }
 
-func eliminate(t *testing.T, expected map[token.Pos]string, errors os.Error) {
+func eliminate(t *testing.T, expected map[token.Pos]string, errors error) {
 	if errors == nil {
 		return
 	}
 	for _, error := range errors.(scanner.ErrorList) {
 		// error.Pos is a token.Position, but we want
 		// a token.Pos so we can do a map lookup
-		// TODO(gri) Need to move scanner.Errors over
-		//           to use token.Pos and file set info.
 		pos := getPos(error.Pos.Filename, error.Pos.Offset)
 		if msg, found := expected[pos]; found {
 			// we expect a message at pos; check if it matches
@@ -154,7 +156,7 @@ func eliminate(t *testing.T, expected map[token.Pos]string, errors os.Error) {
 				continue
 			}
 			// we have a match - eliminate this error
-			expected[pos] = "", false
+			delete(expected, pos)
 		} else {
 			// To keep in mind when analyzing failed test output:
 			// If the same error position occurs multiple times in errors,
@@ -182,7 +184,7 @@ func check(t *testing.T, testname string, testfiles []string) {
 	eliminate(t, errors, err)
 
 	// verify errors returned after resolving identifiers
-	pkg, err := ast.NewPackage(fset, files, GcImporter, Universe)
+	pkg, err := ast.NewPackage(fset, files, GcImport, Universe)
 	eliminate(t, errors, err)
 
 	// verify errors returned by the typechecker
@@ -202,7 +204,7 @@ func TestCheck(t *testing.T) {
 	// For easy debugging w/o changing the testing code,
 	// if there is a local test file, only test that file.
 	const testfile = "test.go"
-	if fi, err := os.Stat(testfile); err == nil && fi.IsRegular() {
+	if fi, err := os.Stat(testfile); err == nil && !fi.IsDir() {
 		fmt.Printf("WARNING: Testing only %s (remove it to run all tests)\n", testfile)
 		check(t, testfile, []string{testfile})
 		return

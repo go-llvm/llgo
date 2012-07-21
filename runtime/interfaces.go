@@ -24,59 +24,25 @@ package runtime
 
 import "unsafe"
 
-type str struct {
-	ptr  *uint8
-	size int
-}
+type equalFunc func(uintptr, *int8, *int8) bool
 
-func malloc(int) unsafe.Pointer
-func memcpy(dst, src unsafe.Pointer, size int)
-
-func strcat(a, b str) str {
-	if a.size == 0 {
-		return b
-	} else if b.size == 0 {
-		return a
-	}
-
-	mem := malloc(a.size + b.size)
-	if mem == unsafe.Pointer(uintptr(0)) {
-		// TODO panic? abort?
-	}
-
-	memcpy(mem, unsafe.Pointer(a.ptr), a.size)
-	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.size)),
-		unsafe.Pointer(b.ptr), b.size)
-
-	a.ptr = (*uint8)(mem)
-	a.size = a.size + b.size
-	return a
-}
-
-func strcmp(a, b str) int32 {
-	sz := a.size
-	if b.size < sz {
-		sz = b.size
-	}
-	aptr, bptr := a.ptr, b.ptr
-	for i := 0; i < sz; i++ {
-		c1, c2 := *aptr, *bptr
-		switch {
-		case c1 < c2:
-			return -1
-		case c1 > c2:
-			return 1
+func compareI2I(atyp, btyp, aval, bval uintptr) bool {
+	if atyp == btyp {
+		atyp := (*commonType)(unsafe.Pointer(atyp))
+		btyp := (*commonType)(unsafe.Pointer(btyp))
+		algs := unsafe.Pointer(atyp.alg)
+		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(*atyp.alg))
+		eqFn := *(*equalFunc)(eqPtr)
+		var avalptr, bvalptr *int8
+		if atyp.size <= unsafe.Sizeof(aval) {
+			// value fits in pointer
+			avalptr = (*int8)(unsafe.Pointer(&aval))
+			bvalptr = (*int8)(unsafe.Pointer(&bval))
+		} else {
+			avalptr = (*int8)(unsafe.Pointer(aval))
+			bvalptr = (*int8)(unsafe.Pointer(bval))
 		}
-		aptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(aptr)) + 1)))
-		bptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(bptr)) + 1)))
+		return eqFn(atyp.size, avalptr, bvalptr)
 	}
-	switch {
-	case a.size < b.size:
-		return -1
-	case a.size > b.size:
-		return 1
-	}
-	return 0
+	return false
 }
-
-// vim: set ft=go:

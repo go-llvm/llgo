@@ -123,6 +123,7 @@ func (c *checker) decomposeRepeatConsts(file *ast.File) {
 			for _, spec := range gendecl.Specs {
 				valspec := spec.(*ast.ValueSpec)
 				if len(valspec.Values) > 0 {
+					// TODO assign type of rhs, if untyped.
 					predValueSpec = valspec
 				} else {
 					valspec.Type = predValueSpec.Type
@@ -155,9 +156,6 @@ func untypedPriority(t Type) int {
 // TODO get rid of the assignee crap, and keep a context stack.
 // We'll also need context for ReturnStmt (in checkStmt).
 func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
-	if typ, ok := c.types[x]; ok {
-		return typ
-	}
 	defer func() {
 		if typ != nil {
 			c.types[x] = typ
@@ -239,6 +237,10 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			return Int
 		default:
 			if xUntyped && yUntyped {
+				// Untyped string concatenation.
+				if xType == String.Underlying && xType == yType {
+					return xType
+				}
 				// Except for shift operations, if the operands of a binary
 				// operation are different kinds of untyped constants, the
 				// operation and, for non-boolean operations, the result use
@@ -337,7 +339,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				default:
 					return &Bad{Msg: fmt.Sprintf("undefined: %s.%s", x.X, x.Sel)}
 				}
-				return Uintptr
+				c.checkExpr(args[0], nil)
+				x.Sel.Obj = Unsafe.Data.(*ast.Scope).Lookup(x.Sel.Name)
+				return x.Sel.Obj.Type.(Type)
 			}
 
 		case *ast.Ident:
@@ -386,6 +390,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					fallthrough
 				case "print":
 					// TODO check args are expressions.
+					for _, arg := range args {
+						c.checkExpr(arg, nil)
+					}
 					return nil
 				case "imag", "real":
 					arg := c.checkExpr(args[0], nil)
@@ -413,12 +420,13 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 		var fntype *Func
-		switch t := c.checkExpr(x.Fun, nil).(type) {
+		switch t := Underlying(c.checkExpr(x.Fun, nil)).(type) {
 		case *Func:
 			fntype = t
 		case *Bad:
 			return t
 		default:
+			fmt.Println(t)
 			// TODO
 		}
 
@@ -578,7 +586,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			msg := c.errorf(x.Pos(), "%s type does not support indexing", t)
 			return &Bad{Msg: msg}
 		}
-		fmt.Println(c.fset.Position(x.Pos()))
 		panic(c.errorf(x.Pos(), "unreachable (%T)", containerType))
 
 	case *ast.ParenExpr:
@@ -796,7 +803,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			idents := make([]*ast.Ident, len(s.Lhs))
 			for i, e := range s.Lhs {
 				if ident, ok := e.(*ast.Ident); ok {
-					idents[i] = ident
+					if ident.Obj != nil {
+						idents[i] = ident
+					}
 				} else {
 					c.checkExpr(e, nil)
 				}
@@ -805,7 +814,7 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		} else {
 			idents := make([]*ast.Ident, 1)
 			for i, e := range s.Rhs {
-				if ident, ok := s.Lhs[i].(*ast.Ident); ok {
+				if ident, ok := s.Lhs[i].(*ast.Ident); ok && ident.Obj != nil {
 					idents[0] = ident
 					c.checkExpr(e, idents)
 				} else {
@@ -972,20 +981,24 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		}
 		if valspec.Values != nil {
 			for i, name := range valspec.Names {
-				c.checkExpr(valspec.Values[i], []*ast.Ident{name})
+				if name.Obj != nil {
+					c.checkExpr(valspec.Values[i], []*ast.Ident{name})
+				} else {
+					c.checkExpr(valspec.Values[i], nil)
+				}
 			}
 		}
 
 	case ast.Typ:
 		typ := &Name{Obj: obj}
 		obj.Type = typ // "mark" object so recursion terminates
-		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
 		if methobjs := c.methods[obj]; methobjs != nil {
 			methobjs.Sort()
 			typ.Methods = methobjs
-			for _, m := range typ.Methods {
-				c.checkObj(m, ref)
-			}
+		}
+		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
+		for _, m := range typ.Methods {
+			c.checkObj(m, ref)
 		}
 
 	case ast.Var:
@@ -1007,9 +1020,11 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 			var typ Type
 			if typexpr != nil {
 				typ = c.makeType(typexpr, ref)
-				for _, name := range names {
+				for i, name := range names {
 					if name.Obj != nil {
 						name.Obj.Type = typ
+					} else {
+						names[i] = nil
 					}
 				}
 			}
@@ -1018,7 +1033,11 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 				c.checkExpr(values[0], names)
 			} else if len(values) == len(names) {
 				for i, name := range names {
-					c.checkExpr(values[i], []*ast.Ident{name})
+					if name.Obj != nil {
+						c.checkExpr(values[i], []*ast.Ident{name})
+					} else {
+						c.checkExpr(values[i], nil)
+					}
 				}
 			}
 		}

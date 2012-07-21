@@ -16,6 +16,9 @@ const (
 )
 
 func main() {
+    println(a)
+    println(B)
+    println(A, A)
     println(A, B, C, D)
     println(Big)
     println(Big2)

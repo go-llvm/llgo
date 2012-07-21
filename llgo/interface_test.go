@@ -4,14 +4,14 @@ import (
 	"testing"
 )
 
-func TestStaticStructInterfaceConversion(t *testing.T) {
+func _TestStaticStructInterfaceConversion(t *testing.T) {
 	err := runAndCheckMain(testdata("interface.go"), checkStringsEqual)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestInterfaceToInterfaceConversion(t *testing.T) {
+func _TestInterfaceToInterfaceConversion(t *testing.T) {
 	err := runAndCheckMain(testdata("interface_i2i.go"), checkStringsEqual)
 	if err != nil {
 		t.Fatal(err)

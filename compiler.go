@@ -111,7 +111,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			default:
 				panic(fmt.Sprintf("unreachable (%T)", x))
 			}
-			value = ConstValue{*(obj.Data.(*types.Const)), c, typ}
+			value = ConstValue{(obj.Data.(types.Const)), c, typ}
 			obj.Data = value
 		}
 
