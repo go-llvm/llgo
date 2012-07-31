@@ -24,25 +24,34 @@ package runtime
 
 import "unsafe"
 
-type equalFunc func(uintptr, *int8, *int8) bool
-
-func compareI2I(atyp, btyp, aval, bval uintptr) bool {
-	if atyp == btyp {
-		atyp := (*type_)(unsafe.Pointer(atyp))
-		btyp := (*type_)(unsafe.Pointer(btyp))
-		algs := unsafe.Pointer(atyp.alg)
-		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(*atyp.alg))
-		eqFn := *(*equalFunc)(eqPtr)
-		var avalptr, bvalptr *int8
-		if atyp.size <= unsafe.Sizeof(aval) {
-			// value fits in pointer
-			avalptr = (*int8)(unsafe.Pointer(&aval))
-			bvalptr = (*int8)(unsafe.Pointer(&bval))
-		} else {
-			avalptr = (*int8)(unsafe.Pointer(aval))
-			bvalptr = (*int8)(unsafe.Pointer(bval))
-		}
-		return eqFn(atyp.size, avalptr, bvalptr)
-	}
-	return false
+type slice struct {
+	elements *int8
+	length    int32
+	capacity  int32
 }
+
+// sliceappend takes a slice type and two slices, and returns the
+// result of appending the second slice to the first, growing the
+// slice as necessary.
+func sliceappend(t unsafe.Pointer, a, b slice) slice {
+	typ := (*type_)(t)
+	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+	if a.capacity - a.length < b.length {
+		a = slicegrow(slicetyp, a, a.capacity + (b.length - (a.capacity - a.length)))
+	}
+	end := uintptr(unsafe.Pointer(a.elements))
+	end = end + uintptr(a.length * slicetyp.elem.size) // FIXME support +=
+	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), int(slicetyp.elem.size * b.length))
+	a.length += b.length
+	return a
+}
+
+func slicegrow(t *sliceType, a slice, newcap int32) slice {
+	mem := malloc(int(t.elem.size * newcap))
+	if a.length > 0 {
+		size := a.length * t.elem.size
+		memcpy(mem, unsafe.Pointer(a.elements), int(size))
+	}
+	return slice{(*int8)(mem), a.length, newcap}
+}
+

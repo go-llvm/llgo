@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
+Copyright (c) 2012 Andrew Wilkins <axwalk@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -24,25 +24,7 @@ package runtime
 
 import "unsafe"
 
-type equalFunc func(uintptr, *int8, *int8) bool
+func malloc(int) unsafe.Pointer
+func memcpy(dst, src unsafe.Pointer, size int)
+func memmove(dst, src unsafe.Pointer, size int)
 
-func compareI2I(atyp, btyp, aval, bval uintptr) bool {
-	if atyp == btyp {
-		atyp := (*type_)(unsafe.Pointer(atyp))
-		btyp := (*type_)(unsafe.Pointer(btyp))
-		algs := unsafe.Pointer(atyp.alg)
-		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(*atyp.alg))
-		eqFn := *(*equalFunc)(eqPtr)
-		var avalptr, bvalptr *int8
-		if atyp.size <= unsafe.Sizeof(aval) {
-			// value fits in pointer
-			avalptr = (*int8)(unsafe.Pointer(&aval))
-			bvalptr = (*int8)(unsafe.Pointer(&bval))
-		} else {
-			avalptr = (*int8)(unsafe.Pointer(aval))
-			bvalptr = (*int8)(unsafe.Pointer(bval))
-		}
-		return eqFn(atyp.size, avalptr, bvalptr)
-	}
-	return false
-}

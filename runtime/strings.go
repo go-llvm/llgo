@@ -29,9 +29,6 @@ type str struct {
 	size int
 }
 
-func malloc(int) unsafe.Pointer
-func memcpy(dst, src unsafe.Pointer, size int)
-
 func strcat(a, b str) str {
 	if a.size == 0 {
 		return b

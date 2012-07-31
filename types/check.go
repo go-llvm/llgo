@@ -210,7 +210,16 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 
 	case *ast.CompositeLit:
 		// TODO do this properly.
-		return c.makeType(x.Type, true)
+		typ := c.makeType(x.Type, true)
+		for _, elt := range x.Elts {
+			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				c.checkExpr(kv.Key, nil)
+				c.checkExpr(kv.Value, nil)
+			} else {
+				c.checkExpr(elt, nil)
+			}
+		}
+		return typ
 
 	case *ast.BinaryExpr:
 		xType := c.checkExpr(x.X, nil)
@@ -349,7 +358,15 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			if x.Obj.Kind == ast.Fun && x.Obj.Decl == nil {
 				// TODO check args
 				switch x.Name {
-				//case "append":
+				case "append":
+					s := c.checkExpr(args[0], nil)
+					if _, ok := Underlying(s).(*Slice); !ok {
+						msg := c.errorf(x.Pos(), "append must be called with a slice type")
+						return &Bad{Msg: msg}
+					}
+					// TODO check elem matches slice element type.
+					c.checkExpr(args[1], nil)
+					return s
 				//case "cap":
 				//case "close":
 				//case "complex":
@@ -419,10 +436,10 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			}
 		}
 
-		var fntype *Func
+		var ftyp *Func
 		switch t := Underlying(c.checkExpr(x.Fun, nil)).(type) {
 		case *Func:
-			fntype = t
+			ftyp = t
 		case *Bad:
 			return t
 		default:
@@ -433,13 +450,20 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		// TODO check arg types
 		for _, arg := range x.Args {
 			c.checkExpr(arg, nil)
+			/*
+			if !Identical(typ, ftyp.Params[i].Type.(Type)) {
+				msg := c.errorf(x.Pos(), "[%s] cannot use %v (type %s) as type %s in function argument", x.Fun, arg, typ, ftyp.Params[i].Type)
+				fmt.Println(msg)
+				return &Bad{Msg: msg}
+			}
+			*/
 		}
 
-		for _, obj := range fntype.Results {
+		for _, obj := range ftyp.Results {
 			c.checkObj(obj, false)
 		}
 		if len(assignees) > 1 {
-			for i, obj := range fntype.Results {
+			for i, obj := range ftyp.Results {
 				if assignees[i] != nil {
 					if assignees[i].Obj.Type == nil {
 						assignees[i].Obj.Type = obj.Type
@@ -449,8 +473,8 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				}
 			}
 		}
-		if len(fntype.Results) == 1 {
-			return fntype.Results[0].Type.(Type)
+		if len(ftyp.Results) == 1 {
+			return ftyp.Results[0].Type.(Type)
 		}
 		return nil // nil or multi-value
 
@@ -851,7 +875,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			c.checkStmt(s.Init)
 		}
 		// TODO make sure cond expr is some sort of bool.
-		c.checkExpr(s.Cond, nil)
+		if s.Cond != nil {
+			c.checkExpr(s.Cond, nil)
+		}
 		if s.Post != nil {
 			c.checkStmt(s.Post)
 		}
@@ -1013,6 +1039,11 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		case *ast.Field:
 			names = x.Names
 			typexpr = x.Type
+		case *ast.AssignStmt:
+			c.checkStmt(x)
+			if obj.Type == nil {
+				panic("obj.Type == nil")
+			}
 		default:
 			panic(fmt.Sprintf("unimplemented (%T)", x))
 		}
@@ -1050,11 +1081,11 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 			recvField := fndecl.Recv.List[0]
 			if len(recvField.Names) > 0 {
 				fn.Recv = recvField.Names[0].Obj
-				c.checkObj(fn.Recv, ref)
 			} else {
 				fn.Recv = ast.NewObj(ast.Var, "_")
-				fn.Recv.Type = c.makeType(recvField.Type, ref)
+				fn.Recv.Decl = recvField
 			}
+			c.checkObj(fn.Recv, ref)
 		} else {
 			// Only check body of non-method functions. We check method
 			// bodies later, to avoid references to incomplete types.

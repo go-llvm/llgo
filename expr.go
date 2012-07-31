@@ -101,6 +101,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return c.VisitNew(expr)
 		case "make":
 			return c.VisitMake(expr)
+		case "append":
+			return c.VisitAppend(expr)
 		}
 
 	case *ast.SelectorExpr:

@@ -35,7 +35,12 @@ func (c *compiler) defineRuntimeIntrinsics() {
 
 	fn = c.module.NamedFunction("runtime.memcpy")
 	if !fn.IsNil() {
-		c.defineMemcpyFunction(fn)
+		c.defineMemcpyFunction(fn, "memcpy")
+	}
+
+	fn = c.module.NamedFunction("runtime.memmove")
+	if !fn.IsNil() {
+		c.defineMemcpyFunction(fn, "memmove")
 	}
 }
 
@@ -50,7 +55,7 @@ func (c *compiler) defineMallocFunction(fn llvm.Value) {
 	c.builder.CreateRet(result)
 }
 
-func (c *compiler) defineMemcpyFunction(fn llvm.Value) {
+func (c *compiler) defineMemcpyFunction(fn llvm.Value, name string) {
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 	dst, src, size := fn.Param(0), fn.Param(1), fn.Param(2)
@@ -61,7 +66,7 @@ func (c *compiler) defineMemcpyFunction(fn llvm.Value) {
 
 	sizeType := size.Type()
 	sizeBits := sizeType.IntTypeWidth()
-	memcpyName := "llvm.memcpy.p0i8.p0i8.i" + strconv.Itoa(sizeBits)
+	memcpyName := "llvm." + name + ".p0i8.p0i8.i" + strconv.Itoa(sizeBits)
 	memcpy := c.module.NamedFunction(memcpyName)
 	if memcpy.IsNil() {
 		paramtypes := []llvm.Type{

@@ -24,6 +24,14 @@ package runtime
 
 import "unsafe"
 
+// This is a runtime-internal representation of runtimeType.
+// runtimeType is always proceeded by commonType.
+type type_ struct {
+	ptr unsafe.Pointer
+	typ unsafe.Pointer
+	commonType
+}
+
 // This is based on commonType from src/pkg/reflect/type.go.
 type commonType struct {
 	size       uintptr
@@ -37,3 +45,9 @@ type commonType struct {
 	_          uintptr // *uncommonType
 	_          uintptr // *runtimeType
 }
+
+type sliceType struct {
+	commonType
+	elem *type_
+}
+

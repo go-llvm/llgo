@@ -37,6 +37,7 @@ type TypeMap struct {
 	runtime map[types.Type]llvm.Value // runtime/reflect type representation
 	expr    map[ast.Expr]types.Type   // expression types
 
+	runtimeType,
 	runtimeCommonType,
 	runtimeUncommonType,
 	runtimeArrayType,
@@ -69,6 +70,7 @@ func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Ex
 		obj := pkg.Scope.Lookup(name)
 		return tm.ToLLVM(obj.Type.(types.Type))
 	}
+	tm.runtimeType = objToLLVMType("runtimeType")
 	tm.runtimeCommonType = objToLLVMType("commonType")
 	tm.runtimeUncommonType = objToLLVMType("uncommonType")
 	tm.runtimeArrayType = objToLLVMType("arrayType")
@@ -115,7 +117,7 @@ func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 	t = types.Underlying(t)
 	r, ok := tm.runtime[t]
 	if !ok {
-		r = tm.makeRuntimeType(t)
+		_, r = tm.makeRuntimeType(t)
 		if r.IsNil() {
 			panic(fmt.Sprint("Failed to create runtime type for: ", t))
 		}
@@ -300,7 +302,7 @@ func (tm *TypeMap) nameLLVMType(n *types.Name) llvm.Type {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (tm *TypeMap) makeRuntimeType(t types.Type) llvm.Value {
+func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
 	switch t := t.(type) {
 	case *types.Bad:
 		return tm.badRuntimeType(t)
@@ -345,6 +347,30 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	return llvm.ConstStruct(elems, false)
 }
 
+func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) {
+	runtimeTypeValue := llvm.ConstNull(tm.runtimeType)
+	initType := llvm.StructType([]llvm.Type{tm.runtimeType, v.Type()}, false)
+	global = llvm.AddGlobal(tm.module, initType, "")
+	ptr = llvm.ConstBitCast(global, llvm.PointerType(tm.runtimeType, 0))
+
+	// Set ptrToThis in v's commonType.
+	if v.Type() == tm.runtimeCommonType {
+		v = llvm.ConstInsertValue(v, ptr, []uint32{9})
+	} else {
+		commonType := llvm.ConstExtractValue(v, []uint32{0})
+		commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
+		v = llvm.ConstInsertValue(v, commonType, []uint32{0})
+	}
+
+	init := llvm.Undef(initType)
+	//runtimeTypeValue = llvm.ConstInsertValue() TODO
+	init = llvm.ConstInsertValue(init, runtimeTypeValue, []uint32{0})
+	init = llvm.ConstInsertValue(init, v, []uint32{1})
+	global.SetInitializer(init)
+
+	return
+}
+
 func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	// Not sure if there's an easier way to do this, but if you just
 	// use ConstStruct, you end up getting a different llvm.Type.
@@ -382,93 +408,86 @@ func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	return typ
 }
 
-func (tm *TypeMap) badRuntimeType(b *types.Bad) llvm.Value {
+func (tm *TypeMap) badRuntimeType(b *types.Bad) (global, ptr llvm.Value) {
 	panic("bad type")
 }
 
-func (tm *TypeMap) basicRuntimeType(b *types.Basic) llvm.Value {
+func (tm *TypeMap) basicRuntimeType(b *types.Basic) (global, ptr llvm.Value) {
 	commonType := tm.makeCommonType(b, reflect.Kind(b.Kind))
-	result := llvm.AddGlobal(tm.module, commonType.Type(), "")
-	elementTypes := tm.runtimeCommonType.StructElementTypes()
-	ptr := llvm.ConstBitCast(result, elementTypes[9])
-	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
-	result.SetInitializer(commonType)
-	return result
+	return tm.makeRuntimeTypeGlobal(commonType)
 }
 
-func (tm *TypeMap) arrayRuntimeType(a *types.Array) llvm.Value {
+func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) sliceRuntimeType(s *types.Slice) llvm.Value {
-	panic("unimplemented")
+func (tm *TypeMap) sliceRuntimeType(s *types.Slice) (global, ptr llvm.Value) {
+	commonType := tm.makeCommonType(s, reflect.Slice)
+	elemRuntimeType := tm.ToRuntime(s.Elt)
+	sliceType := llvm.ConstNull(tm.runtimeSliceType)
+	sliceType = llvm.ConstInsertValue(sliceType, commonType, []uint32{0})
+	sliceType = llvm.ConstInsertValue(sliceType, elemRuntimeType, []uint32{1})
+	return tm.makeRuntimeTypeGlobal(sliceType)
 }
 
-func (tm *TypeMap) structRuntimeType(s *types.Struct) llvm.Value {
-	result := llvm.AddGlobal(tm.module, tm.runtimeStructType, "")
-	elementTypes := tm.runtimeCommonType.StructElementTypes()
-	ptr := llvm.ConstBitCast(result, elementTypes[9])
+func (tm *TypeMap) structRuntimeType(s *types.Struct) (global, ptr llvm.Value) {
 	commonType := tm.makeCommonType(s, reflect.Struct)
-	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
-
-	init := llvm.ConstNull(tm.runtimeStructType)
-	init = llvm.ConstInsertValue(init, commonType, []uint32{0})
-	result.SetInitializer(init)
-
+	structType := llvm.ConstNull(tm.runtimeStructType)
+	structType = llvm.ConstInsertValue(structType, commonType, []uint32{0})
 	// TODO set fields
-
-	//panic("unimplemented")
-	return result
+	return tm.makeRuntimeTypeGlobal(structType)
 }
 
-func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) llvm.Value {
+func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value) {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) funcRuntimeType(f *types.Func) llvm.Value {
+func (tm *TypeMap) funcRuntimeType(f *types.Func) (global, ptr llvm.Value) {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) llvm.Value {
+func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Value) {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) mapRuntimeType(m *types.Map) llvm.Value {
-	result := llvm.AddGlobal(tm.module, tm.runtimeMapType, "")
-	elementTypes := tm.runtimeCommonType.StructElementTypes()
-	ptr := llvm.ConstBitCast(result, elementTypes[9])
+func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {
 	commonType := tm.makeCommonType(m, reflect.Map)
-	commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
-
-	init := llvm.ConstNull(tm.runtimeMapType)
-	init = llvm.ConstInsertValue(init, commonType, []uint32{0})
-	result.SetInitializer(init)
-
+	mapType := llvm.ConstNull(tm.runtimeMapType)
+	mapType = llvm.ConstInsertValue(mapType, commonType, []uint32{0})
 	// TODO set key, elem
-
-	return result
+	return tm.makeRuntimeTypeGlobal(mapType)
 }
 
-func (tm *TypeMap) chanRuntimeType(c *types.Chan) llvm.Value {
+func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) nameRuntimeType(n *types.Name) llvm.Value {
-	underlyingRuntimeType := tm.ToRuntime(n.Underlying).Initializer()
-	result := llvm.AddGlobal(tm.module, underlyingRuntimeType.Type(), "")
-	result.SetName("__llgo.reflect." + n.Obj.Name)
-	elementTypes := tm.runtimeCommonType.StructElementTypes()
-	ptr := llvm.ConstBitCast(result, elementTypes[9])
-	commonType := llvm.ConstInsertValue(underlyingRuntimeType, ptr, []uint32{9})
+func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
+	global, ptr = tm.makeRuntimeType(n.Underlying)
+	globalInit := global.Initializer()
 
-	uncommonTypeInit := llvm.ConstNull(tm.runtimeUncommonType) // TODO
+	// Locate the common type.
+	underlyingRuntimeType := llvm.ConstExtractValue(globalInit, []uint32{1})
+	commonType := underlyingRuntimeType
+	if _, ok := n.Underlying.(*types.Basic); !ok {
+		commonType = llvm.ConstExtractValue(commonType, []uint32{0})
+	}
+
+	// Insert the uncommon type.
+	uncommonTypeInit := llvm.ConstNull(tm.runtimeUncommonType)
 	uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 	uncommonType.SetInitializer(uncommonTypeInit)
 	commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{8})
 
-	// TODO set string, uncommonType.
-	result.SetInitializer(commonType)
-	return result
+	// Update the global's initialiser.
+	if _, ok := n.Underlying.(*types.Basic); !ok {
+		underlyingRuntimeType = llvm.ConstInsertValue(underlyingRuntimeType, commonType, []uint32{0})
+	} else {
+		underlyingRuntimeType = commonType
+	}
+	globalInit = llvm.ConstInsertValue(globalInit, underlyingRuntimeType, []uint32{1})
+	global.SetName("__llgo.reflect." + n.Obj.Name)
+	return global, ptr
 }
 
 // vim: set ft=go :

@@ -85,6 +85,8 @@ func (c *compiler) printValues(values ...Value) Value {
 				switch typ.Kind {
 				case types.UintKind:
 					format += "%lu"
+				case types.Uint8Kind:
+					format += "%hhu"
 				case types.Uint16Kind:
 					format += "%hu"
 				case types.Uint32Kind, types.UintptrKind: // FIXME uintptr to become bitwidth dependent
@@ -93,6 +95,8 @@ func (c *compiler) printValues(values ...Value) Value {
 					format += "%llu" // FIXME windows
 				case types.IntKind:
 					format += "%ld"
+				case types.Int8Kind:
+					format += "%hhd"
 				case types.Int16Kind:
 					format += "%hd"
 				case types.Int32Kind:
@@ -108,6 +112,8 @@ func (c *compiler) printValues(values ...Value) Value {
 				case types.BoolKind:
 					format += "%s"
 					llvm_value = c.getBoolString(llvm_value)
+				case types.UnsafePointerKind:
+					format += "%p"
 				default:
 					panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
 				}
