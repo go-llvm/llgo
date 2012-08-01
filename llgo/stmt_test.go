@@ -32,4 +32,11 @@ func TestIfLazy(t *testing.T) {
 	}
 }
 
+func TestBinaryOperatorAssignment(t *testing.T) {
+	err := runAndCheckMain(testdata("assignment/binop.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // vim: set ft=go:

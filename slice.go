@@ -23,9 +23,9 @@ SOFTWARE.
 package llgo
 
 import (
-	"go/ast"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
+	"go/ast"
 )
 
 // makeSlice allocates a new slice, storing in it the provided elements.

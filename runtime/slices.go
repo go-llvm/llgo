@@ -26,8 +26,8 @@ import "unsafe"
 
 type slice struct {
 	elements *int8
-	length    int32
-	capacity  int32
+	length   int32
+	capacity int32
 }
 
 // sliceappend takes a slice type and two slices, and returns the
@@ -36,12 +36,12 @@ type slice struct {
 func sliceappend(t unsafe.Pointer, a, b slice) slice {
 	typ := (*type_)(t)
 	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
-	if a.capacity - a.length < b.length {
-		a = slicegrow(slicetyp, a, a.capacity + (b.length - (a.capacity - a.length)))
+	if a.capacity-a.length < b.length {
+		a = slicegrow(slicetyp, a, a.capacity+(b.length-(a.capacity-a.length)))
 	}
 	end := uintptr(unsafe.Pointer(a.elements))
-	end = end + uintptr(a.length * slicetyp.elem.size) // FIXME support +=
-	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), int(slicetyp.elem.size * b.length))
+	end += uintptr(a.length * slicetyp.elem.size)
+	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), int(slicetyp.elem.size*b.length))
 	a.length += b.length
 	return a
 }
@@ -54,4 +54,3 @@ func slicegrow(t *sliceType, a slice, newcap int32) slice {
 	}
 	return slice{(*int8)(mem), a.length, newcap}
 }
-

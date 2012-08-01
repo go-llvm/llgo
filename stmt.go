@@ -104,7 +104,38 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	}
 }
 
+// nonAssignmentToken returns the non-assignment token 
+func nonAssignmentToken(t token.Token) token.Token {
+	switch t {
+	case token.ADD_ASSIGN,
+		token.SUB_ASSIGN,
+		token.MUL_ASSIGN,
+		token.QUO_ASSIGN,
+		token.REM_ASSIGN:
+		return token.ADD + (t - token.ADD_ASSIGN)
+	case token.AND_ASSIGN,
+		token.OR_ASSIGN,
+		token.XOR_ASSIGN,
+		token.SHL_ASSIGN,
+		token.SHR_ASSIGN,
+		token.AND_NOT_ASSIGN:
+		return token.AND + (t - token.AND_ASSIGN)
+	}
+	return token.ILLEGAL
+}
+
 func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
+	// x (add_op|mul_op)= y
+	if stmt.Tok != token.DEFINE && stmt.Tok != token.ASSIGN {
+		op := nonAssignmentToken(stmt.Tok)
+		lhs := c.VisitExpr(stmt.Lhs[0])
+		rhsValue := c.VisitExpr(stmt.Rhs[0])
+		newValue := lhs.BinaryOp(op, rhsValue).(*LLVMValue).LLVMValue()
+		c.builder.CreateStore(newValue, lhs.(*LLVMValue).pointer.LLVMValue())
+		return
+	}
+
+	// a, b, ... [:]= x, y, ...
 	values := make([]Value, len(stmt.Lhs))
 	if len(stmt.Rhs) == 1 && len(stmt.Lhs) > 1 {
 		value := c.VisitExpr(stmt.Rhs[0])

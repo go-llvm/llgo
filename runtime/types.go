@@ -50,4 +50,3 @@ type sliceType struct {
 	commonType
 	elem *type_
 }
-
