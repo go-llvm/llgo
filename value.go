@@ -439,12 +439,10 @@ func (v ConstValue) UnaryOp(op token.Token) Value {
 
 func (v ConstValue) Convert(dstTyp types.Type) Value {
 	// Get the underlying type, if any.
-	if name, isname := dstTyp.(*types.Name); isname {
-		dstTyp = types.Underlying(name)
-	}
+	origDstTyp := dstTyp
+	dstTyp = types.Underlying(dstTyp)
 
 	if !types.Identical(v.typ, dstTyp) {
-		// Get the Basic type.
 		isBasic := false
 		if name, isname := types.Underlying(dstTyp).(*types.Name); isname {
 			_, isBasic = name.Underlying.(*types.Basic)
@@ -452,20 +450,19 @@ func (v ConstValue) Convert(dstTyp types.Type) Value {
 
 		compiler := v.compiler
 		if isBasic {
-			return ConstValue{v.Const.Convert(&dstTyp), compiler, dstTyp}
+			return ConstValue{v.Const.Convert(&dstTyp), compiler, origDstTyp}
 		} else {
-			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(dstTyp)
+			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(origDstTyp)
 			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dstTyp))
 		}
 	} else {
-		// TODO convert to dst type. ConstValue may need to change to allow
-		// storage of types other than Basic.
+		v.typ = origDstTyp
 	}
 	return v
 }
 
 func (v ConstValue) LLVMValue() llvm.Value {
-	typ := v.Type()
+	typ := types.Underlying(v.Type())
 	switch typ {
 	case types.Int:
 		// TODO 32/64bit
