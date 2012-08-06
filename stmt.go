@@ -381,19 +381,24 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	c.builder.CreateBr(caseBlocks[0])
 	for i, stmt := range stmt.Body.List {
 		c.builder.SetInsertPointAtEnd(caseBlocks[i])
-		clause := stmt.(*ast.CaseClause)
-		value := c.VisitExpr(clause.List[0])
-		result := value.BinaryOp(token.EQL, tag)
-		for _, expr := range clause.List[1:] {
-			value = c.compileLogicalOp(token.LOR, result, expr)
-		}
-
 		stmtBlock := stmtBlocks[i]
 		nextBlock := endBlock
 		if i+1 < len(caseBlocks) {
 			nextBlock = caseBlocks[i+1]
 		}
-		c.builder.CreateCondBr(result.LLVMValue(), stmtBlock, nextBlock)
+
+		clause := stmt.(*ast.CaseClause)
+		if clause.List != nil {
+			value := c.VisitExpr(clause.List[0])
+			result := value.BinaryOp(token.EQL, tag)
+			for _, expr := range clause.List[1:] {
+				value = c.compileLogicalOp(token.LOR, result, expr)
+			}
+			c.builder.CreateCondBr(result.LLVMValue(), stmtBlock, nextBlock)
+		} else {
+			// default case
+			c.builder.CreateBr(stmtBlock)
+		}
 
 		c.builder.SetInsertPointAtEnd(stmtBlock)
 		branchBlock := endBlock

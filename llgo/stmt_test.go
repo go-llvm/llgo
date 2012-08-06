@@ -11,6 +11,13 @@ func TestMultipleAssigment(t *testing.T) {
 	}
 }
 
+func TestSwitchDefaultClause(t *testing.T) {
+	err := runAndCheckMain(testdata("switch/default.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEmptySwitch(t *testing.T) {
 	err := runAndCheckMain(testdata("switch/empty.go"), checkStringsEqual)
 	if err != nil {
