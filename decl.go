@@ -144,11 +144,12 @@ func isArray(t types.Type) bool {
 
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
-func (c *compiler) createGlobal(e ast.Expr,
-	t types.Type,
-	name string) (g *LLVMValue) {
+func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bool) (g *LLVMValue) {
 	if e == nil {
 		gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
+		if !export {
+			gv.SetLinkage(llvm.InternalLinkage)
+		}
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 		if !isArray(t) {
 			return g.makePointee()
@@ -162,6 +163,7 @@ func (c *compiler) createGlobal(e ast.Expr,
 	fn_type := new(types.Func)
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
+	fn.SetLinkage(llvm.InternalLinkage)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
@@ -186,13 +188,15 @@ func (c *compiler) createGlobal(e ast.Expr,
 	// we'll have to do the assignment in a global constructor
 	// function.
 	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
+	if !export {
+		gv.SetLinkage(llvm.InternalLinkage)
+	}
 	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 	if !isArray(t) {
 		g = g.makePointee()
 	}
 	if isconst {
-		// Initialiser is constant; discard function and return
-		// global now.
+		// Initialiser is constant; discard function and return global now.
 		gv.SetInitializer(init_.LLVMValue())
 	} else {
 		gv.SetInitializer(llvm.ConstNull(c.types.ToLLVM(t)))
@@ -281,10 +285,8 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				// Set the initialiser. If it's a non-const value, then
 				// we'll have to do the assignment in a global constructor
 				// function.
-				value = c.createGlobal(expr, value_type, name)
-				if !name_.IsExported() {
-					value.LLVMValue().SetLinkage(llvm.InternalLinkage)
-				}
+				export := name_.IsExported()
+				value = c.createGlobal(expr, value_type, name, export)
 			}
 		} else { // isconst
 			value = c.VisitExpr(expr).(ConstValue)
