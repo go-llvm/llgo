@@ -270,21 +270,15 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 	name := expr.Sel.Name
 	if iface, ok := types.Underlying(lhs.Type()).(*types.Interface); ok {
-		// validity checked during typechecking.
 		i := sort.Search(len(iface.Methods), func(i int) bool {
 			return iface.Methods[i].Name >= name
 		})
-		struct_value := lhs.LLVMValue()
-		receiver_value := c.builder.CreateStructGEP(struct_value, 0, "")
-		fn_value := c.builder.CreateStructGEP(struct_value, i+2, "")
-		method_type := c.ObjGetType(iface.Methods[i]).(*types.Func)
-		method := c.NewLLVMValue(
-			c.builder.CreateBitCast(
-				c.builder.CreateLoad(fn_value, ""),
-				c.types.ToLLVM(method_type), ""), method_type)
-		method.receiver = c.NewLLVMValue(
-			c.builder.CreateLoad(receiver_value, ""),
-			method_type.Recv.Type.(types.Type))
+		structValue := lhs.LLVMValue()
+		receiver := c.builder.CreateExtractValue(structValue, 0, "")
+		f := c.builder.CreateExtractValue(structValue, i+2, "")
+		ftype := c.ObjGetType(iface.Methods[i]).(*types.Func)
+		method := c.NewLLVMValue(c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), ""), ftype)
+		method.receiver = c.NewLLVMValue(receiver, ftype.Recv.Type.(types.Type))
 		return method
 	}
 

@@ -19,7 +19,14 @@ func _TestInterfaceToInterfaceConversion(t *testing.T) {
 }
 
 func TestStaticBasicTypeToInterfaceConversion(t *testing.T) {
-	err := runAndCheckMain(testdata("interface_basic.go"), checkStringsEqual)
+	err := runAndCheckMain(testdata("interfaces/basic.go"), checkStringsEqual)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInterfaceMethods(t *testing.T) {
+	err := runAndCheckMain(testdata("interfaces/methods.go"), checkStringsEqual)
 	if err != nil {
 		t.Fatal(err)
 	}

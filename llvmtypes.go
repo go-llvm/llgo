@@ -270,8 +270,7 @@ func (tm *TypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
 		receiver_type := &types.Pointer{Base: types.Int8}
 		fntype.Recv = ast.NewObj(ast.Var, "")
 		fntype.Recv.Type = receiver_type
-		fnptr := types.Pointer{Base: fntype}
-		elements[n+2] = tm.ToLLVM(&fnptr)
+		elements[n+2] = tm.ToLLVM(fntype)
 	}
 	return llvm.StructType(elements, false)
 }
