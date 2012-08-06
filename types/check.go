@@ -451,11 +451,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		for _, arg := range x.Args {
 			c.checkExpr(arg, nil)
 			/*
-			if !Identical(typ, ftyp.Params[i].Type.(Type)) {
-				msg := c.errorf(x.Pos(), "[%s] cannot use %v (type %s) as type %s in function argument", x.Fun, arg, typ, ftyp.Params[i].Type)
-				fmt.Println(msg)
-				return &Bad{Msg: msg}
-			}
+				if !Identical(typ, ftyp.Params[i].Type.(Type)) {
+					msg := c.errorf(x.Pos(), "[%s] cannot use %v (type %s) as type %s in function argument", x.Fun, arg, typ, ftyp.Params[i].Type)
+					fmt.Println(msg)
+					return &Bad{Msg: msg}
+				}
 			*/
 		}
 
@@ -591,7 +591,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					assignees[0].Obj.Type = t.Elt
 				}
 				if assignees[1] != nil && assignees[1].Obj.Type == nil {
-					assignees[0].Obj.Type = Bool
+					assignees[1].Obj.Type = Bool
 				}
 			}
 			return t.Elt
