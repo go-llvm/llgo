@@ -6,6 +6,7 @@ import (
 
 func TestMultipleAssignment(t *testing.T)       { checkOutputEqual(t, "assignment/multi.go") }
 func TestBinaryOperatorAssignment(t *testing.T) { checkOutputEqual(t, "assignment/binop.go") }
+func TestNamedResultAssignment(t *testing.T)    { checkOutputEqual(t, "assignment/namedresult.go") }
 func TestSwitchDefault(t *testing.T)            { checkOutputEqual(t, "switch/default.go") }
 func TestSwitchEmpty(t *testing.T)              { checkOutputEqual(t, "switch/empty.go") }
 func TestSwitchScope(t *testing.T)              { checkOutputEqual(t, "switch/scope.go") }

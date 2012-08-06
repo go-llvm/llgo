@@ -87,30 +87,31 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 	// Bind receiver, arguments and return values to their identifiers/objects.
 	// We'll store each parameter on the stack so they're addressable.
-	param_i := 0
+	paramObjects := fn_type.Params
 	if f.Recv != nil {
-		param_0 := llvm_fn.Param(0)
-		recv_obj := fn_type.Recv
-		recv_type := recv_obj.Type.(types.Type)
-		stack_value := c.builder.CreateAlloca(
-			c.types.ToLLVM(recv_type), recv_obj.Name)
-		c.builder.CreateStore(param_0, stack_value)
-		value := c.NewLLVMValue(stack_value, &types.Pointer{Base: recv_type})
-		recv_obj.Data = value.makePointee()
-		param_i++
+		paramObjects = append([]*ast.Object{fn_type.Recv}, paramObjects...)
 	}
-	for _, param := range fn_type.Params {
-		name := param.Name
-		if name != "_" {
-			param_type := param.Type.(types.Type)
-			param_value := llvm_fn.Param(param_i)
-			stack_value := c.builder.CreateAlloca(c.types.ToLLVM(param_type), name)
-			c.builder.CreateStore(param_value, stack_value)
-			value := c.NewLLVMValue(stack_value,
-				&types.Pointer{Base: param_type})
-			param.Data = value.makePointee()
+	for i, obj := range paramObjects {
+		if obj.Name != "" {
+			value := llvm_fn.Param(i)
+			typ := obj.Type.(types.Type)
+			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), obj.Name)
+			c.builder.CreateStore(value, stackvalue)
+			ptrvalue := c.NewLLVMValue(stackvalue, &types.Pointer{Base: typ})
+			obj.Data = ptrvalue.makePointee()
 		}
-		param_i++
+	}
+
+	// Allocate space on the stack for named results.
+	for _, obj := range fn_type.Results {
+		if obj.Name != "" {
+			typ := obj.Type.(types.Type)
+			llvmtyp := c.types.ToLLVM(typ)
+			stackptr := c.builder.CreateAlloca(llvmtyp, obj.Name)
+			c.builder.CreateStore(llvm.ConstNull(llvmtyp), stackptr)
+			ptrvalue := c.NewLLVMValue(stackptr, &types.Pointer{Base: typ})
+			obj.Data = ptrvalue.makePointee()
+		}
 	}
 
 	c.functions = append(c.functions, fn)

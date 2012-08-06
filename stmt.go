@@ -79,28 +79,34 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt) {
 }
 
 func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
-	if stmt.Results == nil {
+	f := c.functions[len(c.functions)-1]
+	ftyp := f.Type().(*types.Func)
+	if len(ftyp.Results) == 0 {
 		c.builder.CreateRetVoid()
-	} else {
-		if len(stmt.Results) == 1 {
-			value := c.VisitExpr(stmt.Results[0])
+		return
+	}
 
-			// Convert value to the function's return type.
-			cur_fn := c.functions[len(c.functions)-1]
-			fn_type := cur_fn.Type().(*types.Func)
-			result := value.Convert(c.ObjGetType(fn_type.Results[0]))
-
-			c.builder.CreateRet(result.LLVMValue())
-		} else {
-			// TODO handle multi-return value functions in
-			// result expressions.
-			// TODO convert to function's return type.
-			values := make([]llvm.Value, len(stmt.Results))
-			for i, expr := range stmt.Results {
-				values[i] = c.VisitExpr(expr).LLVMValue()
-			}
-			c.builder.CreateAggregateRet(values)
+	values := make([]llvm.Value, len(ftyp.Results))
+	if stmt.Results == nil {
+		for i, obj := range ftyp.Results {
+			values[i] = obj.Data.(*LLVMValue).LLVMValue()
 		}
+	} else {
+		for i, expr := range stmt.Results {
+			resultobj := ftyp.Results[i]
+			value := c.VisitExpr(expr).Convert(resultobj.Type.(types.Type))
+			values[i] = value.LLVMValue()
+			if resultobj.Name != "_" && resultobj.Name != "" {
+				resultptr := resultobj.Data.(*LLVMValue).pointer.LLVMValue()
+				c.builder.CreateStore(value.LLVMValue(), resultptr)
+			}
+		}
+	}
+
+	if len(values) == 1 {
+		c.builder.CreateRet(values[0])
+	} else {
+		c.builder.CreateAggregateRet(values)
 	}
 }
 
