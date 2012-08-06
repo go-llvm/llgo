@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-func TestConst(t *testing.T) {
-	err := runAndCheckMain(testdata("const.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestConst(t *testing.T) { checkOutputEqual(t, "const.go") }
 
 // vim: set ft=go:

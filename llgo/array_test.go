@@ -4,19 +4,7 @@ import (
 	"testing"
 )
 
-// Test array initialisation and iteration.
-func TestArray(t *testing.T) {
-	err := runAndCheckMain(testdata("array.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestArrayIndexing(t *testing.T) {
-	err := runAndCheckMain(testdata("array_index.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestArrayRange(t *testing.T) { checkOutputEqual(t, "arrays/range.go") }
+func TestArrayIndex(t *testing.T) { checkOutputEqual(t, "arrays/index.go") }
 
 // vim: set ft=go:

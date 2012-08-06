@@ -4,11 +4,4 @@ import (
 	"testing"
 )
 
-func TestUnsafePointer(t *testing.T) {
-	err := runAndCheckMain(testdata("unsafe/pointer.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// vim: set ft=go:
+func TestUnsafePointer(t *testing.T) { checkOutputEqual(t, "unsafe/pointer.go") }

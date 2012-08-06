@@ -4,46 +4,11 @@ import (
 	"testing"
 )
 
-func TestMultipleAssigment(t *testing.T) {
-	err := runAndCheckMain(testdata("multi.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSwitchDefaultClause(t *testing.T) {
-	err := runAndCheckMain(testdata("switch/default.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEmptySwitch(t *testing.T) {
-	err := runAndCheckMain(testdata("switch/empty.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSwitchScope(t *testing.T) {
-	err := runAndCheckMain(testdata("switch/scope.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestIfLazy(t *testing.T) {
-	err := runAndCheckMain(testdata("if/lazy.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestBinaryOperatorAssignment(t *testing.T) {
-	err := runAndCheckMain(testdata("assignment/binop.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestMultipleAssignment(t *testing.T)       { checkOutputEqual(t, "assignment/multi.go") }
+func TestBinaryOperatorAssignment(t *testing.T) { checkOutputEqual(t, "assignment/binop.go") }
+func TestSwitchDefault(t *testing.T)            { checkOutputEqual(t, "switch/default.go") }
+func TestSwitchEmpty(t *testing.T)              { checkOutputEqual(t, "switch/empty.go") }
+func TestSwitchScope(t *testing.T)              { checkOutputEqual(t, "switch/scope.go") }
+func TestIfLazy(t *testing.T)                   { checkOutputEqual(t, "if/lazy.go") }
 
 // vim: set ft=go:

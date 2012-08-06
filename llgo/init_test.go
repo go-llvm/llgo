@@ -6,12 +6,7 @@ import (
 )
 
 // Test file-level var declarations.
-func TestVarDecl(t *testing.T) {
-	err := runAndCheckMain(testdata("var.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestVarDecl(t *testing.T) { checkOutputEqual(t, "var.go") }
 
 func TestInitFunctions(t *testing.T) {
 	// There are two init functions, and their order is unspecified. So we just
@@ -26,7 +21,7 @@ func TestInitFunctions(t *testing.T) {
 		}
 		return checkStringsEqual(a[2:], b[2:])
 	}
-	err := runAndCheckMain(testdata("init.go", "init2.go"), check)
+	err := runAndCheckMain(check, testdata("init.go", "init2.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

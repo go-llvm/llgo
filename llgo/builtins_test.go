@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// Test use of the "new" builtin function.
-func TestNew(t *testing.T) {
-	err := runAndCheckMain(testdata("new.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestNew(t *testing.T) { checkOutputEqual(t, "new.go") }
 
 // vim: set ft=go:

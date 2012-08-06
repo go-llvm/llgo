@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"syscall"
+	"testing"
 	"unsafe"
 )
 
@@ -152,7 +153,7 @@ func checkStringsEqual(out, expectedOut []string) error {
 	return nil
 }
 
-func runAndCheckMain(files []string, check func(a, b []string) error) error {
+func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
@@ -172,6 +173,15 @@ func runAndCheckMain(files []string, check func(a, b []string) error) error {
 		err = check(output, expected)
 	}
 	return err
+}
+
+// checkOutputEqual compiles and runs the specified files using gc and llgo,
+// and checks that their output matches exactly.
+func checkOutputEqual(t *testing.T, files ...string) {
+	err := runAndCheckMain(checkStringsEqual, testdata(files...))
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // vim: set ft=go:

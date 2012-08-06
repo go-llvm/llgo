@@ -4,6 +4,7 @@ import (
 	"testing"
 )
 
+/*
 func _TestStaticStructInterfaceConversion(t *testing.T) {
 	err := runAndCheckMain(testdata("interface.go"), checkStringsEqual)
 	if err != nil {
@@ -17,19 +18,9 @@ func _TestInterfaceToInterfaceConversion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+*/
 
-func TestStaticBasicTypeToInterfaceConversion(t *testing.T) {
-	err := runAndCheckMain(testdata("interfaces/basic.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestInterfaceMethods(t *testing.T) {
-	err := runAndCheckMain(testdata("interfaces/methods.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestStaticBasicV2I(t *testing.T)   { checkOutputEqual(t, "interfaces/basic.go") }
+func TestInterfaceMethods(t *testing.T) { checkOutputEqual(t, "interfaces/methods.go") }
 
 // vim: set ft=go:

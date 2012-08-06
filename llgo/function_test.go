@@ -4,18 +4,7 @@ import (
 	"testing"
 )
 
-func TestFunction(t *testing.T) {
-	err := runAndCheckMain(testdata("fun.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestVarargsFunction(t *testing.T) {
-	err := runAndCheckMain(testdata("varargs.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+func TestFunction(t *testing.T)        { checkOutputEqual(t, "fun.go") }
+func TestVarargsFunction(t *testing.T) { checkOutputEqual(t, "varargs.go") }
 
 // vim: set ft=go:
