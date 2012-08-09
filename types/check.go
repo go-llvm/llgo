@@ -388,6 +388,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 						return nil
 					}
 				case "len":
+					c.checkExpr(args[0], nil)
 					return Int
 				case "make":
 					t := c.makeType(args[0], true)

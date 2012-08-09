@@ -32,7 +32,7 @@ import (
 )
 
 // maybeImplicitBranch creates a branch from the current position to the
-// specifies basic block, if and only if the current basic block's last
+// specified basic block, if and only if the current basic block's last
 // instruction is not a terminator.
 //
 // If dest is nil, then branch to the next basic block, if any.
@@ -421,6 +421,112 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	}
 }
 
+func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
+	currBlock := c.builder.GetInsertBlock()
+	doneBlock := llvm.AddBasicBlock(currBlock.Parent(), "done")
+	doneBlock.MoveAfter(currBlock)
+	postBlock := llvm.InsertBasicBlock(doneBlock, "post")
+	loopBlock := llvm.InsertBasicBlock(postBlock, "loop")
+	condBlock := llvm.InsertBasicBlock(loopBlock, "cond")
+	defer c.builder.SetInsertPointAtEnd(doneBlock)
+
+	// Evaluate range expression first.
+	x := c.VisitExpr(stmt.X)
+
+	// If it's a pointer type, we'll first check that it's non-nil.
+	typ := types.Underlying(x.Type())
+	if _, ok := typ.(*types.Pointer); ok {
+		ifBlock := llvm.InsertBasicBlock(doneBlock, "if")
+		isnotnull := c.builder.CreateIsNotNull(x.LLVMValue(), "")
+		c.builder.CreateCondBr(isnotnull, ifBlock, doneBlock)
+		c.builder.SetInsertPointAtEnd(ifBlock)
+	}
+
+	// Is it a new var definition? Then allocate some memory on the stack.
+	var keyType, valueType types.Type
+	var keyPtr, valuePtr llvm.Value
+	if stmt.Tok == token.DEFINE {
+		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
+			keyType = key.Obj.Type.(types.Type)
+			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
+			key.Obj.Data = c.NewLLVMValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
+		}
+		if stmt.Value != nil {
+			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
+				valueType = value.Obj.Type.(types.Type)
+				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
+				value.Obj.Data = c.NewLLVMValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
+			}
+		}
+	}
+
+	isarray := false
+	var base, length llvm.Value
+	_, isptr := typ.(*types.Pointer)
+	if isptr {
+		typ = typ.(*types.Pointer).Base
+	}
+	switch typ := types.Underlying(typ).(type) {
+	case *types.Map:
+		// TODO
+		panic("map range unimplemented")
+	case *types.Name:
+		// TODO
+		panic("string range unimplemented")
+	case *types.Array:
+		isarray = true
+		x := x
+		if !isptr {
+			if x_, ok := x.(*LLVMValue); ok && x_.pointer != nil {
+				x = x_.pointer
+			} else {
+				// TODO load value onto stack for indexing?
+			}
+		}
+		base = x.LLVMValue()
+		length = llvm.ConstInt(llvm.Int32Type(), typ.Len, false)
+		goto arrayrange
+	case *types.Slice:
+		slicevalue := x.LLVMValue()
+		if isptr {
+			slicevalue = c.builder.CreateLoad(slicevalue, "")
+		}
+		base = c.builder.CreateExtractValue(slicevalue, 0, "")
+		length = c.builder.CreateExtractValue(slicevalue, 1, "")
+		goto arrayrange
+	}
+
+arrayrange:
+	zero := llvm.ConstNull(llvm.Int32Type())
+	currBlock = c.builder.GetInsertBlock()
+	c.builder.CreateBr(condBlock)
+	c.builder.SetInsertPointAtEnd(condBlock)
+	index := c.builder.CreatePHI(llvm.Int32Type(), "index")
+	lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
+	c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
+	c.builder.SetInsertPointAtEnd(loopBlock)
+	if !keyPtr.IsNil() {
+		c.builder.CreateStore(index, keyPtr)
+	}
+	if !valuePtr.IsNil() {
+		var indices []llvm.Value
+		if isarray {
+			indices = []llvm.Value{zero, index}
+		} else {
+			indices = []llvm.Value{index}
+		}
+		elementptr := c.builder.CreateGEP(base, indices, "")
+		element := c.builder.CreateLoad(elementptr, "")
+		c.builder.CreateStore(element, valuePtr)
+	}
+	c.VisitBlockStmt(stmt.Body)
+	c.maybeImplicitBranch(postBlock)
+	c.builder.SetInsertPointAtEnd(postBlock)
+	newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
+	c.builder.CreateBr(condBlock)
+	index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+}
+
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.logger != nil {
 		c.logger.Println("Compile statement:", reflect.TypeOf(stmt),
@@ -447,6 +553,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitGoStmt(x)
 	case *ast.SwitchStmt:
 		c.VisitSwitchStmt(x)
+	case *ast.RangeStmt:
+		c.VisitRangeStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}
