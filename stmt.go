@@ -488,9 +488,6 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		goto arrayrange
 	case *types.Slice:
 		slicevalue := x.LLVMValue()
-		if isptr {
-			slicevalue = c.builder.CreateLoad(slicevalue, "")
-		}
 		base = c.builder.CreateExtractValue(slicevalue, 0, "")
 		length = c.builder.CreateExtractValue(slicevalue, 1, "")
 		goto arrayrange
