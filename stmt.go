@@ -177,6 +177,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 				}
 			}
+			continue
 		case *ast.IndexExpr:
 			if t, ok := c.types.expr[x.X]; ok {
 				if _, ok := t.(*types.Map); ok {
@@ -185,7 +186,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 					ptr := c.mapLookup(m, index, true).pointer
 					value = value.Convert(types.Deref(ptr.Type()))
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
-					return
+					continue
 				}
 			}
 		}
