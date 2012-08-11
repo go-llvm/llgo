@@ -453,7 +453,8 @@ func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {
 	commonType := tm.makeCommonType(m, reflect.Map)
 	mapType := llvm.ConstNull(tm.runtimeMapType)
 	mapType = llvm.ConstInsertValue(mapType, commonType, []uint32{0})
-	// TODO set key, elem
+	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Key), []uint32{1})
+	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Elt), []uint32{2})
 	return tm.makeRuntimeTypeGlobal(mapType)
 }
 

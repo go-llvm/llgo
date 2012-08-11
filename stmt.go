@@ -133,6 +133,7 @@ func nonAssignmentToken(t token.Token) token.Token {
 func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	// x (add_op|mul_op)= y
 	if stmt.Tok != token.DEFINE && stmt.Tok != token.ASSIGN {
+		// TODO handle assignment to map element.
 		op := nonAssignmentToken(stmt.Tok)
 		lhs := c.VisitExpr(stmt.Lhs[0])
 		rhsValue := c.VisitExpr(stmt.Rhs[0])
@@ -176,11 +177,22 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 				}
 			}
-		default:
-			ptr := c.VisitExpr(expr).(*LLVMValue).pointer
-			value = value.Convert(types.Deref(ptr.Type()))
-			c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
+		case *ast.IndexExpr:
+			if t, ok := c.types.expr[x.X]; ok {
+				if _, ok := t.(*types.Map); ok {
+					m := c.VisitExpr(x.X).(*LLVMValue)
+					index := c.VisitExpr(x.Index)
+					ptr := c.mapLookup(m, index, true).pointer
+					value = value.Convert(types.Deref(ptr.Type()))
+					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
+					return
+				}
+			}
 		}
+		// default (since we can't fallthrough in non-map index exprs)
+		ptr := c.VisitExpr(expr).(*LLVMValue).pointer
+		value = value.Convert(types.Deref(ptr.Type()))
+		c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 	}
 }
 

@@ -242,8 +242,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		return result.makePointee()
 
 	case *types.Map:
-		// FIXME we need to differentiate between insertion and lookup.
-		return c.mapInsert(value, index)
+		return c.mapLookup(value, index, false)
 	}
 	panic("unreachable")
 }

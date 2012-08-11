@@ -223,6 +223,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.QUO:
 		result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.REM:
+		result = b.CreateURem(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.ADD:
 		result = b.CreateAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)

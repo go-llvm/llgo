@@ -27,21 +27,27 @@ import (
 	"github.com/axw/llgo/types"
 )
 
-// mapInsert inserts a key into a map, returning a pointer to the memory
-// location for the value.
-func (c *compiler) mapInsert(m *LLVMValue, key Value) *LLVMValue {
+// mapLookup searches a map for a specified key, returning a pointer to the
+// memory location for the value. If insert is given as true, and the key
+// does not exist in the map, it will be added with an uninitialised value.
+func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
 	mapType := m.Type().(*types.Map)
-	mapinsert := c.module.Module.NamedFunction("runtime.mapinsert")
+	maplookup := c.module.Module.NamedFunction("runtime.maplookup")
 	ptrType := c.target.IntPtrType()
-	if mapinsert.IsNil() {
-		// params: dynamic type, mapptr, keyptr
-		paramTypes := []llvm.Type{ptrType, ptrType, ptrType}
+	if maplookup.IsNil() {
+		// params: dynamic type, mapptr, keyptr, insertifmissing
+		paramTypes := []llvm.Type{ptrType, ptrType, ptrType, llvm.Int1Type()}
 		funcType := llvm.FunctionType(ptrType, paramTypes, false)
-		mapinsert = llvm.AddFunction(c.module.Module, "runtime.mapinsert", funcType)
+		maplookup = llvm.AddFunction(c.module.Module, "runtime.maplookup", funcType)
 	}
-	args := make([]llvm.Value, 3)
+	args := make([]llvm.Value, 4)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
+	if insert {
+		args[3] = llvm.ConstAllOnes(llvm.Int1Type())
+	} else {
+		args[3] = llvm.ConstNull(llvm.Int1Type())
+	}
 
 	if lv, islv := key.(*LLVMValue); islv && lv.pointer != nil {
 		args[2] = c.builder.CreatePtrToInt(lv.pointer.LLVMValue(), ptrType, "")
@@ -55,8 +61,13 @@ func (c *compiler) mapInsert(m *LLVMValue, key Value) *LLVMValue {
 	}
 
 	eltPtrType := &types.Pointer{Base: mapType.Elt}
-	result := c.builder.CreateCall(mapinsert, args, "")
-	result = c.builder.CreateIntToPtr(result, c.types.ToLLVM(eltPtrType), "")
+	llvmtyp := c.types.ToLLVM(eltPtrType)
+	zeroglobal := llvm.AddGlobal(c.module.Module, llvmtyp.ElementType(), "")
+	zeroglobal.SetInitializer(llvm.ConstNull(llvmtyp.ElementType()))
+	result := c.builder.CreateCall(maplookup, args, "")
+	result = c.builder.CreateIntToPtr(result, llvmtyp, "")
+	notnull := c.builder.CreateIsNotNull(result, "")
+	result = c.builder.CreateSelect(notnull, result, zeroglobal, "")
 	value := c.NewLLVMValue(result, eltPtrType)
 	return value.makePointee()
 }

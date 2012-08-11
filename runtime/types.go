@@ -50,3 +50,9 @@ type sliceType struct {
 	commonType
 	elem *type_
 }
+
+type mapType struct {
+	commonType
+	key  *type_
+	elem *type_
+}

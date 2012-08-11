@@ -24,15 +24,13 @@ package runtime
 
 import "unsafe"
 
-type equalFunc func(uintptr, *int8, *int8) bool
-
 func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 	if atyp == btyp {
 		atyp := (*type_)(unsafe.Pointer(atyp))
 		btyp := (*type_)(unsafe.Pointer(btyp))
 		algs := unsafe.Pointer(atyp.alg)
 		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(*atyp.alg))
-		eqFn := *(*equalFunc)(eqPtr)
+		eqFn := *(*equalalg)(eqPtr)
 		var avalptr, bvalptr *int8
 		if atyp.size <= unsafe.Sizeof(aval) {
 			// value fits in pointer

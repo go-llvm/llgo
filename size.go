@@ -52,6 +52,8 @@ func (c *compiler) sizeofType(t types.Type) int {
 		case types.UintptrKind, types.UnsafePointerKind:
 			return c.target.PointerSize()
 		}
+	case *types.Pointer:
+		return c.target.PointerSize()
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}
