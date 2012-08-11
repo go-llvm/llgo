@@ -41,21 +41,11 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 
 	typ := (*type_)(t)
 	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
-
-	// Calculate sizes, offsets.
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
-	keyalign := uintptr(maptyp.key.align)
-	keyoffset := ptrsize
-	if keyoffset%keyalign != 0 {
-		keyoffset += keyalign - (keyoffset % keyalign)
-	}
+	keyoffset := align(ptrsize, maptyp.key.align)
 	elemsize := uintptr(maptyp.elem.size)
-	elemalign := uintptr(maptyp.elem.align)
-	elemoffset := keyoffset + keysize
-	if elemoffset%elemalign != 0 {
-		elemoffset += elemalign - (elemoffset % elemalign)
-	}
+	elemoffset := align(keyoffset+keysize, maptyp.elem.align)
 	entrysize := elemoffset + elemsize
 
 	// Search for the entry with the specified key.
@@ -64,17 +54,18 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	keyeqfun := *(*equalalg)(keyeqptr)
 	var last *mapentry
 	for ptr := m.head; ptr != nil; ptr = ptr.next {
-		last = ptr
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		if keyeqfun(keysize, key, keyptr) {
 			elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
 			return elemptr
 		}
+		last = ptr
 	}
 
 	// Not found: insert the key if requested.
 	if insert {
 		newentry := (*mapentry)(malloc(entrysize))
+		newentry.next = nil
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry) + keyoffset))
 		elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + elemoffset)
 		memcpy(keyptr, key, keysize)
@@ -88,4 +79,36 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	}
 
 	return 0
+}
+
+func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
+	if m == nil {
+		return 0
+	}
+
+	typ := (*type_)(t)
+	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+	keysize := uintptr(maptyp.key.size)
+	keyoffset := align(ptrsize, maptyp.key.align)
+
+	// Search for the entry with the specified key.
+	keyalgs := unsafe.Pointer(maptyp.key.alg)
+	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(*maptyp.key.alg))
+	keyeqfun := *(*equalalg)(keyeqptr)
+	var last *mapentry
+	for ptr := m.head; ptr != nil; ptr = ptr.next {
+		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
+		if keyeqfun(keysize, key, keyptr) {
+			if last == nil {
+				m.head = ptr.next
+			} else {
+				last.next = ptr.next
+			}
+			free(ptr)
+			m.length--
+			return
+		}
+		last = ptr
+	}
 }

@@ -24,6 +24,15 @@ package runtime
 
 import "unsafe"
 
+func free(unsafe.Pointer)
 func malloc(int) unsafe.Pointer
 func memcpy(dst, src unsafe.Pointer, size int)
 func memmove(dst, src unsafe.Pointer, size int)
+
+func align(p uintptr, align_ uint8) uintptr {
+	align := uint32(align_)
+	if p%align != 0 {
+		p += (p - (p % align))
+	}
+	return p
+}

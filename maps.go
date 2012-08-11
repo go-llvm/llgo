@@ -72,4 +72,26 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
 	return value.makePointee()
 }
 
-// vim: set ft=go:
+func (c *compiler) mapDelete(m *LLVMValue, key Value) {
+	mapdelete := c.module.Module.NamedFunction("runtime.mapdelete")
+	ptrType := c.target.IntPtrType()
+	if mapdelete.IsNil() {
+		// params: dynamic type, mapptr, keyptr
+		paramTypes := []llvm.Type{ptrType, ptrType, ptrType}
+		funcType := llvm.FunctionType(llvm.VoidType(), paramTypes, false)
+		mapdelete = llvm.AddFunction(c.module.Module, "runtime.mapdelete", funcType)
+	}
+	args := make([]llvm.Value, 3)
+	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
+	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
+	if lv, islv := key.(*LLVMValue); islv && lv.pointer != nil {
+		args[2] = c.builder.CreatePtrToInt(lv.pointer.LLVMValue(), ptrType, "")
+	}
+	if args[2].IsNil() {
+		global := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(key.Type()), "")
+		global.SetGlobalConstant(true)
+		global.SetInitializer(key.LLVMValue())
+		args[2] = c.builder.CreatePtrToInt(global, ptrType, "")
+	}
+	c.builder.CreateCall(mapdelete, args, "")
+}

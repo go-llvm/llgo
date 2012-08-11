@@ -33,6 +33,11 @@ func (c *compiler) defineRuntimeIntrinsics() {
 		c.defineMallocFunction(fn)
 	}
 
+	fn = c.module.NamedFunction("runtime.free")
+	if !fn.IsNil() {
+		c.defineFreeFunction(fn)
+	}
+
 	fn = c.module.NamedFunction("runtime.memcpy")
 	if !fn.IsNil() {
 		c.defineMemcpyFunction(fn, "memcpy")
@@ -53,6 +58,15 @@ func (c *compiler) defineMallocFunction(fn llvm.Value) {
 	fn_type := fn.Type().ElementType()
 	result := c.builder.CreatePtrToInt(ptr, fn_type.ReturnType(), "")
 	c.builder.CreateRet(result)
+}
+
+func (c *compiler) defineFreeFunction(fn llvm.Value) {
+	entry := llvm.AddBasicBlock(fn, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
+	ptr := fn.FirstParam()
+	ptrtyp := llvm.PointerType(llvm.Int8Type(), 0)
+	c.builder.CreateFree(c.builder.CreateIntToPtr(ptr, ptrtyp, ""))
+	c.builder.CreateRetVoid()
 }
 
 func (c *compiler) defineMemcpyFunction(fn llvm.Value, name string) {

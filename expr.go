@@ -103,6 +103,11 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return c.VisitMake(expr)
 		case "append":
 			return c.VisitAppend(expr)
+		case "delete":
+			m := c.VisitExpr(expr.Args[0]).(*LLVMValue)
+			key := c.VisitExpr(expr.Args[1])
+			c.mapDelete(m, key)
+			return nil
 		}
 
 	case *ast.SelectorExpr:
