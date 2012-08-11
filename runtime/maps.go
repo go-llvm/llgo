@@ -83,6 +83,7 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 		} else {
 			m.head = newentry
 		}
+		m.length++
 		return elemptr
 	}
 

@@ -56,10 +56,16 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		return c.NewConstValue(token.INT, v)
 
 	case *types.Slice:
-		ptr := value.(*LLVMValue).pointer
-		len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
-		len_value := c.builder.CreateLoad(len_field, "")
-		return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
+		//ptr := value.(*LLVMValue).pointer
+		//len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
+		sliceval := value.LLVMValue()
+		lenval := c.builder.CreateExtractValue(sliceval, 1, "") //c.builder.CreateLoad(len_field, "")
+		return c.NewLLVMValue(lenval, types.Int32).Convert(types.Int)
+
+	case *types.Map:
+		mapval := value.LLVMValue()
+		lenval := c.builder.CreateExtractValue(mapval, 0, "") //c.builder.CreateLoad(len_field, "")
+		return c.NewLLVMValue(lenval, types.Int32).Convert(types.Int)
 
 	case *types.Array:
 		v := strconv.FormatUint(typ.Len, 10)
