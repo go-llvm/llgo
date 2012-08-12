@@ -112,3 +112,28 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 		last = ptr
 	}
 }
+
+func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv unsafe.Pointer) {
+	if m == nil {
+		return
+	}
+	ptr := (*mapentry)(nextin)
+	if ptr == nil {
+		ptr = m.head
+	} else {
+		ptr = ptr.next
+	}
+	if ptr != nil {
+		typ := (*type_)(t)
+		maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+		keysize := uintptr(maptyp.key.size)
+		keyoffset := align(ptrsize, maptyp.key.align)
+		elemsize := uintptr(maptyp.elem.size)
+		elemoffset := align(keyoffset+keysize, maptyp.elem.align)
+		nextout = unsafe.Pointer(ptr)
+		pk = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
+		pv = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
+	}
+	return
+}

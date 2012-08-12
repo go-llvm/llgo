@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"reflect"
+	"sort"
 	"strings"
 	"syscall"
 	"testing"
@@ -153,6 +154,20 @@ func checkStringsEqual(out, expectedOut []string) error {
 	return nil
 }
 
+func checkStringsEqualUnordered(out, expectedOut []string) error {
+	outSorted := make([]string, len(out))
+	expectedOutSorted := make([]string, len(expectedOut))
+	copy(outSorted, out)
+	copy(expectedOutSorted, expectedOut)
+	sort.Strings(outSorted)
+	sort.Strings(expectedOutSorted)
+	if !reflect.DeepEqual(outSorted, expectedOutSorted) {
+		return fmt.Errorf("Output did not match: %q (actual) != %q (expected)",
+			outSorted, expectedOutSorted)
+	}
+	return nil
+}
+
 func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
@@ -179,6 +194,16 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 // and checks that their output matches exactly.
 func checkOutputEqual(t *testing.T, files ...string) {
 	err := runAndCheckMain(checkStringsEqual, testdata(files...))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkOutputEqualUnordered compiles and runs the specified files using gc
+// and llgo, and checks that their output, when split by line and sorted,
+// matches.
+func checkOutputEqualUnordered(t *testing.T, files ...string) {
+	err := runAndCheckMain(checkStringsEqualUnordered, testdata(files...))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -481,11 +481,9 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	}
 	switch typ := types.Underlying(typ).(type) {
 	case *types.Map:
-		// TODO
-		panic("map range unimplemented")
+		goto maprange
 	case *types.Name:
-		// TODO
-		panic("string range unimplemented")
+		goto stringrange
 	case *types.Array:
 		isarray = true
 		x := x
@@ -506,35 +504,66 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		goto arrayrange
 	}
 
-arrayrange:
-	zero := llvm.ConstNull(llvm.Int32Type())
-	currBlock = c.builder.GetInsertBlock()
-	c.builder.CreateBr(condBlock)
-	c.builder.SetInsertPointAtEnd(condBlock)
-	index := c.builder.CreatePHI(llvm.Int32Type(), "index")
-	lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
-	c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
-	c.builder.SetInsertPointAtEnd(loopBlock)
-	if !keyPtr.IsNil() {
-		c.builder.CreateStore(index, keyPtr)
-	}
-	if !valuePtr.IsNil() {
-		var indices []llvm.Value
-		if isarray {
-			indices = []llvm.Value{zero, index}
-		} else {
-			indices = []llvm.Value{index}
+maprange:
+	{
+		currBlock = c.builder.GetInsertBlock()
+		c.builder.CreateBr(condBlock)
+		c.builder.SetInsertPointAtEnd(condBlock)
+		nextptrphi := c.builder.CreatePHI(c.target.IntPtrType(), "next")
+		nextptr, pk, pv := c.mapNext(x.(*LLVMValue), nextptrphi)
+		notnull := c.builder.CreateIsNotNull(nextptr, "")
+		c.builder.CreateCondBr(notnull, loopBlock, doneBlock)
+		c.builder.SetInsertPointAtEnd(loopBlock)
+		if !keyPtr.IsNil() {
+			keyval := c.builder.CreateLoad(pk, "")
+			c.builder.CreateStore(keyval, keyPtr)
 		}
-		elementptr := c.builder.CreateGEP(base, indices, "")
-		element := c.builder.CreateLoad(elementptr, "")
-		c.builder.CreateStore(element, valuePtr)
+		if !valuePtr.IsNil() {
+			valval := c.builder.CreateLoad(pv, "")
+			c.builder.CreateStore(valval, valuePtr)
+		}
+		c.VisitBlockStmt(stmt.Body)
+		c.maybeImplicitBranch(postBlock)
+		c.builder.SetInsertPointAtEnd(postBlock)
+		c.builder.CreateBr(condBlock)
+		nextptrphi.AddIncoming([]llvm.Value{llvm.ConstNull(c.target.IntPtrType()), nextptr}, []llvm.BasicBlock{currBlock, postBlock})
+		return
 	}
-	c.VisitBlockStmt(stmt.Body)
-	c.maybeImplicitBranch(postBlock)
-	c.builder.SetInsertPointAtEnd(postBlock)
-	newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
-	c.builder.CreateBr(condBlock)
-	index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+
+stringrange:
+	panic("string range unimplemented")
+
+arrayrange:
+	{
+		zero := llvm.ConstNull(llvm.Int32Type())
+		currBlock = c.builder.GetInsertBlock()
+		c.builder.CreateBr(condBlock)
+		c.builder.SetInsertPointAtEnd(condBlock)
+		index := c.builder.CreatePHI(llvm.Int32Type(), "index")
+		lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
+		c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
+		c.builder.SetInsertPointAtEnd(loopBlock)
+		if !keyPtr.IsNil() {
+			c.builder.CreateStore(index, keyPtr)
+		}
+		if !valuePtr.IsNil() {
+			var indices []llvm.Value
+			if isarray {
+				indices = []llvm.Value{zero, index}
+			} else {
+				indices = []llvm.Value{index}
+			}
+			elementptr := c.builder.CreateGEP(base, indices, "")
+			element := c.builder.CreateLoad(elementptr, "")
+			c.builder.CreateStore(element, valuePtr)
+		}
+		c.VisitBlockStmt(stmt.Body)
+		c.maybeImplicitBranch(postBlock)
+		c.builder.SetInsertPointAtEnd(postBlock)
+		newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
+		c.builder.CreateBr(condBlock)
+		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+	}
 }
 
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
