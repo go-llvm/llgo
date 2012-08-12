@@ -29,26 +29,14 @@ import (
 )
 
 func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
-	strcat := c.module.Module.NamedFunction("runtime.strcat")
-	if strcat.IsNil() {
-		string_type := c.types.ToLLVM(types.String)
-		param_types := []llvm.Type{string_type, string_type}
-		func_type := llvm.FunctionType(string_type, param_types, false)
-		strcat = llvm.AddFunction(c.module.Module, "runtime.strcat", func_type)
-	}
+	strcat := c.namedFunction("runtime.strcat", "func f(a, b string) string")
 	args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
 	result := c.builder.CreateCall(strcat, args, "")
 	return c.NewLLVMValue(result, types.String)
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-	strcmp := c.module.Module.NamedFunction("runtime.strcmp")
-	if strcmp.IsNil() {
-		string_type := c.types.ToLLVM(types.String)
-		param_types := []llvm.Type{string_type, string_type}
-		func_type := llvm.FunctionType(llvm.Int32Type(), param_types, false)
-		strcmp = llvm.AddFunction(c.module.Module, "runtime.strcmp", func_type)
-	}
+	strcmp := c.namedFunction("runtime.strcmp", "func f(a, b string) int32")
 	args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
 	result := c.builder.CreateCall(strcmp, args, "")
 	zero := llvm.ConstNull(llvm.Int32Type())

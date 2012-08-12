@@ -338,8 +338,7 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	equalAlgName := "runtime.memequal"
 	equalAlg := tm.module.NamedFunction(equalAlgName)
 	if equalAlg.IsNil() {
-		equalAlg = llvm.AddFunction(
-			tm.module, equalAlgName, tm.equalAlgFunctionType)
+		equalAlg = llvm.AddFunction(tm.module, equalAlgName, tm.equalAlgFunctionType)
 	}
 
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}

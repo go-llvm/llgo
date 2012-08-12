@@ -28,6 +28,7 @@ func free(unsafe.Pointer)
 func malloc(int) unsafe.Pointer
 func memcpy(dst, src unsafe.Pointer, size int)
 func memmove(dst, src unsafe.Pointer, size int)
+func memset(dst unsafe.Pointer, fill byte, size int)
 
 func align(p uintptr, align_ uint8) uintptr {
 	align := uint32(align_)

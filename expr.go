@@ -164,7 +164,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 				value = value.Convert(param_type)
 				varargs = append(varargs, value.LLVMValue())
 			}
-			slice_value := c.makeSlice(varargs, param_type)
+			slice_value := c.makeLiteralSlice(varargs, param_type)
 			args = append(args, slice_value)
 		}
 	}

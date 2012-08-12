@@ -28,8 +28,8 @@ import (
 	"go/ast"
 )
 
-// makeSlice allocates a new slice, storing in it the provided elements.
-func (c *compiler) makeSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
+// makeLiteralSlice allocates a new slice, storing in it the provided elements.
+func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
 	n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
 	llvmelttyp := c.types.ToLLVM(elttyp)
 	mem := c.builder.CreateArrayMalloc(llvmelttyp, n, "")
@@ -43,6 +43,36 @@ func (c *compiler) makeSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
 	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
 	struct_ = c.builder.CreateInsertValue(struct_, n, 1, "")
 	struct_ = c.builder.CreateInsertValue(struct_, n, 2, "")
+	return struct_
+}
+
+// makeSlice allocates a new slice with the optional length and capacity,
+// initialising its contents to their zero values.
+func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Value {
+	var lengthValue llvm.Value
+	if length != nil {
+		lengthValue = length.Convert(types.Int32).LLVMValue()
+	} else {
+		lengthValue = llvm.ConstNull(llvm.Int32Type())
+	}
+
+	// TODO check capacity >= length
+	capacityValue := lengthValue
+	if capacity != nil {
+		capacityValue = capacity.Convert(types.Int32).LLVMValue()
+	}
+
+	llvmelttyp := c.types.ToLLVM(elttyp)
+	mem := c.builder.CreateArrayMalloc(llvmelttyp, capacityValue, "")
+	sizeof := llvm.ConstTrunc(llvm.SizeOf(llvmelttyp), llvm.Int32Type())
+	size := c.builder.CreateMul(capacityValue, sizeof, "")
+	c.memsetZero(mem, size)
+
+	slicetyp := types.Slice{Elt: elttyp}
+	struct_ := llvm.Undef(c.types.ToLLVM(&slicetyp))
+	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
+	struct_ = c.builder.CreateInsertValue(struct_, lengthValue, 1, "")
+	struct_ = c.builder.CreateInsertValue(struct_, capacityValue, 2, "")
 	return struct_
 }
 
@@ -66,19 +96,9 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	s := c.VisitExpr(expr.Args[0])
 	elem := c.VisitExpr(expr.Args[1])
 
-	appendName := "runtime.sliceappend"
-	appendFun := c.module.NamedFunction(appendName)
-	uintptrTyp := c.target.IntPtrType()
-	var i8slice llvm.Type
-	if appendFun.IsNil() {
-		i8slice = c.types.ToLLVM(&types.Slice{Elt: types.Int8})
-		args := []llvm.Type{uintptrTyp, i8slice, i8slice}
-		appendFunTyp := llvm.FunctionType(i8slice, args, false)
-		appendFun = llvm.AddFunction(c.module.Module, appendName, appendFunTyp)
-	} else {
-		i8slice = appendFun.Type().ReturnType()
-	}
-	i8ptr := i8slice.StructElementTypes()[0]
+	sliceappend := c.namedFunction("runtime.sliceappend", "func f(t uintptr, dst, src []int8) []int8")
+	i8slice := sliceappend.Type().ElementType().ReturnType()
+	i8ptr := c.types.ToLLVM(&types.Pointer{Base: types.Int8})
 
 	// Coerce first argument into an []int8.
 	a_ := s.LLVMValue()
@@ -97,9 +117,9 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 
 	// Call runtime function, then coerce the result.
 	runtimeTyp := c.types.ToRuntime(s.Type())
-	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, uintptrTyp, "")
+	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 	args := []llvm.Value{runtimeTyp, a, b}
-	result := c.builder.CreateCall(appendFun, args, "")
+	result := c.builder.CreateCall(sliceappend, args, "")
 	return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), s.Type())
 }
 

@@ -24,14 +24,26 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	//"github.com/axw/llgo/types"
+	"github.com/axw/llgo/types"
 	"go/ast"
 )
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 	typ := c.GetType(expr.Args[0])
-	// TODO len (if slice)
-	// TODO cap
+	switch utyp := types.Underlying(typ).(type) {
+	case *types.Slice:
+		var length, capacity Value
+		switch len(expr.Args) {
+		case 3:
+			capacity = c.VisitExpr(expr.Args[2])
+			fallthrough
+		case 2:
+			length = c.VisitExpr(expr.Args[1])
+		}
+		slice := c.makeSlice(utyp.Elt, length, capacity)
+		return c.NewLLVMValue(slice, typ)
+	}
+	// TODO map, chan
 	return c.NewLLVMValue(llvm.ConstNull(c.types.ToLLVM(typ)), typ)
 }
 

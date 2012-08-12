@@ -9,4 +9,3 @@ func main() {
 		println(x[i])
 	}
 }
-

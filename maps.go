@@ -32,14 +32,8 @@ import (
 // does not exist in the map, it will be added with an uninitialised value.
 func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
 	mapType := m.Type().(*types.Map)
-	maplookup := c.module.Module.NamedFunction("runtime.maplookup")
+	maplookup := c.namedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
-	if maplookup.IsNil() {
-		// params: dynamic type, mapptr, keyptr, insertifmissing
-		paramTypes := []llvm.Type{ptrType, ptrType, ptrType, llvm.Int1Type()}
-		funcType := llvm.FunctionType(ptrType, paramTypes, false)
-		maplookup = llvm.AddFunction(c.module.Module, "runtime.maplookup", funcType)
-	}
 	args := make([]llvm.Value, 4)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
@@ -71,14 +65,8 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
 }
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
-	mapdelete := c.module.Module.NamedFunction("runtime.mapdelete")
+	mapdelete := c.namedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
 	ptrType := c.target.IntPtrType()
-	if mapdelete.IsNil() {
-		// params: dynamic type, mapptr, keyptr
-		paramTypes := []llvm.Type{ptrType, ptrType, ptrType}
-		funcType := llvm.FunctionType(llvm.VoidType(), paramTypes, false)
-		mapdelete = llvm.AddFunction(c.module.Module, "runtime.mapdelete", funcType)
-	}
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
@@ -96,16 +84,8 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 // mapNext iterates through a map, accepting an iterator state value,
 // and returning a new state value, key pointer, and value pointer.
 func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llvm.Value) {
-	mapnext := c.module.Module.NamedFunction("runtime.mapnext")
+	mapnext := c.namedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
 	ptrType := c.target.IntPtrType()
-	if mapnext.IsNil() {
-		// params: dynamic type, mapptr, nextptr
-		paramTypes := []llvm.Type{ptrType, ptrType, ptrType}
-		// results: nextptr, keyptr, valptr
-		resultType := llvm.StructType([]llvm.Type{ptrType, ptrType, ptrType}, false)
-		funcType := llvm.FunctionType(resultType, paramTypes, false)
-		mapnext = llvm.AddFunction(c.module.Module, "runtime.mapnext", funcType)
-	}
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
