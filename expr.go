@@ -215,11 +215,14 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 	typ := value.Type()
 	if typ == types.String {
-		// TODO
-		panic("unimplemented")
+		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
+		gepindices := []llvm.Value{index.LLVMValue()}
+		ptr = c.builder.CreateGEP(ptr, gepindices, "")
+		result := c.NewLLVMValue(ptr, &types.Pointer{Base: types.Byte})
+		return result.makePointee()
 	}
 
-	switch value.Type().(type) {
+	switch typ.(type) {
 	case *types.Array, *types.Slice:
 		if !isIntType(index.Type()) {
 			panic("Array index expression must evaluate to an integer")
