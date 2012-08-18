@@ -72,7 +72,7 @@ func (c *compiler) printValues(isPrintln bool, values ...Value) Value {
 		if isPrintln {
 			f = " "
 		} else {
-			f = "+"
+			f = ""
 		}
 		for i, value := range values {
 			llvm_value := value.LLVMValue()
