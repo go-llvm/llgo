@@ -85,6 +85,8 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
 		return &types.Pointer{Base: c.GetType(x.X)}
 	case *ast.Ellipsis:
 		return c.GetType(x.Elt)
+	//case *ast.Chan:
+	//return c.VisitChanType()
 	default:
 		value := c.VisitExpr(expr)
 		return value.(TypeValue).typ
@@ -217,5 +219,10 @@ func (c *compiler) VisitMapType(m *ast.MapType) *types.Map {
 	k, v := c.GetType(m.Key), c.GetType(m.Value)
 	return &types.Map{Key: k, Elt: v}
 }
-
+/*
+func (c *compiler) VisitChanType(m *ast.MapType) *types.Map{
+	dir, v := c.GetType(m.Dir), c.GetType(m.Value)
+	return &types.Chan{Dir: dir, Elt: v}
+}
+*/
 // vim: set ft=go :

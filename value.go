@@ -469,11 +469,18 @@ func (v ConstValue) LLVMValue() llvm.Value {
 	switch typ {
 	case types.Int:
 		// TODO 32/64bit
-		int_val := v.Val.(*big.Int)
-		if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
-			panic(fmt.Sprint("const ", int_val, " overflows int"))
-		}
-		return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
+		//Mortdeus:
+		//For right now lets keep this as 32 bit until gc decides to honor
+		//the spec on int/uint/ect.  Things like n>2^32 are not being 
+		//allowed by gc in cases like make([]type, n). []type can only take 
+		//max(int32) total indexs right now. Until the go team implements
+		//cpu buswidth aware ints/uints ect it would be unwise to introduce coding
+		//practices that arent backwards compatible with gc.
+	//	int_val := v.Val.(*big.Int)
+	//	if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
+	//		panic(fmt.Sprint("const ", int_val, " overflows int"))
+	//	}
+	//	return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
 
 	case types.Int8:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)
@@ -485,9 +492,10 @@ func (v ConstValue) LLVMValue() llvm.Value {
 	case types.Uint16:
 		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
 
-	case types.Int32, types.Rune:
+	case types.Int, types.Int32, types.Rune:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
-	case types.Uint32:
+
+	case types.Uint32, types.Uint:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 
 	case types.Int64:

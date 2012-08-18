@@ -26,6 +26,11 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
+//Mortdeus:
+//We need to talk about split stack support into llvm's ld.
+//That is the biggest roadblock atm.
+//I volunteer axw for this. :P
+
 func getnewgoroutine(module llvm.Module) llvm.Value {
 	fn := module.NamedFunction("llgo_newgoroutine")
 	if fn.IsNil() {
