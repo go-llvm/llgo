@@ -95,6 +95,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		switch x.String() {
 		case "println":
 			return c.VisitPrintln(expr)
+		case "print":
+			return c.VisitPrint(expr)
 		case "len":
 			return c.VisitLen(expr)
 		case "new":
@@ -108,6 +110,14 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			key := c.VisitExpr(expr.Args[1])
 			c.mapDelete(m, key)
 			return nil
+
+			//case "close"
+			//case "complex"
+			//case "real"
+			//case "imag"
+			//case "cap"
+			//case "panic"
+			//case "recover"
 		}
 
 	case *ast.SelectorExpr:
@@ -431,6 +441,8 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 		return c.VisitSelectorExpr(x)
 	case *ast.StarExpr:
 		return c.VisitStarExpr(x)
+	//case *ast.SendExpr
+	//return c.VisitSendExpr(x)
 	case *ast.ParenExpr:
 		return c.VisitExpr(x.X)
 	case *ast.TypeAssertExpr:

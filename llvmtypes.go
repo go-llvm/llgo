@@ -166,22 +166,36 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.Int8Type()
 	case types.Int16Kind, types.Uint16Kind:
 		return llvm.Int16Type()
-	case types.Int32Kind, types.Uint32Kind:
+
+	//This is how gc is doing things.	
+	case types.IntKind, types.UintKind,
+		types.Int32Kind, types.Uint32Kind:
 		return llvm.Int32Type()
+
 	case types.Int64Kind, types.Uint64Kind:
 		return llvm.Int64Type()
 	case types.Float32Kind:
 		return llvm.FloatType()
 	case types.Float64Kind:
 		return llvm.DoubleType()
-	case types.UnsafePointerKind, types.UintptrKind,
-		types.UintKind, types.IntKind:
+
+	//Ummmm. Not sure this is right way uintptr is supposed to be handled.
+	//Esentially a uintptr is an uninitialized pointer. But all that means is that its
+	//an int that contains the address of the memory you are pointing too.
+	//
+	case types.UnsafePointerKind, types.UintptrKind:
+		//When gc supports this we can add it back
+		//types.UintKind, types.IntKind:	
 		return tm.target.IntPtrType()
+
 	//case Complex64: TODO
 	//case Complex128:
+
+	//Constants? What are these?
 	//case UntypedInt:
-	//case UntypedFloat:
+	//case UntypedFloat:	
 	//case UntypedComplex:
+
 	case types.StringKind:
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		elements := []llvm.Type{i8ptr, llvm.Int32Type()}
