@@ -182,9 +182,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		result_type = &types.Struct{Fields: fields}
 	}
 
-	return c.NewLLVMValue(
-		c.builder.CreateCall(fn.LLVMValue(), args, ""),
-		result_type)
+	result := c.builder.CreateCall(fn.LLVMValue(), args, "")
+	return c.NewLLVMValue(result, result_type)
 }
 
 func isIntType(t types.Type) bool {
@@ -256,7 +255,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 }
 
 type selectorCandidate struct {
-	Indices []uint64
+	Indices []int
 	Type    types.Type
 }
 
@@ -300,7 +299,6 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 			if p, ok := types.Underlying(t).(*types.Pointer); ok {
 				if _, ok := types.Underlying(p.Base).(*types.Struct); ok {
-					indices = append(indices, 0)
 					t = p.Base
 				}
 			}
@@ -317,14 +315,14 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 			if t, ok := types.Underlying(t).(*types.Struct); ok {
 				if i, ok := t.FieldIndices[name]; ok {
-					result.Indices = append(indices, i)
+					result.Indices = append(indices, int(i))
 					result.Type = t
 				} else {
 					// Add embedded types to the next set of types
 					// to check.
 					for i, field := range t.Fields {
 						if field.Name == "" {
-							indices = append(indices[0:], uint64(i))
+							indices = append(indices[0:], i)
 							t := field.Type.(types.Type)
 							candidate := selectorCandidate{indices, t}
 							next = append(next, candidate)
@@ -336,10 +334,29 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		curr = next
 	}
 
-	// Get a pointer to the field/struct for field/method invocation.
-	indices := make([]llvm.Value, len(result.Indices))
-	for i, v := range result.Indices {
-		indices[i] = llvm.ConstInt(llvm.Int32Type(), v, false)
+	// Get a pointer to the field/receiver.
+	recvValue := lhs.(*LLVMValue)
+	if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); !ok {
+		recvValue = recvValue.pointer
+	}
+	recvValue = c.NewLLVMValue(recvValue.LLVMValue(), recvValue.Type())
+	if len(result.Indices) > 0 {
+		for _, v := range result.Indices {
+			ptr := recvValue.LLVMValue()
+			field := types.Underlying(types.Deref(recvValue.typ)).(*types.Struct).Fields[v]
+			fieldPtr := c.builder.CreateStructGEP(ptr, v, "")
+			fieldPtrTyp := &types.Pointer{Base: field.Type.(types.Type)}
+			recvValue = c.NewLLVMValue(fieldPtr, fieldPtrTyp)
+
+			// GEP returns a pointer; if the field is a pointer,
+			// we must load our pointer-to-a-pointer.
+			if _, ok := field.Type.(*types.Pointer); ok {
+				recvValue = recvValue.makePointee()
+			}
+		}
+	}
+	if !types.Identical(recvValue.typ, expr.Sel.Obj.Type.(types.Type)) {
+		recvValue = recvValue.makePointee()
 	}
 
 	// Method?
@@ -347,40 +364,16 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		method := c.Resolve(expr.Sel.Obj).(*LLVMValue)
 		methodType := expr.Sel.Obj.Type.(*types.Func)
 		receiverType := methodType.Recv.Type.(types.Type)
-		if len(indices) > 0 {
-			receiverValue := c.builder.CreateGEP(lhs.LLVMValue(), indices, "")
-			if types.Identical(result.Type, receiverType) {
-				receiverValue = c.builder.CreateLoad(receiverValue, "")
-			}
-			method.receiver = c.NewLLVMValue(receiverValue, receiverType)
+		if types.Identical(recvValue.Type(), receiverType) {
+			method.receiver = recvValue
+		} else if types.Identical(&types.Pointer{Base: recvValue.Type()}, receiverType) {
+			method.receiver = recvValue.pointer
 		} else {
-			lhs := lhs.(*LLVMValue)
-			if types.Identical(result.Type, receiverType) {
-				method.receiver = lhs
-			} else if types.Identical(result.Type, &types.Pointer{Base: receiverType}) {
-				method.receiver = lhs.makePointee()
-			} else if types.Identical(&types.Pointer{Base: result.Type}, receiverType) {
-				method.receiver = lhs.pointer
-			}
+			method.receiver = recvValue.makePointee()
 		}
 		return method
 	} else {
-		var ptr llvm.Value
-		if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); ok {
-			ptr = lhs.LLVMValue()
-		} else {
-			if lhs, ok := lhs.(*LLVMValue); ok && lhs.pointer != nil {
-				ptr = lhs.pointer.LLVMValue()
-				zero := llvm.ConstNull(llvm.Int32Type())
-				indices = append([]llvm.Value{zero}, indices...)
-			} else {
-				// TODO handle struct literal selectors.
-				panic("selectors on struct literals unimplemented")
-			}
-		}
-		fieldValue := c.builder.CreateGEP(ptr, indices, "")
-		fieldType := &types.Pointer{Base: expr.Sel.Obj.Type.(types.Type)}
-		return c.NewLLVMValue(fieldValue, fieldType).makePointee()
+		return recvValue
 	}
 	panic("unreachable")
 }
