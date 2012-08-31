@@ -99,8 +99,18 @@ func (c *checker) collectMethods(file *ast.File) {
 				recv = typ.X.(*ast.Ident)
 			case *ast.Ident:
 				recv = typ
-			default:
-				panic("bad receiver type expression")
+			case *ast.BadExpr:
+				return
+			}
+
+			if recv.Obj == nil {
+				// error reported elsewhere.
+				return
+			}
+
+			if recv.Obj.Kind != ast.Typ {
+				c.errorf(recv.Pos(), "%s is not a type", recv.Name)
+				return
 			}
 
 			// The Obj field of the funcdecl wll be nil, so we'll have to
@@ -708,10 +718,7 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 		}
 		c.checkObj(obj, cycleOk)
 		if !cycleOk && obj.Type.(*Name).Underlying == nil {
-			// TODO(gri) Enable this message again once its position
-			// is independent of the underlying map implementation.
-			// msg := c.errorf(obj.Pos(), "illegal cycle in declaration of %s", obj.Name)
-			msg := "illegal cycle"
+			msg := c.errorf(obj.Pos(), "illegal cycle in declaration of %s", obj.Name)
 			return &Bad{Msg: msg}
 		}
 		return obj.Type.(Type)
@@ -757,7 +764,9 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 				if ptr, ok := typ.(*Pointer); ok {
 					typ = ptr.Base
 				}
-				indices[typ.(*Name).Obj.Name] = uint64(i)
+				if name, ok := typ.(*Name); ok {
+					indices[name.Obj.Name] = uint64(i)
+				}
 			} else {
 				indices[f.Name] = uint64(i)
 			}
@@ -1019,11 +1028,29 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 	case ast.Typ:
 		typ := &Name{Obj: obj}
 		obj.Type = typ // "mark" object so recursion terminates
+		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
 		if methobjs := c.methods[obj]; methobjs != nil {
 			methobjs.Sort()
 			typ.Methods = methobjs
+
+			// Check for instances of field and method with same name.
+			if s, ok := typ.Underlying.(*Struct); ok {
+				for _, m := range methobjs {
+					if _, ok := s.FieldIndices[m.Name]; ok {
+						c.errorf(m.Pos(), "type %s has both field and method named %s", obj.Name, m.Name)
+					}
+				}
+			}
+
+			// methods cannot be associated with an interface type
+			// (do this check after sorting for reproducible error positions - needed for testing)
+			if _, ok := typ.Underlying.(*Interface); ok {
+				for _, m := range methobjs {
+					recv := m.Decl.(*ast.FuncDecl).Recv.List[0].Type
+					c.errorf(recv.Pos(), "invalid receiver type %s (%s is an interface type)", obj.Name, obj.Name)
+				}
+			}
 		}
-		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
 		for _, m := range typ.Methods {
 			c.checkObj(m, ref)
 		}
@@ -1110,6 +1137,14 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	c.fset = fset
 	c.types = make(map[ast.Expr]Type)
 	c.methods = make(map[*ast.Object]ObjList)
+
+	// Compute sorted list of file names so that
+	// package file iterations are reproducible (needed for testing).
+	filenames := make([]string, 0, len(pkg.Files))
+	for filename := range pkg.Files {
+		filenames = append(filenames, filename)
+	}
+	sort.Strings(filenames)
 
 	for _, file := range pkg.Files {
 		c.decomposeRepeatConsts(file)

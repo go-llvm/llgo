@@ -43,6 +43,8 @@ var tests = []struct {
 	files []string
 }{
 	{"test0", []string{"testdata/test0.src"}},
+	{"test1", []string{"testdata/test1.src"}},
+	{"test2", []string{"testdata/test2a.src", "testdata/test2b.src"}},
 }
 
 var fset = token.NewFileSet()
