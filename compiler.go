@@ -347,7 +347,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	}
 
 	// Create debug metadata.
-	compiler.createMetadata()
+	//compiler.createMetadata()
 
 	return compiler.module, nil
 }
