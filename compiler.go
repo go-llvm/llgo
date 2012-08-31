@@ -53,20 +53,22 @@ type Compiler interface {
 }
 
 type compiler struct {
-	builder    llvm.Builder
-	module     *Module
-	targetArch string
-	targetOs   string
-	target     llvm.TargetData
-	functions  []Value
-	initfuncs  []Value
-	pkg        *ast.Package
-	fileset    *token.FileSet
-	filescope  *ast.Scope
-	scope      *ast.Scope
-	pkgmap     map[*ast.Object]string
-	types      *TypeMap
-	logger     *log.Logger
+	builder        llvm.Builder
+	module         *Module
+	targetArch     string
+	targetOs       string
+	target         llvm.TargetData
+	functions      []Value
+	breakblocks    []llvm.BasicBlock
+	continueblocks []llvm.BasicBlock
+	initfuncs      []Value
+	pkg            *ast.Package
+	fileset        *token.FileSet
+	filescope      *ast.Scope
+	scope          *ast.Scope
+	pkgmap         map[*ast.Object]string
+	types          *TypeMap
+	logger         *log.Logger
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -148,7 +150,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			name := c.pkgmap[obj] + "." + obj.Name
 			g := llvm.AddGlobal(module, c.types.ToLLVM(t), name)
 			g.SetLinkage(llvm.AvailableExternallyLinkage)
-			obj.Data = c.NewLLVMValue(g, t)
+			obj.Data = c.NewLLVMValue(g, &types.Pointer{Base: t}).makePointee()
 		}
 
 		value = (obj.Data).(Value)

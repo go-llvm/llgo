@@ -116,7 +116,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 	c.functions = append(c.functions, fn)
 	if f.Body != nil {
-		c.VisitBlockStmt(f.Body)
+		c.VisitBlockStmt(f.Body, false)
 	}
 	c.functions = c.functions[0 : len(c.functions)-1]
 

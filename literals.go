@@ -44,7 +44,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 
 	fn_value := c.NewLLVMValue(fn, fn_type)
 	c.functions = append(c.functions, fn_value)
-	c.VisitBlockStmt(lit.Body)
+	c.VisitBlockStmt(lit.Body, false)
 	if fn_type.Results == nil {
 		lasti := entry.LastInstruction()
 		if lasti.IsNil() || lasti.Opcode() != llvm.Ret {

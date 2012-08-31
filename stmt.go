@@ -70,11 +70,34 @@ func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 	c.builder.CreateStore(value, ptr.LLVMValue())
 }
 
-func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt) {
+func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 	c.PushScope()
 	defer c.PopScope()
+
+	// This is a little awkward, but it makes dealing with branching easier.
+	// A free-standing block statement (i.e. one not attached to a control
+	// statement) will splice in a new block.
+	var doneBlock llvm.BasicBlock
+	if createNewBlock {
+		currBlock := c.builder.GetInsertBlock()
+		doneBlock = llvm.InsertBasicBlock(currBlock, "")
+		doneBlock.MoveAfter(currBlock)
+		newBlock := llvm.InsertBasicBlock(doneBlock, "")
+		c.builder.CreateBr(newBlock)
+		c.builder.SetInsertPointAtEnd(newBlock)
+	}
+
 	for _, stmt := range stmt.List {
 		c.VisitStmt(stmt)
+		if _, ok := stmt.(*ast.BranchStmt); ok {
+			// Ignore anything after a branch statement.
+			break
+		}
+	}
+
+	if createNewBlock {
+		c.maybeImplicitBranch(doneBlock)
+		c.builder.SetInsertPointAtEnd(doneBlock)
 	}
 }
 
@@ -223,7 +246,7 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	cond_val := c.VisitExpr(stmt.Cond)
 	c.builder.CreateCondBr(cond_val.LLVMValue(), ifBlock, elseBlock)
 	c.builder.SetInsertPointAtEnd(ifBlock)
-	c.VisitBlockStmt(stmt.Body)
+	c.VisitBlockStmt(stmt.Body, false)
 	c.maybeImplicitBranch(resumeBlock)
 
 	if stmt.Else != nil {
@@ -249,6 +272,13 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 	if stmt.Post != nil {
 		postBlock = llvm.InsertBasicBlock(doneBlock, "post")
 	}
+
+	c.breakblocks = append(c.breakblocks, doneBlock)
+	c.continueblocks = append(c.continueblocks, postBlock)
+	defer func() {
+		c.breakblocks = c.breakblocks[:len(c.breakblocks)-1]
+		c.continueblocks = c.continueblocks[:len(c.continueblocks)-1]
+	}()
 
 	// Is there an initializer? Create a new scope and visit the statement.
 	if stmt.Init != nil {
@@ -276,7 +306,7 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 
 	// Loop body.
 	c.builder.SetInsertPointAtEnd(loopBlock)
-	c.VisitBlockStmt(stmt.Body)
+	c.VisitBlockStmt(stmt.Body, false)
 	c.maybeImplicitBranch(postBlock)
 }
 
@@ -388,6 +418,10 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	endBlock.MoveAfter(startBlock)
 	defer c.builder.SetInsertPointAtEnd(endBlock)
 
+	// Add a "break" block to the stack.
+	c.breakblocks = append(c.breakblocks, endBlock)
+	defer func() { c.breakblocks = c.breakblocks[:len(c.breakblocks)-1] }()
+
 	caseBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
 	stmtBlocks := make([]llvm.BasicBlock, 0, len(stmt.Body.List))
 	for _ = range stmt.Body.List {
@@ -422,10 +456,16 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 		c.builder.SetInsertPointAtEnd(stmtBlock)
 		branchBlock := endBlock
 		for _, stmt := range clause.Body {
-			if br, isbr := stmt.(*ast.BranchStmt); isbr && br.Tok == token.FALLTHROUGH {
-				if i+1 < len(stmtBlocks) {
-					branchBlock = stmtBlocks[i+1]
+			if br, isbr := stmt.(*ast.BranchStmt); isbr {
+				if br.Tok == token.FALLTHROUGH {
+					if i+1 < len(stmtBlocks) {
+						branchBlock = stmtBlocks[i+1]
+					}
+				} else {
+					c.VisitStmt(stmt)
 				}
+				// Ignore anything after a branch statement.
+				break
 			} else {
 				c.VisitStmt(stmt)
 			}
@@ -472,6 +512,13 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			}
 		}
 	}
+
+	c.breakblocks = append(c.breakblocks, doneBlock)
+	c.continueblocks = append(c.continueblocks, postBlock)
+	defer func() {
+		c.breakblocks = c.breakblocks[:len(c.breakblocks)-1]
+		c.continueblocks = c.continueblocks[:len(c.continueblocks)-1]
+	}()
 
 	isarray := false
 	var base, length llvm.Value
@@ -522,7 +569,7 @@ maprange:
 			valval := c.builder.CreateLoad(pv, "")
 			c.builder.CreateStore(valval, valuePtr)
 		}
-		c.VisitBlockStmt(stmt.Body)
+		c.VisitBlockStmt(stmt.Body, false)
 		c.maybeImplicitBranch(postBlock)
 		c.builder.SetInsertPointAtEnd(postBlock)
 		c.builder.CreateBr(condBlock)
@@ -557,12 +604,27 @@ arrayrange:
 			element := c.builder.CreateLoad(elementptr, "")
 			c.builder.CreateStore(element, valuePtr)
 		}
-		c.VisitBlockStmt(stmt.Body)
+		c.VisitBlockStmt(stmt.Body, false)
 		c.maybeImplicitBranch(postBlock)
 		c.builder.SetInsertPointAtEnd(postBlock)
 		newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
 		c.builder.CreateBr(condBlock)
 		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+	}
+}
+
+func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
+	// BREAK, CONTINUE, GOTO, FALLTHROUGH
+	switch stmt.Tok {
+	case token.BREAK:
+		block := c.breakblocks[len(c.breakblocks)-1]
+		c.builder.CreateBr(block)
+	case token.CONTINUE:
+		block := c.continueblocks[len(c.continueblocks)-1]
+		c.builder.CreateBr(block)
+	default:
+		// TODO implement goto, fallthrough
+		panic("unimplemented: " + stmt.Tok.String())
 	}
 }
 
@@ -585,7 +647,7 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	case *ast.ExprStmt:
 		c.VisitExpr(x.X)
 	case *ast.BlockStmt:
-		c.VisitBlockStmt(x)
+		c.VisitBlockStmt(x, true)
 	case *ast.DeclStmt:
 		c.VisitDecl(x.Decl)
 	case *ast.GoStmt:
@@ -594,6 +656,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitSwitchStmt(x)
 	case *ast.RangeStmt:
 		c.VisitRangeStmt(x)
+	case *ast.BranchStmt:
+		c.VisitBranchStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}
