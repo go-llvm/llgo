@@ -123,4 +123,36 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), s.Type())
 }
 
+func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
+	// expr.X, expr.Low, expr.High
+	value := c.VisitExpr(expr.X)
+	var low, high llvm.Value
+	if expr.Low != nil {
+		low = c.VisitExpr(expr.Low).Convert(types.Int32).LLVMValue()
+	} else {
+		low = llvm.ConstNull(llvm.Int32Type())
+	}
+	if expr.High != nil {
+		high = c.VisitExpr(expr.High).Convert(types.Int32).LLVMValue()
+	} else {
+		high = llvm.ConstAllOnes(llvm.Int32Type()) // -1
+	}
+	switch types.Underlying(value.Type()).(type) {
+	case *types.Slice:
+		sliceslice := c.namedFunction("runtime.sliceslice", "func f(t uintptr, s []int8, low, high int32) []int8")
+		i8slice := sliceslice.Type().ElementType().ReturnType()
+		sliceValue := value.LLVMValue()
+		sliceTyp := sliceValue.Type()
+		sliceValue = c.coerceSlice(sliceValue, i8slice)
+		runtimeTyp := c.types.ToRuntime(value.Type())
+		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
+		result := c.builder.CreateCall(sliceslice, args, "")
+		return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), value.Type())
+	default:
+		panic("unimplemented")
+	}
+	panic("unreachable")
+}
+
 // vim: set ft=go :

@@ -428,6 +428,8 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 		return c.VisitExpr(x.X)
 	case *ast.TypeAssertExpr:
 		return c.VisitTypeAssertExpr(x)
+	case *ast.SliceExpr:
+		return c.VisitSliceExpr(x)
 	case *ast.Ident:
 		if x.Obj == nil {
 			x.Obj = c.LookupObj(x.Name)

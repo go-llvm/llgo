@@ -54,3 +54,21 @@ func slicegrow(t *sliceType, a slice, newcap int32) slice {
 	}
 	return slice{(*int8)(mem), a.length, newcap}
 }
+
+func sliceslice(t unsafe.Pointer, a slice, low, high int32) slice {
+	if high == -1 {
+		high = a.length
+	} else {
+		// TODO check upper bound
+	}
+	a.capacity -= low
+	a.length = high - low
+	if low > 0 {
+		typ := (*type_)(t)
+		slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+		newptr := uintptr(unsafe.Pointer(a.elements))
+		newptr += uintptr(slicetyp.elem.size * low)
+		a.elements = (*int8)(unsafe.Pointer(newptr))
+	}
+	return a
+}
