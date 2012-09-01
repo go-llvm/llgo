@@ -42,8 +42,7 @@ func strcat(a, b str) str {
 	}
 
 	memcpy(mem, unsafe.Pointer(a.ptr), a.size)
-	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.size)),
-		unsafe.Pointer(b.ptr), b.size)
+	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.size)), unsafe.Pointer(b.ptr), b.size)
 
 	a.ptr = (*uint8)(mem)
 	a.size = a.size + b.size
@@ -74,6 +73,21 @@ func strcmp(a, b str) int32 {
 		return 1
 	}
 	return 0
+}
+
+func stringslice(a str, low, high int32) str {
+	if high == -1 {
+		high = a.size
+	} else {
+		// TODO check upper bound
+	}
+	if low > 0 {
+		newptr := uintptr(unsafe.Pointer(a.ptr))
+		newptr += uintptr(low)
+		a.ptr = (*uint8)(unsafe.Pointer(newptr))
+	}
+	a.size = high - low
+	return a
 }
 
 // vim: set ft=go:

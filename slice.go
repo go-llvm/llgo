@@ -149,6 +149,12 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), value.Type())
+	case *types.Name:
+		// String
+		stringslice := c.namedFunction("runtime.stringslice", "func f(a string, low, high int32) string")
+		args := []llvm.Value{value.LLVMValue(), low, high}
+		result := c.builder.CreateCall(stringslice, args, "")
+		return c.NewLLVMValue(result, value.Type())
 	default:
 		panic("unimplemented")
 	}
