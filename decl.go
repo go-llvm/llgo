@@ -33,7 +33,7 @@ import (
 	"strconv"
 )
 
-func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
+func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	var fn_type *types.Func
 	fn_name := f.Name.String()
 
@@ -68,30 +68,17 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) Value {
 	return result
 }
 
-func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
-	var fn Value
-	if f.Name.Obj != nil {
-		fn = c.Resolve(f.Name.Obj)
-	} else {
-		fn = c.VisitFuncProtoDecl(f)
-	}
-	if f.Body == nil {
-		return fn
-	}
-
-	fn_type := fn.Type().(*types.Func)
-	llvm_fn := fn.LLVMValue()
-
+// buildFunction takes a function Value, a list of parameters, and a body,
+// and generates code for the function.
+func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.BlockStmt) {
+	ftyp := f.Type().(*types.Func)
+	llvm_fn := f.LLVMValue()
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
 	// Bind receiver, arguments and return values to their identifiers/objects.
 	// We'll store each parameter on the stack so they're addressable.
-	paramObjects := fn_type.Params
-	if f.Recv != nil {
-		paramObjects = append([]*ast.Object{fn_type.Recv}, paramObjects...)
-	}
-	for i, obj := range paramObjects {
+	for i, obj := range params {
 		if obj.Name != "" {
 			value := llvm_fn.Param(i)
 			typ := obj.Type.(types.Type)
@@ -103,7 +90,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	}
 
 	// Allocate space on the stack for named results.
-	for _, obj := range fn_type.Results {
+	for _, obj := range ftyp.Results {
 		if obj.Name != "" {
 			typ := obj.Type.(types.Type)
 			llvmtyp := c.types.ToLLVM(typ)
@@ -114,18 +101,34 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		}
 	}
 
-	c.functions = append(c.functions, fn)
-	if f.Body != nil {
-		c.VisitBlockStmt(f.Body, false)
-	}
+	c.functions = append(c.functions, f)
+	c.VisitBlockStmt(body, false)
 	c.functions = c.functions[0 : len(c.functions)-1]
-
 	last := llvm_fn.LastBasicBlock()
 	if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
 		// Assume nil return type, AST should be checked first.
 		c.builder.SetInsertPointAtEnd(last)
 		c.builder.CreateRetVoid()
 	}
+}
+
+func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
+	var fn *LLVMValue
+	if f.Name.Obj != nil {
+		fn = c.Resolve(f.Name.Obj).(*LLVMValue)
+	} else {
+		fn = c.VisitFuncProtoDecl(f)
+	}
+	if f.Body == nil {
+		return fn
+	}
+
+	fn_type := fn.Type().(*types.Func)
+	paramObjects := fn_type.Params
+	if f.Recv != nil {
+		paramObjects = append([]*ast.Object{fn_type.Recv}, paramObjects...)
+	}
+	c.buildFunction(fn, paramObjects, f.Body)
 
 	// Is it an 'init' function? Then record it.
 	if f.Name.String() == "init" {

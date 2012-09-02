@@ -34,26 +34,13 @@ func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
 }
 
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
-	fn_type := c.VisitFuncType(lit.Type)
-	fn := llvm.AddFunction(c.module.Module, "", c.types.ToLLVM(fn_type))
-	fn.SetFunctionCallConv(llvm.FastCallConv)
-
+	ftyp := c.types.expr[lit].(*types.Func)
+	fn_value := llvm.AddFunction(c.module.Module, "", c.types.ToLLVM(ftyp).ElementType())
+	fn_value.SetFunctionCallConv(llvm.FastCallConv)
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
-	entry := llvm.AddBasicBlock(fn, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
-
-	fn_value := c.NewLLVMValue(fn, fn_type)
-	c.functions = append(c.functions, fn_value)
-	c.VisitBlockStmt(lit.Body, false)
-	if fn_type.Results == nil {
-		lasti := entry.LastInstruction()
-		if lasti.IsNil() || lasti.Opcode() != llvm.Ret {
-			// Assume nil return type, AST should be checked first.
-			c.builder.CreateRetVoid()
-		}
-	}
-	c.functions = c.functions[0 : len(c.functions)-1]
-	return fn_value
+	f := c.NewLLVMValue(fn_value, ftyp)
+	c.buildFunction(f, ftyp.Params, lit.Body)
+	return f
 }
 
 func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
