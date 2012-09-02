@@ -221,7 +221,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		return result.makePointee()
 	}
 
-	switch typ.(type) {
+	switch types.Underlying(typ).(type) {
 	case *types.Array, *types.Slice:
 		if !isIntType(index.Type()) {
 			panic("Array index expression must evaluate to an integer")
@@ -230,7 +230,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 		var ptr llvm.Value
 		var result_type types.Type
-		switch typ := value.Type().(type) {
+		switch typ := types.Underlying(typ).(type) {
 		case *types.Array:
 			result_type = typ.Elt
 			ptr = value.pointer.LLVMValue()
