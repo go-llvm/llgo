@@ -30,7 +30,7 @@ import (
 // mapLookup searches a map for a specified key, returning a pointer to the
 // memory location for the value. If insert is given as true, and the key
 // does not exist in the map, it will be added with an uninitialised value.
-func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
+func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMValue, notnull *LLVMValue) {
 	mapType := m.Type().(*types.Map)
 	maplookup := c.namedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
@@ -58,10 +58,10 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) *LLVMValue {
 	zeroglobal.SetInitializer(llvm.ConstNull(llvmtyp.ElementType()))
 	result := c.builder.CreateCall(maplookup, args, "")
 	result = c.builder.CreateIntToPtr(result, llvmtyp, "")
-	notnull := c.builder.CreateIsNotNull(result, "")
-	result = c.builder.CreateSelect(notnull, result, zeroglobal, "")
+	notnull_ := c.builder.CreateIsNotNull(result, "")
+	result = c.builder.CreateSelect(notnull_, result, zeroglobal, "")
 	value := c.NewLLVMValue(result, eltPtrType)
-	return value.makePointee()
+	return value.makePointee(), c.NewLLVMValue(notnull_, types.Bool)
 }
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {

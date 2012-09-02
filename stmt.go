@@ -168,13 +168,23 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	// a, b, ... [:]= x, y, ...
 	values := make([]Value, len(stmt.Lhs))
 	if len(stmt.Rhs) == 1 && len(stmt.Lhs) > 1 {
-		value := c.VisitExpr(stmt.Rhs[0])
-		ptr := value.LLVMValue()
-		struct_type := value.Type().(*types.Struct)
-		for i := 0; i < len(struct_type.Fields); i++ {
-			t := c.ObjGetType(struct_type.Fields[i])
-			value_ := c.builder.CreateExtractValue(ptr, i, "")
-			values[i] = c.NewLLVMValue(value_, t)
+		switch x := stmt.Rhs[0].(type) {
+		case *ast.IndexExpr:
+			// value, ok := m[k]
+			m := c.VisitExpr(x.X).(*LLVMValue)
+			index := c.VisitExpr(x.Index)
+			value, notnull := c.mapLookup(m, index, false)
+			values[0] = value
+			values[1] = notnull
+		case *ast.CallExpr:
+			value := c.VisitExpr(x)
+			aggregate := value.LLVMValue()
+			struct_type := value.Type().(*types.Struct)
+			for i, f := range struct_type.Fields {
+				t := c.ObjGetType(f)
+				value_ := c.builder.CreateExtractValue(aggregate, i, "")
+				values[i] = c.NewLLVMValue(value_, t)
+			}
 		}
 	} else {
 		for i, expr := range stmt.Rhs {
@@ -206,7 +216,8 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				if _, ok := t.(*types.Map); ok {
 					m := c.VisitExpr(x.X).(*LLVMValue)
 					index := c.VisitExpr(x.Index)
-					ptr := c.mapLookup(m, index, true).pointer
+					elem, _ := c.mapLookup(m, index, true)
+					ptr := elem.pointer
 					value = value.Convert(types.Deref(ptr.Type()))
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
 					continue

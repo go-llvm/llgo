@@ -249,7 +249,8 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		return result.makePointee()
 
 	case *types.Map:
-		return c.mapLookup(value, index, false)
+		value, _ = c.mapLookup(value, index, false)
+		return value
 	}
 	panic("unreachable")
 }
