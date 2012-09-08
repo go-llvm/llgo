@@ -33,7 +33,7 @@ import (
 type TypeMap struct {
 	module  llvm.Module
 	target  llvm.TargetData
-	types   map[types.Type]llvm.Type  // compile-time LLVM type
+	types   map[string]llvm.Type      // compile-time LLVM type
 	runtime map[types.Type]llvm.Value // runtime/reflect type representation
 	expr    map[ast.Expr]types.Type   // expression types
 
@@ -57,7 +57,7 @@ type TypeMap struct {
 
 func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Expr]types.Type) *TypeMap {
 	tm := &TypeMap{module: module, target: target, expr: exprTypes}
-	tm.types = make(map[types.Type]llvm.Type)
+	tm.types = make(map[string]llvm.Type)
 	tm.runtime = make(map[types.Type]llvm.Value)
 
 	// Load "reflect.go", and generate LLVM types for the runtime type
@@ -102,13 +102,14 @@ func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Ex
 
 func (tm *TypeMap) ToLLVM(t types.Type) llvm.Type {
 	t = types.Underlying(t)
-	lt, ok := tm.types[t]
+	tstr := t.String()
+	lt, ok := tm.types[tstr]
 	if !ok {
 		lt = tm.makeLLVMType(t)
 		if lt.IsNil() {
 			panic(fmt.Sprint("Failed to create LLVM type for: ", t))
 		}
-		tm.types[t] = lt
+		tm.types[tstr] = lt
 	}
 	return lt
 }
@@ -207,10 +208,11 @@ func (tm *TypeMap) structLLVMType(s *types.Struct) llvm.Type {
 	// Types may be circular, so we need to first create an empty
 	// struct type, then fill in its body after visiting its
 	// members.
-	typ, ok := tm.types[s]
+	sstr := s.String()
+	typ, ok := tm.types[sstr]
 	if !ok {
 		typ = llvm.GlobalContext().StructCreateNamed("")
-		tm.types[s] = typ
+		tm.types[sstr] = typ
 		elements := make([]llvm.Type, len(s.Fields))
 		for i, f := range s.Fields {
 			ft := f.Type.(types.Type)
@@ -283,7 +285,7 @@ func (tm *TypeMap) mapLLVMType(m *types.Map) llvm.Type {
 	size_type := llvm.Int32Type()
 	element_types := []llvm.Type{size_type, list_type}
 	typ := llvm.StructType(element_types, false)
-	tm.types[m] = typ
+	tm.types[m.String()] = typ
 
 	list_element_types := []llvm.Type{
 		list_ptr_type, tm.ToLLVM(m.Key), tm.ToLLVM(m.Elt)}
@@ -437,7 +439,11 @@ func (tm *TypeMap) structRuntimeType(s *types.Struct) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value) {
-	panic("unimplemented")
+	commonType := tm.makeCommonType(p, reflect.Map)
+	ptrType := llvm.ConstNull(tm.runtimePtrType)
+	ptrType = llvm.ConstInsertValue(ptrType, commonType, []uint32{0})
+	ptrType = llvm.ConstInsertValue(ptrType, tm.ToRuntime(p.Base), []uint32{1})
+	return tm.makeRuntimeTypeGlobal(ptrType)
 }
 
 func (tm *TypeMap) funcRuntimeType(f *types.Func) (global, ptr llvm.Value) {

@@ -182,7 +182,13 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		result_type = &types.Struct{Fields: fields}
 	}
 
+	// After calling the function, we must bitcast to the computed LLVM
+	// type. This is a no-op, and exists just to satisfy LLVM's type
+	// comparisons.
 	result := c.builder.CreateCall(fn.LLVMValue(), args, "")
+	if len(fn_type.Results) == 1 {
+		result = c.builder.CreateBitCast(result, c.types.ToLLVM(result_type), "")
+	}
 	return c.NewLLVMValue(result, result_type)
 }
 
