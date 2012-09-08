@@ -45,16 +45,22 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 
 func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 	typ := c.GetType(lit.Type)
-	var valuemap map[Value]Value
+	var valuemap map[interface{}]Value
 	var valuelist []Value
+	_, isstruct := types.Underlying(typ).(*types.Struct)
 	if lit.Elts != nil {
 		for _, elt := range lit.Elts {
 			var value Value
 			if kv, iskv := elt.(*ast.KeyValueExpr); iskv {
-				key := c.VisitExpr(kv.Key)
 				value = c.VisitExpr(kv.Value)
 				if valuemap == nil {
-					valuemap = make(map[Value]Value)
+					valuemap = make(map[interface{}]Value)
+				}
+				var key interface{}
+				if isstruct {
+					key = kv.Key.(*ast.Ident).Name
+				} else {
+					key = c.VisitExpr(kv.Key)
 				}
 				valuemap[key] = value
 			} else {
@@ -130,7 +136,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		struct_value := c.builder.CreateMalloc(c.types.ToLLVM(typ), "")
 		if valuemap != nil {
 			for key, value := range valuemap {
-				fieldName := key.(ConstValue).Val.(string)
+				fieldName := key.(string)
 				index := typ.FieldIndices[fieldName]
 				for len(values) <= int(index) {
 					values = append(values, nil)
