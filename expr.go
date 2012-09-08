@@ -38,9 +38,7 @@ import (
 //
 // Binary logical operators are implemented using a Phi node, which takes
 // on the appropriate value depending on which basic blocks branch to it.
-func (c *compiler) compileLogicalOp(op token.Token,
-	lhs Value,
-	rhsExpr ast.Expr) Value {
+func (c *compiler) compileLogicalOp(op token.Token, lhs Value, rhsFunc func() Value) Value {
 	lhsBlock := c.builder.GetInsertBlock()
 	resultBlock := llvm.AddBasicBlock(lhsBlock.Parent(), "")
 	resultBlock.MoveAfter(lhsBlock)
@@ -53,7 +51,7 @@ func (c *compiler) compileLogicalOp(op token.Token,
 		c.builder.CreateCondBr(lhs.LLVMValue(), rhsBlock, falseBlock)
 	}
 	c.builder.SetInsertPointAtEnd(rhsBlock)
-	rhs := c.VisitExpr(rhsExpr)
+	rhs := rhsFunc()
 	c.builder.CreateCondBr(rhs.LLVMValue(), resultBlock, falseBlock)
 	c.builder.SetInsertPointAtEnd(falseBlock)
 	c.builder.CreateBr(resultBlock)
@@ -79,7 +77,7 @@ func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	switch expr.Op {
 	case token.LOR, token.LAND:
-		return c.compileLogicalOp(expr.Op, lhs, expr.Y)
+		return c.compileLogicalOp(expr.Op, lhs, func() Value { return c.VisitExpr(expr.Y) })
 	}
 	return lhs.BinaryOp(expr.Op, c.VisitExpr(expr.Y))
 }

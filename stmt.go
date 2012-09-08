@@ -420,6 +420,14 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 		return
 	}
 
+	// makeValueFunc takes an expression, evaluates it, and returns
+	// a Value representing its equality comparison with the tag.
+	makeValueFunc := func(expr ast.Expr) func() Value {
+		return func() Value {
+			return c.VisitExpr(expr).BinaryOp(token.EQL, tag)
+		}
+	}
+
 	// Create a BasicBlock for each case clause and each associated
 	// statement body. Each case clause will branch to either its
 	// statement body (success) or to the next case (failure), or the
@@ -456,7 +464,8 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 			value := c.VisitExpr(clause.List[0])
 			result := value.BinaryOp(token.EQL, tag)
 			for _, expr := range clause.List[1:] {
-				value = c.compileLogicalOp(token.LOR, result, expr)
+				rhsResultFunc := makeValueFunc(expr)
+				result = c.compileLogicalOp(token.LOR, result, rhsResultFunc)
 			}
 			c.builder.CreateCondBr(result.LLVMValue(), stmtBlock, nextBlock)
 		} else {
