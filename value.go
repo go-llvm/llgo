@@ -126,10 +126,12 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	// Later we can do better by treating constants specially. For now, let's
 	// convert to LLVMValue's.
 	var rhs *LLVMValue
+	rhsisnil := false
 	switch rhs_ := rhs_.(type) {
 	case *LLVMValue:
 		rhs = rhs_
 	case NilValue:
+		rhsisnil = true
 		switch rhs_ := rhs_.Convert(lhs.Type()).(type) {
 		case ConstValue:
 			rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
@@ -141,14 +143,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		rhs = c.NewLLVMValue(value.LLVMValue(), value.Type())
 	}
 
-	// Special case for structs.
-	// TODO handle strings as an even more special case.
-	if struct_type, ok := types.Underlying(lhs.typ).(*types.Struct); ok {
+	switch typ := types.Underlying(lhs.typ).(type) {
+	case *types.Struct:
 		// TODO check types are the same.
-
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
-		struct_fields := struct_type.Fields
-
+		struct_fields := typ.Fields
 		if element_types_count > 0 {
 			t := c.ObjGetType(struct_fields[0])
 			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
@@ -170,33 +169,24 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			}
 			return result
 		}
-	}
 
-	// Interfaces.
-	if _, ok := types.Underlying(lhs.typ).(*types.Interface); ok {
-		// TODO check for interface/interface comparison vs. interface/value comparison.
-
-		// nil comparison
-		if /*rhs.LLVMValue().IsConstant() &&*/ rhs.LLVMValue().IsNull() {
-			var result llvm.Value
-			if op == token.EQL {
-				valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-				typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
-				result = b.CreateAnd(typeNull, valueNull, "")
-			} else {
-				valueNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-				typeNotNull := b.CreateIsNotNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
-				result = b.CreateOr(typeNotNull, valueNotNull, "")
-			}
+	case *types.Interface:
+		if rhsisnil {
+			valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+			typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
+			result := b.CreateAnd(typeNull, valueNull, "")
 			return c.NewLLVMValue(result, types.Bool)
 		}
-		value := lhs.compareI2I(rhs)
-		if op == token.NEQ {
-			value = value.UnaryOp(token.NOT)
-		}
-		return value
+		// TODO check for interface/interface comparison vs. interface/value comparison.
+		return lhs.compareI2I(rhs)
+
+	case *types.Slice:
+		// []T == nil
+		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+		return c.NewLLVMValue(isnil, types.Bool)
 	}
 
+	// Strings.
 	if types.Underlying(lhs.typ) == types.String {
 		if types.Underlying(rhs.typ) == types.String {
 			switch op {
