@@ -150,10 +150,12 @@ func isArray(t types.Type) bool {
 // TODO collapse all global inits into one init function?
 func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bool) (g *LLVMValue) {
 	if e == nil {
-		gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
+		llvmtyp := c.types.ToLLVM(t)
+		gv := llvm.AddGlobal(c.module.Module, llvmtyp, name)
 		if !export {
 			gv.SetLinkage(llvm.InternalLinkage)
 		}
+		gv.SetInitializer(llvm.ConstNull(llvmtyp))
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 		if !isArray(t) {
 			return g.makePointee()

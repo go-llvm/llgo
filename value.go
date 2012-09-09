@@ -256,12 +256,17 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LAND:
 		// FIXME change this to branch
-		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		//result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		//return lhs.compiler.NewLLVMValue(result, types.Bool)
+		panic("handled elsewhere")
 	case token.LOR:
 		// FIXME change this to branch
-		result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		//result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		//return lhs.compiler.NewLLVMValue(result, types.Bool)
+		panic("handled elsewhere")
+	case token.AND: // a & b
+		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	default:
 		panic(fmt.Sprint("Unimplemented operator: ", op))
 	}
