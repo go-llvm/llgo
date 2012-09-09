@@ -1147,10 +1147,21 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	sort.Strings(filenames)
 
 	for _, file := range pkg.Files {
+		// Associate the type of repeat consts with each individual constant.
 		c.decomposeRepeatConsts(file)
+
+		// Collect methods, associating each with its receiver type's object.
 		c.collectMethods(file)
+
+		// Check init functions here, since they don't exist in the package scope.
+		for _, decl := range file.Decls {
+			if fdecl, ok := decl.(*ast.FuncDecl); ok && fdecl.Recv == nil && fdecl.Name.Name == "init" {
+				c.checkStmt(fdecl.Body)
+			}
+		}
 	}
 
+	// Check package-scope objects.
 	for _, obj := range pkg.Scope.Objects {
 		c.checkObj(obj, false)
 	}
