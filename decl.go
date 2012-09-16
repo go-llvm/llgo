@@ -219,21 +219,24 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-	var value_type types.Type
-	if valspec.Type != nil {
-		value_type = c.GetType(valspec.Type)
-	}
-
 	var iota_obj *ast.Object = types.Universe.Lookup("iota")
 	defer func(data interface{}) {
 		iota_obj.Data = data
 	}(iota_obj.Data)
 
+	var value_type types.Type
 	for i, name_ := range valspec.Names {
 		// We may resolve constants in the process of resolving others.
 		obj := name_.Obj
 		if _, isvalue := (obj.Data).(Value); isvalue {
 			continue
+		}
+
+		// Expression may have side-effects, so compute it regardless of
+		// whether it'll be assigned to a name.
+		var expr ast.Expr
+		if i < len(valspec.Values) && valspec.Values[i] != nil {
+			expr = valspec.Values[i]
 		}
 
 		// Set iota if necessary.
@@ -249,17 +252,23 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 			}
 		}
 
-		// Expression may have side-effects, so compute it regardless of
-		// whether it'll be assigned to a name.
-		var expr ast.Expr
-		if i < len(valspec.Values) && valspec.Values[i] != nil {
-			expr = valspec.Values[i]
+		// If the name is "_", then we can just evaluate the expression
+		// and ignore the result.
+		name := name_.String()
+		if name == "_" {
+			if expr != nil {
+				c.VisitExpr(expr)
+			}
+			continue
+		} else {
+			if value_type == nil && valspec.Type != nil {
+				value_type = c.GetType(valspec.Type)
+			}
 		}
 
 		// For constants, we just pass the ConstValue around. Otherwise, we
 		// will convert it to an LLVMValue.
 		var value Value
-		name := name_.String()
 		if !isconst {
 			ispackagelevel := len(c.functions) == 0
 			if !ispackagelevel {
@@ -300,10 +309,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				value = value.Convert(value_type)
 			}
 		}
-
-		if name != "_" {
-			obj.Data = value
-		}
+		obj.Data = value
 	}
 }
 
