@@ -31,9 +31,9 @@ func memmove(dst, src unsafe.Pointer, size int)
 func memset(dst unsafe.Pointer, fill byte, size int)
 
 func align(p uintptr, align_ uint8) uintptr {
-	align := uint32(align_)
+	align := uintptr(align_)
 	if p%align != 0 {
-		p += (p - (p % align))
+		p += (align - (p % align))
 	}
 	return p
 }

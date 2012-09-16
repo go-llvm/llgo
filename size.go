@@ -27,6 +27,42 @@ import (
 	"github.com/axw/llgo/types"
 )
 
+func (c *compiler) alignofType(t types.Type) int {
+	switch t := t.(type) {
+	case *types.Name:
+		return c.alignofType(t.Underlying)
+	case *types.Basic:
+		switch t.Kind {
+		case types.BoolKind:
+			return 1
+		case types.IntKind, types.UintKind:
+			return 4 // TODO make same as uintptr?
+		case types.Int8Kind, types.Uint8Kind:
+			return 1
+		case types.Int16Kind, types.Uint16Kind:
+			return 2
+		case types.Int32Kind, types.Uint32Kind, types.Float32Kind:
+			return 4
+		case types.Int64Kind, types.Uint64Kind, types.Float64Kind, types.Complex64Kind, types.Complex128Kind:
+			// 4 or 8 for currently supported architectures.
+			// TODO use 128-bit float type for Complex128 if available?
+			return c.target.PointerSize()
+		case types.UintptrKind, types.UnsafePointerKind, types.StringKind:
+			return c.target.PointerSize()
+		}
+	case *types.Pointer:
+		return c.target.PointerSize()
+	case *types.Struct:
+		if len(t.Fields) > 0 {
+			return c.alignofType(t.Fields[0].Type.(types.Type))
+		}
+		return 0
+	default:
+		panic(fmt.Sprintf("unhandled type: %T", t))
+	}
+	panic("unreachable")
+}
+
 func (c *compiler) sizeofType(t types.Type) int {
 	switch t := t.(type) {
 	case *types.Name:
@@ -48,12 +84,24 @@ func (c *compiler) sizeofType(t types.Type) int {
 		case types.Complex128Kind:
 			return 16
 		case types.StringKind:
-			return 4 + c.target.PointerSize()
+			return c.target.PointerSize() + 4
 		case types.UintptrKind, types.UnsafePointerKind:
 			return c.target.PointerSize()
 		}
 	case *types.Pointer:
 		return c.target.PointerSize()
+	case *types.Struct:
+		size := 0
+		for _, f := range t.Fields {
+			fieldtype := f.Type.(types.Type)
+			fieldalign := c.alignofType(fieldtype)
+			fieldsize := c.sizeofType(fieldtype)
+			if size%fieldalign != 0 {
+				size += fieldalign - (size % fieldalign)
+			}
+			size += fieldsize
+		}
+		return size
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}
