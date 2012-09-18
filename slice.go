@@ -137,7 +137,24 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 	} else {
 		high = llvm.ConstAllOnes(llvm.Int32Type()) // -1
 	}
-	switch types.Underlying(value.Type()).(type) {
+	switch typ := types.Underlying(value.Type()).(type) {
+	case *types.Array:
+		sliceslice := c.namedFunction("runtime.sliceslice", "func f(t uintptr, s []int8, low, high int32) []int8")
+		i8slice := sliceslice.Type().ElementType().ReturnType()
+		sliceValue := llvm.Undef(i8slice) // temporary slice
+		arrayptr := value.(*LLVMValue).pointer.LLVMValue()
+		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
+		arraylen := llvm.ConstInt(llvm.Int32Type(), typ.Len, false)
+		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
+		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
+		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
+		sliceTyp := &types.Slice{Elt: typ.Elt}
+		runtimeTyp := c.types.ToRuntime(sliceTyp)
+		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
+		result := c.builder.CreateCall(sliceslice, args, "")
+		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
+		return c.NewLLVMValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
 		sliceslice := c.namedFunction("runtime.sliceslice", "func f(t uintptr, s []int8, low, high int32) []int8")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
@@ -149,8 +166,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), value.Type())
-	case *types.Name:
-		// String
+	case *types.Name: // String
 		stringslice := c.namedFunction("runtime.stringslice", "func f(a string, low, high int32) string")
 		args := []llvm.Value{value.LLVMValue(), low, high}
 		result := c.builder.CreateCall(stringslice, args, "")
