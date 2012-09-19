@@ -111,13 +111,31 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 	values := make([]llvm.Value, len(ftyp.Results))
 	if stmt.Results == nil {
+		// Bare return. No need to update named results, so just
+		// prepare return values.
 		for i, obj := range ftyp.Results {
 			values[i] = obj.Data.(*LLVMValue).LLVMValue()
 		}
 	} else {
-		for i, expr := range stmt.Results {
+		results := make([]Value, len(ftyp.Results))
+		if len(stmt.Results) == 1 && len(ftyp.Results) > 1 {
+			aggresult := c.VisitExpr(stmt.Results[0])
+			aggtyp := aggresult.Type().(*types.Struct)
+			aggval := aggresult.LLVMValue()
+			for i := 0; i < len(results); i++ {
+				elemtyp := aggtyp.Fields[i].Type.(types.Type)
+				elemval := c.builder.CreateExtractValue(aggval, i, "")
+				result := c.NewLLVMValue(elemval, elemtyp)
+				results[i] = result
+			}
+		} else {
+			for i, expr := range stmt.Results {
+				results[i] = c.VisitExpr(expr)
+			}
+		}
+		for i, _ := range stmt.Results {
 			resultobj := ftyp.Results[i]
-			value := c.VisitExpr(expr).Convert(resultobj.Type.(types.Type))
+			value := results[i].Convert(resultobj.Type.(types.Type))
 			values[i] = value.LLVMValue()
 			if resultobj.Name != "_" && resultobj.Name != "" {
 				resultptr := resultobj.Data.(*LLVMValue).pointer.LLVMValue()
