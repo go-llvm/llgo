@@ -57,6 +57,8 @@ func (c *compiler) alignofType(t types.Type) int {
 			return c.alignofType(t.Fields[0].Type.(types.Type))
 		}
 		return 0
+	case *types.Array:
+		return c.alignofType(t.Elt)
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}
@@ -102,6 +104,14 @@ func (c *compiler) sizeofType(t types.Type) int {
 			size += fieldsize
 		}
 		return size
+	case *types.Array:
+		eltsize := c.sizeofType(t.Elt)
+		eltalign := c.alignofType(t.Elt)
+		eltpad := 0
+		if eltsize%eltalign != 0 {
+			eltpad = eltalign - (eltsize % eltalign)
+		}
+		return (eltsize + eltpad) * int(t.Len)
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}
