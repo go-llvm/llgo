@@ -256,7 +256,8 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				if yUntyped {
 					return xType
 				}
-				if typ, ok := c.types[x]; ok {
+				typ := c.types[x]
+				if typ != nil {
 					return typ
 				}
 			}

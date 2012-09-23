@@ -15,6 +15,11 @@ const (
     Big3 = 2147483647
 )
 
+const (
+	expbits32  uint = 8
+	bias32          = -1<<(expbits32-1) + 1
+)
+
 func main() {
     println(a)
     println(B)
@@ -23,5 +28,6 @@ func main() {
     println(Big)
     println(Big2)
     println(Big3)
+    println(bias32)
 }
 
