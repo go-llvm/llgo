@@ -225,6 +225,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.SHL:
 		result = b.CreateShl(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.SHR:
+		result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
 		if isfp {
 			result = b.CreateFCmp(llvm.FloatONE, lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -259,6 +262,12 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		panic("handled elsewhere")
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.OR: // a | b
+		result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.XOR: // a ^ b
+		result = b.CreateXor(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	default:
 		panic(fmt.Sprint("Unimplemented operator: ", op))
@@ -465,7 +474,7 @@ func (v ConstValue) Convert(dstTyp types.Type) Value {
 func (v ConstValue) LLVMValue() llvm.Value {
 	typ := types.Underlying(v.Type())
 	switch typ {
-	case types.Int:
+	case types.Int, types.Uint:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
 		// TODO 32/64bit (probably wait for gc)
 		//int_val := v.Val.(*big.Int)
@@ -473,6 +482,8 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		//	panic(fmt.Sprint("const ", int_val, " overflows int"))
 		//}
 		//return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
+	case types.Uint:
+		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 
 	case types.Int8:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)
@@ -493,6 +504,11 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
 	case types.Uint64:
 		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
+
+	case types.Float32:
+		return llvm.ConstFloat(llvm.FloatType(), float64(v.Float64()))
+	case types.Float64:
+		return llvm.ConstFloat(llvm.DoubleType(), float64(v.Float64()))
 
 	case types.UnsafePointer, types.Uintptr:
 		inttype := v.compiler.target.IntPtrType()
@@ -540,6 +556,11 @@ func (v ConstValue) Type() types.Type {
 
 func (v ConstValue) Int64() int64 {
 	return v.Val.(*big.Int).Int64()
+}
+
+func (v ConstValue) Float64() float64 {
+	r := v.Val.(*big.Rat)
+	return float64(r.Num().Int64()) / float64(r.Denom().Int64())
 }
 
 ///////////////////////////////////////////////////////////////////////////////

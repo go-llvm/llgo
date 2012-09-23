@@ -12,6 +12,7 @@ func TestSwitchEmpty(t *testing.T)              { checkOutputEqual(t, "switch/em
 func TestSwitchScope(t *testing.T)              { checkOutputEqual(t, "switch/scope.go") }
 func TestSwitchBranching(t *testing.T)          { checkOutputEqual(t, "switch/branch.go") }
 func TestSwitchStrings(t *testing.T)            { checkOutputEqual(t, "switch/strings.go") }
+func TestTypeSwitch(t *testing.T)               { checkOutputEqual(t, "switch/type.go") }
 func TestIfLazy(t *testing.T)                   { checkOutputEqual(t, "if/lazy.go") }
 
 // vim: set ft=go:

@@ -103,6 +103,12 @@ func (c *compiler) printValues(values ...Value) Value {
 					format += "%d"
 				case types.Int64Kind:
 					format += "%lld" // FIXME windows
+				case types.Float32Kind:
+					format += "%f"
+				case types.Float64Kind:
+					// Doesn't match up with gc's formatting, which allocates
+					// a minimum of three digits for the exponent.
+					format += "%+e"
 				case types.StringKind:
 					ptrval := c.builder.CreateExtractValue(llvm_value, 0, "")
 					lenval := c.builder.CreateExtractValue(llvm_value, 1, "")
@@ -119,11 +125,11 @@ func (c *compiler) printValues(values ...Value) Value {
 				}
 
 			case *types.Interface:
-				format += "(%p %p)"
+				format += "(%p,%p)"
 				ival := c.builder.CreateExtractValue(llvm_value, 0, "")
 				itype := c.builder.CreateExtractValue(llvm_value, 1, "")
-				args = append(args, ival)
-				llvm_value = itype
+				args = append(args, itype)
+				llvm_value = ival
 
 			case *types.Slice, *types.Array:
 				// If we see a constant array, we either:

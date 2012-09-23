@@ -666,6 +666,113 @@ func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
 	}
 }
 
+func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
+	if stmt.Init != nil {
+		c.PushScope()
+		defer c.PopScope()
+		c.VisitStmt(stmt.Init)
+	}
+
+	var assignIdent *ast.Ident
+	var typeAssertExpr *ast.TypeAssertExpr
+	switch stmt := stmt.Assign.(type) {
+	case *ast.AssignStmt:
+		assignIdent = stmt.Lhs[0].(*ast.Ident)
+		typeAssertExpr = stmt.Rhs[0].(*ast.TypeAssertExpr)
+	case *ast.ExprStmt:
+		typeAssertExpr = stmt.X.(*ast.TypeAssertExpr)
+	}
+	if len(stmt.Body.List) == 0 {
+		// No case clauses, so just evaluate the expression.
+		c.VisitExpr(typeAssertExpr.X)
+		return
+	}
+
+	currBlock := c.builder.GetInsertBlock()
+	endBlock := llvm.AddBasicBlock(currBlock.Parent(), "")
+	endBlock.MoveAfter(currBlock)
+	defer c.builder.SetInsertPointAtEnd(endBlock)
+
+	// TODO: investigate the use of a switch instruction
+	//       on the type's hash (when we compute type hashes).
+
+	// Create blocks for each statement.
+	defaultBlock := endBlock
+	var condBlocks []llvm.BasicBlock
+	var stmtBlocks []llvm.BasicBlock
+	for _, stmt := range stmt.Body.List {
+		caseClause := stmt.(*ast.CaseClause)
+		if caseClause.List == nil {
+			defaultBlock = llvm.InsertBasicBlock(endBlock, "")
+		} else {
+			condBlock := llvm.InsertBasicBlock(endBlock, "")
+			stmtBlock := llvm.InsertBasicBlock(endBlock, "")
+			condBlocks = append(condBlocks, condBlock)
+			stmtBlocks = append(stmtBlocks, stmtBlock)
+		}
+	}
+	stmtBlocks = append(stmtBlocks, defaultBlock)
+
+	// Evaluate the expression, then jump to the first condition block.
+	iface := c.VisitExpr(typeAssertExpr.X).(*LLVMValue)
+	typptr := c.builder.CreateExtractValue(iface.LLVMValue(), 1, "")
+	typptr = c.builder.CreatePtrToInt(typptr, c.target.IntPtrType(), "")
+	if len(stmt.Body.List) == 1 && defaultBlock != endBlock {
+		c.builder.CreateBr(defaultBlock)
+	} else {
+		c.builder.CreateBr(condBlocks[0])
+	}
+
+	i := 0
+	for _, stmt := range stmt.Body.List {
+		caseClause := stmt.(*ast.CaseClause)
+		if caseClause.List != nil {
+			c.builder.SetInsertPointAtEnd(condBlocks[i])
+			stmtBlock := stmtBlocks[i]
+			nextCondBlock := defaultBlock
+			if i+1 < len(condBlocks) {
+				nextCondBlock = condBlocks[i+1]
+			}
+			// TODO handle multiple types
+			// TODO use runtime type equality function
+			typ := c.types.expr[caseClause.List[0]]
+			check := c.types.ToRuntime(typ)
+			check = c.builder.CreatePtrToInt(check, c.target.IntPtrType(), "")
+			equal := c.builder.CreateICmp(llvm.IntEQ, typptr, check, "")
+			c.builder.CreateCondBr(equal, stmtBlock, nextCondBlock)
+			i++
+		}
+	}
+
+	i = 0
+	for _, stmt := range stmt.Body.List {
+		caseClause := stmt.(*ast.CaseClause)
+		var block llvm.BasicBlock
+		var typ types.Type
+		if caseClause.List != nil {
+			block = stmtBlocks[i]
+			if len(caseClause.List) == 1 {
+				typ = c.types.expr[caseClause.List[0]]
+			}
+			i++
+		} else {
+			block = defaultBlock
+		}
+		c.builder.SetInsertPointAtEnd(block)
+		if assignIdent != nil {
+			if len(caseClause.List) == 1 {
+				assignIdent.Obj.Data = iface.loadI2V(typ)
+			} else {
+				assignIdent.Obj.Data = iface
+			}
+		}
+		for _, stmt := range caseClause.Body {
+			c.VisitStmt(stmt)
+		}
+		c.maybeImplicitBranch(endBlock)
+	}
+}
+
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.logger != nil {
 		c.logger.Println("Compile statement:", reflect.TypeOf(stmt),
@@ -696,6 +803,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitRangeStmt(x)
 	case *ast.BranchStmt:
 		c.VisitBranchStmt(x)
+	case *ast.TypeSwitchStmt:
+		c.VisitTypeSwitchStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}

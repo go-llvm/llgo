@@ -204,6 +204,21 @@ func (v *LLVMValue) convertI2V(typ types.Type) Value {
 	return v.compiler.NewLLVMValue(result, typ)
 }
 
+// loadI2V loads an interface value to a type, without checking
+// that the interface type matches.
+func (v *LLVMValue) loadI2V(typ types.Type) Value {
+	c := v.compiler
+	if c.sizeofType(typ) > c.target.PointerSize() {
+		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+		return c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
+	}
+	bits := c.target.TypeSizeInBits(c.types.ToLLVM(typ))
+	value := c.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+	value = c.builder.CreatePtrToInt(value, llvm.IntType(int(bits)), "")
+	value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
+	return c.NewLLVMValue(value, typ)
+}
+
 // interfacesEqual compares two interfaces for equality, returning
 // a dynamic boolean value.
 func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {

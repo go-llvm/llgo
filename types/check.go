@@ -635,6 +635,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		return &Bad{Msg: msg}
 
 	case *ast.TypeAssertExpr:
+		// x.Type == nil iff we're visiting x.(type) switch.
+		if x.Type == nil {
+			return nil
+		}
+
 		// TODO perform static type assertions.
 		//from := c.checkExpr(x.X, nil)
 		to := c.makeType(x.Type, true)
@@ -751,7 +756,18 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 	case *ast.ArrayType:
 		if t.Len != nil {
 			// TODO(gri) compute length
-			return &Array{Elt: c.makeType(t.Elt, cycleOk)}
+			var len_ uint64
+			if _, ok := t.Len.(*ast.Ellipsis); ok {
+				len_ = 0
+			} else {
+				// TODO this properly, evaluating complex expressions, etc.
+				n, err := strconv.Atoi(t.Len.(*ast.BasicLit).Value)
+				if err != nil {
+					panic(err)
+				}
+				len_ = uint64(n)
+			}
+			return &Array{Elt: c.makeType(t.Elt, cycleOk), Len: len_}
 		}
 		return &Slice{Elt: c.makeType(t.Elt, true)}
 
@@ -989,7 +1005,24 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			}
 		}
 
-	//case *ast.TypeSwitchStmt:
+	case *ast.TypeSwitchStmt:
+		if s.Init != nil {
+			c.checkStmt(s.Init)
+		}
+		c.checkStmt(s.Assign)
+		for _, s_ := range s.Body.List {
+			cc := s_.(*ast.CaseClause)
+			for _, e := range cc.List {
+				// TODO check expression is a type that could
+				// satisfy the interface.
+				if id, ok := e.(*ast.Ident); ok && id.Obj == Nil {
+					// ...
+				} else {
+					typ := c.makeType(e, true)
+					c.types[e] = typ
+				}
+			}
+		}
 
 	default:
 		panic(fmt.Sprintf("unimplemented %T", s))
@@ -1107,13 +1140,17 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		fn := obj.Type.(*Func)
 		if fndecl.Recv != nil {
 			recvField := fndecl.Recv.List[0]
+			names := recvField.Names
 			if len(recvField.Names) > 0 {
 				fn.Recv = recvField.Names[0].Obj
 			} else {
 				fn.Recv = ast.NewObj(ast.Var, "_")
 				fn.Recv.Decl = recvField
+				name := &ast.Ident{Name: "_", Obj: fn.Recv}
+				recvField.Names = []*ast.Ident{name}
 			}
 			c.checkObj(fn.Recv, ref)
+			recvField.Names = names
 		} else {
 			// Only check body of non-method functions. We check method
 			// bodies later, to avoid references to incomplete types.
