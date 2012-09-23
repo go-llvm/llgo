@@ -133,9 +133,9 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 				results[i] = c.VisitExpr(expr)
 			}
 		}
-		for i, _ := range stmt.Results {
+		for i, result := range results {
 			resultobj := ftyp.Results[i]
-			value := results[i].Convert(resultobj.Type.(types.Type))
+			value := result.Convert(resultobj.Type.(types.Type))
 			values[i] = value.LLVMValue()
 			if resultobj.Name != "_" && resultobj.Name != "" {
 				resultptr := resultobj.Data.(*LLVMValue).pointer.LLVMValue()
