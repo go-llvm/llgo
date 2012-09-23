@@ -450,7 +450,12 @@ func (tm *TypeMap) funcRuntimeType(f *types.Func) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Value) {
-	panic("unimplemented")
+	commonType := tm.makeCommonType(i, reflect.Interface)
+	interfaceType := llvm.ConstNull(tm.runtimeInterfaceType)
+	interfaceType = llvm.ConstInsertValue(interfaceType, commonType, []uint32{0})
+	// TODO set methods
+	//interfaceType = llvm.ConstInsertValue(interfaceType, methods, []uint32{1})
+	return tm.makeRuntimeTypeGlobal(interfaceType)
 }
 
 func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {

@@ -747,11 +747,19 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 			}
 			// TODO handle multiple types
 			// TODO use runtime type equality function
-			typ := c.types.expr[caseClause.List[0]]
-			check := c.types.ToRuntime(typ)
-			check = c.builder.CreatePtrToInt(check, c.target.IntPtrType(), "")
-			equal := c.builder.CreateICmp(llvm.IntEQ, typptr, check, "")
-			c.builder.CreateCondBr(equal, stmtBlock, nextCondBlock)
+			if len(caseClause.List) > 1 {
+				panic("unimplemented")
+			}
+			var cond llvm.Value
+			if isNilIdent(caseClause.List[0]) {
+				cond = c.builder.CreateIsNull(typptr, "")
+			} else {
+				typ := c.types.expr[caseClause.List[0]]
+				check := c.types.ToRuntime(typ)
+				check = c.builder.CreatePtrToInt(check, c.target.IntPtrType(), "")
+				cond = c.builder.CreateICmp(llvm.IntEQ, typptr, check, "")
+			}
+			c.builder.CreateCondBr(cond, stmtBlock, nextCondBlock)
 			i++
 		}
 	}
@@ -772,7 +780,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		}
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
-			if len(caseClause.List) == 1 {
+			if len(caseClause.List) == 1 && !isNilIdent(caseClause.List[0]) {
 				assignIdent.Obj.Data = iface.loadI2V(typ)
 			} else {
 				assignIdent.Obj.Data = iface

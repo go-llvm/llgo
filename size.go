@@ -112,6 +112,10 @@ func (c *compiler) sizeofType(t types.Type) int {
 			eltpad = eltalign - (eltsize % eltalign)
 		}
 		return (eltsize + eltpad) * int(t.Len)
+	case *types.Interface:
+		// XXX This needs to change if/when interfaces are
+		// changed to dynamically lookup methods, like in gc.
+		return (2+len(t.Methods)) * c.target.PointerSize()
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}

@@ -33,6 +33,11 @@ import (
 	"strconv"
 )
 
+func isNilIdent(x ast.Expr) bool {
+	ident, ok := x.(*ast.Ident)
+	return ok && ident.Obj == types.Nil
+}
+
 // Binary logical operators are handled specially, outside of the Value
 // type, because of the need to perform lazy evaluation.
 //

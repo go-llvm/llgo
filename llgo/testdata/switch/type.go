@@ -12,6 +12,25 @@ func test(i interface{}) {
 	}
 }
 
+type stringer interface {
+	String() string
+}
+
+func printany(i interface{}) {
+	switch v := i.(type) {
+	case nil:
+		print("nil", v)
+	case stringer:
+		print(v.String())
+	case error:
+		print(v.Error())
+	case int:
+		print(v)
+	case string:
+		print(v)
+	}
+}
+
 func main() {
 	test(int64(123))
 	test("abc")
