@@ -222,6 +222,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.SUB:
 		result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.SHL:
+		result = b.CreateShl(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
 		if isfp {
 			result = b.CreateFCmp(llvm.FloatONE, lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -463,12 +466,13 @@ func (v ConstValue) LLVMValue() llvm.Value {
 	typ := types.Underlying(v.Type())
 	switch typ {
 	case types.Int:
-		// TODO 32/64bit
-		int_val := v.Val.(*big.Int)
-		if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
-			panic(fmt.Sprint("const ", int_val, " overflows int"))
-		}
-		return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
+		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
+		// TODO 32/64bit (probably wait for gc)
+		//int_val := v.Val.(*big.Int)
+		//if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
+		//	panic(fmt.Sprint("const ", int_val, " overflows int"))
+		//}
+		//return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
 
 	case types.Int8:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)

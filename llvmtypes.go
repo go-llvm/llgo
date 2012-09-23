@@ -167,7 +167,7 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.Int8Type()
 	case types.Int16Kind, types.Uint16Kind:
 		return llvm.Int16Type()
-	case types.Int32Kind, types.Uint32Kind:
+	case types.Int32Kind, types.Uint32Kind, types.UintKind, types.IntKind:
 		return llvm.Int32Type()
 	case types.Int64Kind, types.Uint64Kind:
 		return llvm.Int64Type()
@@ -175,8 +175,7 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.FloatType()
 	case types.Float64Kind:
 		return llvm.DoubleType()
-	case types.UnsafePointerKind, types.UintptrKind,
-		types.UintKind, types.IntKind:
+	case types.UnsafePointerKind, types.UintptrKind:
 		return tm.target.IntPtrType()
 	//case Complex64: TODO
 	//case Complex128:
@@ -355,10 +354,10 @@ func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) 
 
 	// Set ptrToThis in v's commonType.
 	if v.Type() == tm.runtimeCommonType {
-		v = llvm.ConstInsertValue(v, ptr, []uint32{9})
+		v = llvm.ConstInsertValue(v, ptr, []uint32{10})
 	} else {
 		commonType := llvm.ConstExtractValue(v, []uint32{0})
-		commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{9})
+		commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{10})
 		v = llvm.ConstInsertValue(v, commonType, []uint32{0})
 	}
 
@@ -404,7 +403,7 @@ func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	algptr = llvm.ConstBitCast(algptr, elementTypes[6])
 	typ = llvm.ConstInsertValue(typ, algptr, []uint32{6})
 
-	// TODO string
+	// TODO string, gc
 	return typ
 }
 
@@ -482,7 +481,7 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	uncommonTypeInit := llvm.ConstNull(tm.runtimeUncommonType)
 	uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 	uncommonType.SetInitializer(uncommonTypeInit)
-	commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{8})
+	commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{9})
 
 	// Update the global's initialiser.
 	if _, ok := n.Underlying.(*types.Basic); !ok {

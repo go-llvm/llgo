@@ -84,7 +84,7 @@ func (c *compiler) printValues(values ...Value) Value {
 			case *types.Basic:
 				switch typ.Kind {
 				case types.UintKind:
-					format += "%lu"
+					format += "%u" // TODO make 32/64-bit
 				case types.Uint8Kind:
 					format += "%hhu"
 				case types.Uint16Kind:
@@ -94,7 +94,7 @@ func (c *compiler) printValues(values ...Value) Value {
 				case types.Uint64Kind:
 					format += "%llu" // FIXME windows
 				case types.IntKind:
-					format += "%ld"
+					format += "%d" // TODO make 32/64-bit
 				case types.Int8Kind:
 					format += "%hhd"
 				case types.Int16Kind:

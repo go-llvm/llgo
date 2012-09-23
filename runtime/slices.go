@@ -40,16 +40,17 @@ func sliceappend(t unsafe.Pointer, a, b slice) slice {
 		a = slicegrow(slicetyp, a, a.capacity+(b.length-(a.capacity-a.length)))
 	}
 	end := uintptr(unsafe.Pointer(a.elements))
-	end += uintptr(a.length * slicetyp.elem.size)
-	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), int(slicetyp.elem.size*b.length))
+	end += uintptr(a.length) * slicetyp.elem.size
+	copylen := int(slicetyp.elem.size*uintptr(b.length))
+	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), copylen)
 	a.length += b.length
 	return a
 }
 
 func slicegrow(t *sliceType, a slice, newcap int32) slice {
-	mem := malloc(int(t.elem.size * newcap))
+	mem := malloc(int(t.elem.size * uintptr(newcap)))
 	if a.length > 0 {
-		size := a.length * t.elem.size
+		size := uintptr(a.length) * t.elem.size
 		memcpy(mem, unsafe.Pointer(a.elements), int(size))
 	}
 	return slice{(*int8)(mem), a.length, newcap}
@@ -67,7 +68,7 @@ func sliceslice(t unsafe.Pointer, a slice, low, high int32) slice {
 		typ := (*type_)(t)
 		slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
 		newptr := uintptr(unsafe.Pointer(a.elements))
-		newptr += uintptr(slicetyp.elem.size * low)
+		newptr += uintptr(slicetyp.elem.size * uintptr(low))
 		a.elements = (*int8)(unsafe.Pointer(newptr))
 	}
 	return a

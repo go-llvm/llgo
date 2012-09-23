@@ -41,6 +41,7 @@ type commonType struct {
 	fieldAlign uint8
 	kind       uint8
 	alg        *uintptr
+	gc         uintptr
 	string     *string
 	_          uintptr // *uncommonType
 	_          uintptr // *runtimeType
