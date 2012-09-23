@@ -232,7 +232,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		return typ
 
 	case *ast.BinaryExpr:
+		c.types[x.X] = c.types[x]
 		xType := c.checkExpr(x.X, nil)
+		c.types[x.Y] = xType // For contextual type resolution
 		yType := c.checkExpr(x.Y, nil)
 		_, xUntyped := xType.(*Basic)
 		_, yUntyped := yType.(*Basic)
@@ -248,11 +250,16 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			// If the left operand of a non-constant shift expression is an
 			// untyped constant, the type of the constant is what it would
 			// be if the shift expression were replaced by its left operand
-			// alone; the type is int if it cannot be determined from thexi
+			// alone; the type is int if it cannot be determined from the
 			// context
-			// TODO check if rhs is non-const.
-			//if xUntyped && !isConst(x.Y) {
-			//}
+			if xUntyped {
+				if yUntyped {
+					return xType
+				}
+				if typ, ok := c.types[x]; ok {
+					return typ
+				}
+			}
 			return Int
 		default:
 			if xUntyped && yUntyped {
@@ -624,6 +631,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		panic(c.errorf(x.Pos(), "unreachable (%T)", containerType))
 
 	case *ast.ParenExpr:
+		c.types[x.X] = c.types[x]
 		return c.checkExpr(x.X, assignees)
 
 	case *ast.StarExpr:

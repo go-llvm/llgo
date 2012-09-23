@@ -26,5 +26,13 @@ func main() {
 	println(lo ^ 0x0001)
 	println(-123 >> 1)
 	println(-123 << 1)
+
+	// context of '&' op is used to type the untyped lhs
+	// operand of the shift expression.
+	shift := uint(2)
+	println(uint64(0xFFFFFFFF) & (1<<shift - 1))
+
+	// rhs' type is converted lhs'
+	println(uint32(1) << uint64(2))
 }
 

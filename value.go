@@ -223,9 +223,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SHL:
+		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
 		result = b.CreateShl(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SHR:
+		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
 		result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
@@ -250,16 +252,6 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.GEQ:
 		result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
-	case token.LAND:
-		// FIXME change this to branch
-		//result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		//return lhs.compiler.NewLLVMValue(result, types.Bool)
-		panic("handled elsewhere")
-	case token.LOR:
-		// FIXME change this to branch
-		//result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		//return lhs.compiler.NewLLVMValue(result, types.Bool)
-		panic("handled elsewhere")
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
