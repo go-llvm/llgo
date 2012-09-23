@@ -14,5 +14,6 @@ func TestSwitchBranching(t *testing.T)          { checkOutputEqual(t, "switch/br
 func TestSwitchStrings(t *testing.T)            { checkOutputEqual(t, "switch/strings.go") }
 func TestTypeSwitch(t *testing.T)               { checkOutputEqual(t, "switch/type.go") }
 func TestIfLazy(t *testing.T)                   { checkOutputEqual(t, "if/lazy.go") }
+func TestGoto(t *testing.T)                     { checkOutputEqual(t, "goto.go") }
 
 // vim: set ft=go:

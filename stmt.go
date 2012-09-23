@@ -652,13 +652,21 @@ arrayrange:
 }
 
 func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
-	// BREAK, CONTINUE, GOTO, FALLTHROUGH
+	// TODO handle labeled continue, break.
 	switch stmt.Tok {
 	case token.BREAK:
 		block := c.breakblocks[len(c.breakblocks)-1]
 		c.builder.CreateBr(block)
 	case token.CONTINUE:
 		block := c.continueblocks[len(c.continueblocks)-1]
+		c.builder.CreateBr(block)
+	case token.GOTO:
+		block, _ := stmt.Label.Obj.Data.(llvm.BasicBlock)
+		if block.IsNil() {
+			f := c.builder.GetInsertBlock().Parent()
+			block = llvm.AddBasicBlock(f, stmt.Label.Name)
+			stmt.Label.Obj.Data = block
+		}
 		c.builder.CreateBr(block)
 	default:
 		// TODO implement goto, fallthrough
@@ -692,6 +700,10 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 	endBlock := llvm.AddBasicBlock(currBlock.Parent(), "")
 	endBlock.MoveAfter(currBlock)
 	defer c.builder.SetInsertPointAtEnd(endBlock)
+
+	// Add a "break" block to the stack.
+	c.breakblocks = append(c.breakblocks, endBlock)
+	defer func() { c.breakblocks = c.breakblocks[:len(c.breakblocks)-1] }()
 
 	// TODO: investigate the use of a switch instruction
 	//       on the type's hash (when we compute type hashes).
@@ -773,6 +785,19 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 	}
 }
 
+func (c *compiler) VisitLabeledStmt(stmt *ast.LabeledStmt) {
+	currBlock := c.builder.GetInsertBlock()
+	labeledBlock, _ := stmt.Label.Obj.Data.(llvm.BasicBlock)
+	if labeledBlock.IsNil() {
+		labeledBlock = llvm.AddBasicBlock(currBlock.Parent(), stmt.Label.Name)
+		stmt.Label.Obj.Data = labeledBlock
+	}
+	labeledBlock.MoveAfter(currBlock)
+	c.builder.CreateBr(labeledBlock)
+	c.builder.SetInsertPointAtEnd(labeledBlock)
+	c.VisitStmt(stmt.Stmt)
+}
+
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.logger != nil {
 		c.logger.Println("Compile statement:", reflect.TypeOf(stmt),
@@ -805,6 +830,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitBranchStmt(x)
 	case *ast.TypeSwitchStmt:
 		c.VisitTypeSwitchStmt(x)
+	case *ast.LabeledStmt:
+		c.VisitLabeledStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}
