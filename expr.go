@@ -57,6 +57,7 @@ func (c *compiler) compileLogicalOp(op token.Token, lhs Value, rhsFunc func() Va
 	}
 	c.builder.SetInsertPointAtEnd(rhsBlock)
 	rhs := rhsFunc()
+	rhsBlock = c.builder.GetInsertBlock() // rhsFunc may create blocks
 	c.builder.CreateCondBr(rhs.LLVMValue(), resultBlock, falseBlock)
 	c.builder.SetInsertPointAtEnd(falseBlock)
 	c.builder.CreateBr(resultBlock)
@@ -103,8 +104,10 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	switch x := (expr.Fun).(type) {
 	case *ast.Ident:
 		switch x.String() {
+		case "print":
+			return c.VisitPrint(expr, false)
 		case "println":
-			return c.VisitPrintln(expr)
+			return c.VisitPrint(expr, true)
 		case "len":
 			return c.VisitLen(expr)
 		case "new":
@@ -117,6 +120,9 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			m := c.VisitExpr(expr.Args[0]).(*LLVMValue)
 			key := c.VisitExpr(expr.Args[1])
 			c.mapDelete(m, key)
+			return nil
+		case "panic":
+			// TODO
 			return nil
 		}
 

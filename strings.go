@@ -28,16 +28,32 @@ import (
 	"go/token"
 )
 
+func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
+	result := llvm.Undef(typ)
+	ptr := c.builder.CreateExtractValue(v, 0, "")
+	len := c.builder.CreateExtractValue(v, 1, "")
+	result = c.builder.CreateInsertValue(result, ptr, 0, "")
+	result = c.builder.CreateInsertValue(result, len, 1, "")
+	return result
+}
+
 func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
-	strcat := c.namedFunction("runtime.strcat", "func f(a, b string) string")
-	args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
+	strcat := c.NamedFunction("runtime.strcat", "func f(a, b _string) _string")
+	_string := strcat.Type().ElementType().ReturnType()
+	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
+	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
+	args := []llvm.Value{lhsstr, rhsstr}
 	result := c.builder.CreateCall(strcat, args, "")
+	result = c.coerceString(result, c.types.ToLLVM(types.String))
 	return c.NewLLVMValue(result, types.String)
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-	strcmp := c.namedFunction("runtime.strcmp", "func f(a, b string) int32")
-	args := []llvm.Value{lhs.LLVMValue(), rhs.LLVMValue()}
+	strcmp := c.NamedFunction("runtime.strcmp", "func f(a, b _string) int32")
+	_string := strcmp.Type().ElementType().ParamTypes()[0]
+	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
+	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
+	args := []llvm.Value{lhsstr, rhsstr}
 	result := c.builder.CreateCall(strcmp, args, "")
 	zero := llvm.ConstNull(llvm.Int32Type())
 	var pred llvm.IntPredicate

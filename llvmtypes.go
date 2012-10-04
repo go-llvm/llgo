@@ -30,12 +30,17 @@ import (
 	"reflect"
 )
 
+type LLVMTypeMap struct {
+	module llvm.Module
+	target llvm.TargetData
+	types  map[string]llvm.Type // compile-time LLVM type
+}
+
 type TypeMap struct {
-	module  llvm.Module
-	target  llvm.TargetData
-	types   map[string]llvm.Type      // compile-time LLVM type
-	runtime map[types.Type]llvm.Value // runtime/reflect type representation
-	expr    map[ast.Expr]types.Type   // expression types
+	*LLVMTypeMap
+	types     map[types.Type]llvm.Value // runtime/reflect type representation
+	expr      map[ast.Expr]types.Type
+	functions *FunctionCache
 
 	runtimeType,
 	runtimeCommonType,
@@ -55,10 +60,17 @@ type TypeMap struct {
 	copyAlgFunctionType llvm.Type
 }
 
-func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Expr]types.Type) *TypeMap {
-	tm := &TypeMap{module: module, target: target, expr: exprTypes}
+func NewLLVMTypeMap(module llvm.Module, target llvm.TargetData) *LLVMTypeMap {
+	tm := &LLVMTypeMap{module: module, target: target}
 	tm.types = make(map[string]llvm.Type)
-	tm.runtime = make(map[types.Type]llvm.Value)
+	return tm
+}
+
+func NewTypeMap(llvmtm *LLVMTypeMap, exprTypes map[ast.Expr]types.Type, c *FunctionCache) *TypeMap {
+	tm := &TypeMap{LLVMTypeMap: llvmtm}
+	tm.types = make(map[types.Type]llvm.Value)
+	tm.expr = exprTypes
+	tm.functions = c
 
 	// Load "reflect.go", and generate LLVM types for the runtime type
 	// structures.
@@ -90,7 +102,7 @@ func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Ex
 	// Create runtime algorithm function types.
 	params := []llvm.Type{uintptrType, voidPtrType}
 	tm.hashAlgFunctionType = llvm.FunctionType(uintptrType, params, false)
-	params = []llvm.Type{uintptrType, voidPtrType, voidPtrType}
+	params = []llvm.Type{uintptrType, uintptrType, uintptrType}
 	tm.equalAlgFunctionType = llvm.FunctionType(boolType, params, false)
 	params = []llvm.Type{uintptrType, voidPtrType}
 	tm.printAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
@@ -100,7 +112,7 @@ func NewTypeMap(module llvm.Module, target llvm.TargetData, exprTypes map[ast.Ex
 	return tm
 }
 
-func (tm *TypeMap) ToLLVM(t types.Type) llvm.Type {
+func (tm *LLVMTypeMap) ToLLVM(t types.Type) llvm.Type {
 	t = types.Underlying(t)
 	tstr := t.String()
 	lt, ok := tm.types[tstr]
@@ -116,18 +128,18 @@ func (tm *TypeMap) ToLLVM(t types.Type) llvm.Type {
 
 func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 	t = types.Underlying(t)
-	r, ok := tm.runtime[t]
+	r, ok := tm.types[t]
 	if !ok {
 		_, r = tm.makeRuntimeType(t)
 		if r.IsNil() {
 			panic(fmt.Sprint("Failed to create runtime type for: ", t))
 		}
-		tm.runtime[t] = r
+		tm.types[t] = r
 	}
 	return r
 }
 
-func (tm *TypeMap) makeLLVMType(t types.Type) llvm.Type {
+func (tm *LLVMTypeMap) makeLLVMType(t types.Type) llvm.Type {
 	switch t := t.(type) {
 	case *types.Bad:
 		return tm.badLLVMType(t)
@@ -155,11 +167,11 @@ func (tm *TypeMap) makeLLVMType(t types.Type) llvm.Type {
 	panic("unreachable")
 }
 
-func (tm *TypeMap) badLLVMType(b *types.Bad) llvm.Type {
+func (tm *LLVMTypeMap) badLLVMType(b *types.Bad) llvm.Type {
 	return llvm.Type{nil}
 }
 
-func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
+func (tm *LLVMTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 	switch b.Kind {
 	case types.BoolKind:
 		return llvm.Int1Type()
@@ -190,20 +202,20 @@ func (tm *TypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 	panic(fmt.Sprint("unhandled kind: ", b.Kind))
 }
 
-func (tm *TypeMap) arrayLLVMType(a *types.Array) llvm.Type {
+func (tm *LLVMTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
 	return llvm.ArrayType(tm.ToLLVM(a.Elt), int(a.Len))
 }
 
-func (tm *TypeMap) sliceLLVMType(s *types.Slice) llvm.Type {
+func (tm *LLVMTypeMap) sliceLLVMType(s *types.Slice) llvm.Type {
 	elements := []llvm.Type{
 		llvm.PointerType(tm.ToLLVM(s.Elt), 0),
-		llvm.Int32Type(),
-		llvm.Int32Type(),
+		tm.ToLLVM(types.Uint),
+		tm.ToLLVM(types.Uint),
 	}
 	return llvm.StructType(elements, false)
 }
 
-func (tm *TypeMap) structLLVMType(s *types.Struct) llvm.Type {
+func (tm *LLVMTypeMap) structLLVMType(s *types.Struct) llvm.Type {
 	// Types may be circular, so we need to first create an empty
 	// struct type, then fill in its body after visiting its
 	// members.
@@ -222,11 +234,11 @@ func (tm *TypeMap) structLLVMType(s *types.Struct) llvm.Type {
 	return typ
 }
 
-func (tm *TypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
+func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	return llvm.PointerType(tm.ToLLVM(p.Base), 0)
 }
 
-func (tm *TypeMap) funcLLVMType(f *types.Func) llvm.Type {
+func (tm *LLVMTypeMap) funcLLVMType(f *types.Func) llvm.Type {
 	param_types := make([]llvm.Type, 0)
 
 	// Add receiver parameter.
@@ -258,7 +270,7 @@ func (tm *TypeMap) funcLLVMType(f *types.Func) llvm.Type {
 	return llvm.PointerType(fn_type, 0)
 }
 
-func (tm *TypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
+func (tm *LLVMTypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
 	valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
 	typptr_type := valptr_type // runtimeCommonType may not be defined yet
 	elements := make([]llvm.Type, 2+len(i.Methods))
@@ -276,7 +288,7 @@ func (tm *TypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
 	return llvm.StructType(elements, false)
 }
 
-func (tm *TypeMap) mapLLVMType(m *types.Map) llvm.Type {
+func (tm *LLVMTypeMap) mapLLVMType(m *types.Map) llvm.Type {
 	// XXX This map type will change in the future, when I get around to it.
 	// At the moment, it's representing a really dumb singly linked list.
 	list_type := llvm.GlobalContext().StructCreateNamed("")
@@ -292,11 +304,11 @@ func (tm *TypeMap) mapLLVMType(m *types.Map) llvm.Type {
 	return typ
 }
 
-func (tm *TypeMap) chanLLVMType(c *types.Chan) llvm.Type {
+func (tm *LLVMTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
 	panic("unimplemented")
 }
 
-func (tm *TypeMap) nameLLVMType(n *types.Name) llvm.Type {
+func (tm *LLVMTypeMap) nameLLVMType(n *types.Name) llvm.Type {
 	return tm.ToLLVM(n.Underlying)
 }
 
@@ -336,12 +348,7 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
 	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
 
-	equalAlgName := "runtime.memequal"
-	equalAlg := tm.module.NamedFunction(equalAlgName)
-	if equalAlg.IsNil() {
-		equalAlg = llvm.AddFunction(tm.module, equalAlgName, tm.equalAlgFunctionType)
-	}
-
+	equalAlg := tm.functions.NamedFunction("runtime.memequal", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)
 }
@@ -496,6 +503,7 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	}
 	globalInit = llvm.ConstInsertValue(globalInit, underlyingRuntimeType, []uint32{1})
 	global.SetName("__llgo.reflect." + n.Obj.Name)
+	global.SetLinkage(llvm.PrivateLinkage)
 	return global, ptr
 }
 

@@ -63,7 +63,7 @@ func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
 	return result
 }
 
-func (c *compiler) printValues(values ...Value) Value {
+func (c *compiler) printValues(println_ bool, values ...Value) Value {
 	var args []llvm.Value = nil
 	if len(values) > 0 {
 		format := ""
@@ -77,7 +77,7 @@ func (c *compiler) printValues(values ...Value) Value {
 				typ = name.Underlying
 			}
 
-			if i > 0 {
+			if println_ && i > 0 {
 				format += " "
 			}
 			switch typ := typ.(type) {
@@ -139,14 +139,12 @@ func (c *compiler) printValues(values ...Value) Value {
 				init_value := init_.LLVMValue()
 				switch init_.(type) {
 				case ConstValue:
-					llvm_value = llvm.AddGlobal(
-						c.module.Module, init_value.Type(), "")
+					llvm_value = llvm.AddGlobal(c.module.Module, init_value.Type(), "")
 					llvm_value.SetInitializer(init_value)
 					llvm_value.SetGlobalConstant(true)
-					llvm_value.SetLinkage(llvm.InternalLinkage)
+					//llvm_value.SetLinkage(llvm.PrivateLinkage)
 				case *LLVMValue:
-					llvm_value = c.builder.CreateAlloca(
-						init_value.Type(), "")
+					llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
 					c.builder.CreateStore(init_value, llvm_value)
 				}
 				// FIXME don't assume string...
@@ -161,22 +159,28 @@ func (c *compiler) printValues(values ...Value) Value {
 
 			args = append(args, llvm_value)
 		}
-		format += "\n"
+		if println_ {
+			format += "\n"
+		}
 		formatval := c.builder.CreateGlobalStringPtr(format, "")
 		args = append([]llvm.Value{formatval}, args...)
 	} else {
-		args = []llvm.Value{c.builder.CreateGlobalStringPtr("\n", "")}
+		var format string
+		if println_ {
+			format = "\n"
+		}
+		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
 	}
 	printf := getprintf(c.module.Module)
 	return c.NewLLVMValue(c.builder.CreateCall(printf, args, ""), types.Int32)
 }
 
-func (c *compiler) VisitPrintln(expr *ast.CallExpr) Value {
+func (c *compiler) VisitPrint(expr *ast.CallExpr, println_ bool) Value {
 	var values []Value
 	for _, arg := range expr.Args {
 		values = append(values, c.VisitExpr(arg))
 	}
-	return c.printValues(values...)
+	return c.printValues(println_, values...)
 }
 
 // vim: set ft=go :

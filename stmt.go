@@ -71,9 +71,6 @@ func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 }
 
 func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
-	c.PushScope()
-	defer c.PopScope()
-
 	// This is a little awkward, but it makes dealing with branching easier.
 	// A free-standing block statement (i.e. one not attached to a control
 	// statement) will splice in a new block.
@@ -223,6 +220,15 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 						ptr, &types.Pointer{Base: value.Type()})
 					obj.Data = llvm_value.makePointee()
 				} else {
+					if obj.Data == nil {
+						// FIXME this is crap, going to need to revisit
+						// how decl's are visited (should be in data
+						// dependent order.)
+						functions := c.functions
+						c.functions = nil
+						c.VisitValueSpec(obj.Decl.(*ast.ValueSpec), false)
+						c.functions = functions
+					}
 					ptr := (obj.Data).(*LLVMValue).pointer
 					value = value.Convert(types.Deref(ptr.Type()))
 					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
@@ -267,9 +273,7 @@ func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
 	}
 
 	if stmt.Init != nil {
-		c.PushScope()
 		c.VisitStmt(stmt.Init)
-		defer c.PopScope()
 	}
 
 	cond_val := c.VisitExpr(stmt.Cond)
@@ -311,9 +315,7 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 
 	// Is there an initializer? Create a new scope and visit the statement.
 	if stmt.Init != nil {
-		c.PushScope()
 		c.VisitStmt(stmt.Init)
-		defer c.PopScope()
 	}
 
 	// Start the loop.
@@ -422,8 +424,6 @@ func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 
 func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	if stmt.Init != nil {
-		c.PushScope()
-		defer c.PopScope()
 		c.VisitStmt(stmt.Init)
 	}
 
@@ -676,8 +676,6 @@ func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
 
 func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 	if stmt.Init != nil {
-		c.PushScope()
-		defer c.PopScope()
 		c.VisitStmt(stmt.Init)
 	}
 

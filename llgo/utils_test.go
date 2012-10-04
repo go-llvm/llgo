@@ -48,7 +48,7 @@ func addExterns(m *llgo.Module) {
 
 func getRuntimeFiles() (files []string, err error) {
 	var pkg *build.Package
-	pkgpath := "github.com/axw/llgo/runtime"
+	pkgpath := "github.com/axw/llgo/pkg/runtime"
 	pkg, err = build.Import(pkgpath, "", 0)
 	if err == nil {
 		files = make([]string, len(pkg.GoFiles))
@@ -92,7 +92,7 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 		return
 	}
 
-	engine, err := llvm.NewJITCompiler(m.Module, 0)
+	engine, err := llvm.NewExecutionEngine(m.Module)
 	if err != nil {
 		return
 	}

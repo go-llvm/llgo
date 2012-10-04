@@ -44,26 +44,30 @@ import (
 	"strings"
 )
 
-var dumpast *bool = flag.Bool(
+var dumpast = flag.Bool(
 	"dumpast", false,
 	"Dump the AST to stderr and exit")
 
-var dump *bool = flag.Bool(
+var dump = flag.Bool(
 	"dump", false,
 	"Dump the LLVM assembly to stderr and exit")
 
-var trace *bool = flag.Bool(
+var trace = flag.Bool(
 	"trace", false,
 	"Trace the compilation process")
 
-var version *bool = flag.Bool(
+var version = flag.Bool(
 	"version", false,
 	"Display version information and exit")
 
-var os_ *string = flag.String("os", runtime.GOOS, "Set the target OS")
-var arch *string = flag.String("arch", runtime.GOARCH, "Set the target architecture")
+var os_ = flag.String("os", runtime.GOOS, "Set the target OS")
+var arch = flag.String("arch", runtime.GOARCH, "Set the target architecture")
+var printTriple = flag.Bool("print-triple", false, "Print out target triple and exit")
+var compileOnly = flag.Bool("c", false, "Compile only, don't link")
+var outputFile = flag.String("o", "-", "Output filename")
 
 var exitCode = 0
+var compiler = llgo.NewCompiler()
 
 func report(err error) {
 	scanner.PrintError(os.Stderr, err)
@@ -144,11 +148,22 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 		os.Exit(0)
 	}
 
-	compiler := llgo.NewCompiler()
-	compiler.SetTraceEnabled(*trace)
-	compiler.SetTargetArch(*arch)
-	compiler.SetTargetOs(*os_)
 	return compiler.Compile(fset, pkg, exprTypes)
+}
+
+func writeObjectFile(m *llgo.Module) error {
+	var outfile *os.File
+	switch *outputFile {
+	case "-":
+		outfile = os.Stdout
+	default:
+		var err error
+		outfile, err = os.Create(*outputFile)
+		if err != nil {
+			return err
+		}
+	}
+	return llvm.WriteBitcodeToFile(m.Module, outfile)
 }
 
 func displayVersion() {
@@ -178,6 +193,11 @@ func displayVersion() {
 	os.Exit(0)
 }
 
+func displayTriple() {
+	fmt.Println(compiler.GetTargetTriple())
+	os.Exit(0)
+}
+
 func main() {
 	llvm.InitializeAllTargets()
 	llvm.InitializeAllTargetMCs()
@@ -187,6 +207,13 @@ func main() {
 		displayVersion()
 	}
 
+	compiler.SetTraceEnabled(*trace)
+	compiler.SetTargetArch(*arch)
+	compiler.SetTargetOs(*os_)
+	if *printTriple {
+		displayTriple()
+	}
+
 	module, err := compileFiles(flag.Args())
 	if err == nil {
 		defer module.Dispose()
@@ -194,7 +221,7 @@ func main() {
 			if *dump {
 				module.Dump()
 			} else {
-				err := llvm.WriteBitcodeToFile(module.Module, os.Stdout)
+				err := writeObjectFile(module)
 				if err != nil {
 					fmt.Println(err)
 				}

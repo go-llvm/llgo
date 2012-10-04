@@ -49,8 +49,17 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		if c.module.Name == "main" && fn_name == "main" {
 			exported = true
 		} else {
-			pkgname := c.pkgmap[f.Name.Obj]
-			fn_name = pkgname + "." + fn_name
+			if f.Recv != nil {
+				recv := fn_type.Recv
+				if recvtyp, ok := recv.Type.(*types.Pointer); ok {
+					recv = recvtyp.Base.(*types.Name).Obj
+				}
+				pkgname := c.pkgmap[recv]
+				fn_name = pkgname + "." + recv.Name + "." + fn_name
+			} else {
+				pkgname := c.pkgmap[f.Name.Obj]
+				fn_name = pkgname + "." + fn_name
+			}
 		}
 	}
 
@@ -131,7 +140,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	c.buildFunction(fn, paramObjects, f.Body)
 
 	// Is it an 'init' function? Then record it.
-	if f.Name.String() == "init" {
+	if f.Name.Name == "init" {
 		c.initfuncs = append(c.initfuncs, fn)
 	} else {
 		//if obj != nil {
@@ -153,7 +162,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 		llvmtyp := c.types.ToLLVM(t)
 		gv := llvm.AddGlobal(c.module.Module, llvmtyp, name)
 		if !export {
-			gv.SetLinkage(llvm.InternalLinkage)
+			gv.SetLinkage(llvm.PrivateLinkage)
 		}
 		gv.SetInitializer(llvm.ConstNull(llvmtyp))
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
@@ -169,7 +178,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 	fn_type := new(types.Func)
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
-	fn.SetLinkage(llvm.InternalLinkage)
+	fn.SetLinkage(llvm.PrivateLinkage)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
@@ -195,7 +204,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 	// function.
 	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
 	if !export {
-		gv.SetLinkage(llvm.InternalLinkage)
+		gv.SetLinkage(llvm.PrivateLinkage)
 	}
 	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
 	if !isArray(t) {
@@ -213,7 +222,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 		c.builder.CreateRetVoid()
 		// FIXME order global ctors
 		fn_value := c.NewLLVMValue(fn, fn_type)
-		c.initfuncs = append(c.initfuncs, fn_value)
+		c.varinitfuncs = append(c.varinitfuncs, fn_value)
 	}
 	return g
 }
@@ -253,9 +262,11 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		}
 
 		// If the name is "_", then we can just evaluate the expression
-		// and ignore the result.
+		// and ignore the result. We handle package level variables
+		// specially, below.
+		ispackagelevel := len(c.functions) == 0
 		name := name_.String()
-		if name == "_" {
+		if name == "_" && !ispackagelevel {
 			if expr != nil {
 				c.VisitExpr(expr)
 			}
@@ -270,7 +281,6 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		// will convert it to an LLVMValue.
 		var value Value
 		if !isconst {
-			ispackagelevel := len(c.functions) == 0
 			if !ispackagelevel {
 				// Visit the expression.
 				var init_ Value

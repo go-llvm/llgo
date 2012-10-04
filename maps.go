@@ -32,7 +32,7 @@ import (
 // does not exist in the map, it will be added with an uninitialised value.
 func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMValue, notnull *LLVMValue) {
 	mapType := m.Type().(*types.Map)
-	maplookup := c.namedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
+	maplookup := c.NamedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 4)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
@@ -65,7 +65,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 }
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
-	mapdelete := c.namedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
+	mapdelete := c.NamedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
@@ -84,7 +84,7 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 // mapNext iterates through a map, accepting an iterator state value,
 // and returning a new state value, key pointer, and value pointer.
 func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llvm.Value) {
-	mapnext := c.namedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
+	mapnext := c.NamedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)

@@ -85,7 +85,7 @@ type Array struct {
 }
 
 func (a *Array) String() string {
-	return fmt.Sprint("Array(", a.Len, ", ", a.Elt, ")")
+	return fmt.Sprintf("[%d]%s", a.Len, a.Elt)
 }
 
 // A Slice represents a slice type []Elt.
@@ -111,7 +111,20 @@ type Struct struct {
 }
 
 func (s *Struct) String() string {
-	return fmt.Sprint("Struct(", s.Fields, ", ", s.Tags, ")")
+	str := "struct{"
+	for i, field := range s.Fields {
+		if i > 0 {
+			str += "; "
+		}
+		if field.Name != "" {
+			str += field.Name + " "
+		}
+		str += fmt.Sprint(field.Type)
+		if s.Tags != nil && s.Tags[i] != "" {
+			str += fmt.Sprintf(" %q", s.Tags[i])
+		}
+	}
+	return str + "}"
 }
 
 // A Pointer represents a pointer type *Base.
@@ -121,7 +134,7 @@ type Pointer struct {
 }
 
 func (p *Pointer) String() string {
-	return fmt.Sprint("Pointer(", p.Base, ")")
+	return fmt.Sprintf("*%v", p.Base)
 }
 
 // A Func represents a function type func(...) (...).
@@ -135,8 +148,44 @@ type Func struct {
 }
 
 func (f *Func) String() string {
-	return fmt.Sprintf("Func(%v, %v, %v, %v)", f.Recv,
-		f.Params, f.Results, f.IsVariadic)
+	str := "func "
+	if f.Recv != nil {
+		str += "("
+		if f.Recv.Name != "" {
+			str += f.Recv.Name + " "
+		}
+		str += fmt.Sprint(f.Recv.Type) + ")"
+	}
+	str += "("
+	for i, param := range f.Params {
+		if i > 0 {
+			str += ", "
+		}
+		if param.Name != "" {
+			str += param.Name + " "
+		}
+		if f.IsVariadic && i == len(f.Params)-1 {
+			str += "..."
+		}
+		str += fmt.Sprint(param.Type)
+	}
+	str += ") "
+	if len(f.Results) > 1 {
+		str += "("
+	}
+	for i, result := range f.Results {
+		if i > 0 {
+			str += ", "
+		}
+		if result.Name != "" {
+			str += result.Name + " "
+		}
+		str += fmt.Sprint(result.Type)
+	}
+	if len(f.Results) > 1 {
+		str += ")"
+	}
+	return str
 }
 
 // An Interface represents an interface type interface{...}.
@@ -183,11 +232,11 @@ func (n *Name) String() string {
 	u := n.Underlying
 	if u != nil {
 		n.Underlying = nil
-		res := fmt.Sprint("Name(", n.Obj.Name, ", ", u, ")")
+		res := fmt.Sprintf("%s(%s)", n.Obj.Name, u)
 		n.Underlying = u
 		return res
 	}
-	return fmt.Sprint("Name(", n.Obj.Name, ", ...)")
+	return fmt.Sprintf("%s(...)", n.Obj.Name)
 }
 
 // If typ is a pointer type, Deref returns the pointer's base type;

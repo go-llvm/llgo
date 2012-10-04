@@ -1204,6 +1204,18 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 			if fdecl, ok := decl.(*ast.FuncDecl); ok && fdecl.Recv == nil && fdecl.Name.Name == "init" {
 				c.checkStmt(fdecl.Body)
 			}
+
+			// Check unnamed var's.
+			if gendecl, ok := decl.(*ast.GenDecl); ok && gendecl.Tok == token.VAR {
+				for _, spec := range gendecl.Specs {
+					valspec := spec.(*ast.ValueSpec)
+					for _, name := range valspec.Names {
+						if name.Name == "_" {
+							c.checkObj(name.Obj, true)
+						}
+					}
+				}
+			}
 		}
 	}
 

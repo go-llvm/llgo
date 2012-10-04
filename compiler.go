@@ -30,6 +30,7 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"runtime"
 )
 
 type Module struct {
@@ -50,6 +51,7 @@ type Compiler interface {
 	SetTraceEnabled(bool)
 	SetTargetArch(string)
 	SetTargetOs(string)
+	GetTargetTriple() string
 }
 
 type compiler struct {
@@ -62,13 +64,15 @@ type compiler struct {
 	breakblocks    []llvm.BasicBlock
 	continueblocks []llvm.BasicBlock
 	initfuncs      []Value
+	varinitfuncs   []Value
 	pkg            *ast.Package
 	fileset        *token.FileSet
 	filescope      *ast.Scope
 	scope          *ast.Scope
 	pkgmap         map[*ast.Object]string
-	types          *TypeMap
-	logger         *log.Logger
+	*FunctionCache
+	types  *TypeMap
+	logger *log.Logger
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -167,17 +171,6 @@ func (c *compiler) Lookup(name string) (Value, *ast.Object) {
 	return nil, nil
 }
 
-func (c *compiler) PushScope() *ast.Scope {
-	c.scope = ast.NewScope(c.scope)
-	return c.scope
-}
-
-func (c *compiler) PopScope() *ast.Scope {
-	scope := c.scope
-	c.scope = c.scope.Outer
-	return scope
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
@@ -199,6 +192,8 @@ func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
 
 func NewCompiler() Compiler {
 	compiler := new(compiler)
+	compiler.SetTargetArch(runtime.GOARCH)
+	compiler.SetTargetOs(runtime.GOOS)
 	return compiler
 }
 
@@ -252,22 +247,27 @@ func getTripleArchName(llvmArch string) string {
 	return llvmArch
 }
 
+func (compiler *compiler) GetTargetTriple() string {
+	arch := getTripleArchName(compiler.targetArch)
+	os := compiler.targetOs
+	return fmt.Sprintf("%s-unknown-%s", arch, os)
+}
+
 func (compiler *compiler) Compile(fset *token.FileSet,
 	pkg *ast.Package,
 	exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg
-	compiler.initfuncs = make([]Value, 0)
+	compiler.initfuncs = nil
+	compiler.varinitfuncs = nil
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
 	// Create a TargetMachine from the OS & Arch.
-	triple := fmt.Sprintf("%s-unknown-%s",
-		getTripleArchName(compiler.targetArch),
-		compiler.targetOs)
+	triple := compiler.GetTargetTriple()
 	var machine llvm.TargetMachine
 	for target := llvm.FirstTarget(); target.C != nil && machine.C == nil; target = target.NextTarget() {
 		if target.Name() == compiler.targetArch {
@@ -299,7 +299,9 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 			//err = e.(error)
 		}
 	}()
-	compiler.types = NewTypeMap(compiler.module.Module, compiler.target, exprTypes)
+	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
+	compiler.FunctionCache = NewFunctionCache(compiler)
+	compiler.types = NewTypeMap(llvmtypemap, exprTypes, compiler.FunctionCache)
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.
@@ -326,24 +328,26 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	//     due to (a) imports having to be initialised before the
 	//     importer, and (b) LLVM having no specified order of
 	//     initialisation for ctors with the same priority.
-	if len(compiler.initfuncs) > 0 {
-		elttypes := []llvm.Type{
-			llvm.Int32Type(),
-			llvm.PointerType(
-				llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
+	var initfuncs [][]Value
+	if compiler.varinitfuncs != nil {
+		initfuncs = append(initfuncs, compiler.varinitfuncs)
+	}
+	if compiler.initfuncs != nil {
+		initfuncs = append(initfuncs, compiler.initfuncs)
+	}
+	if initfuncs != nil {
+		elttypes := []llvm.Type{llvm.Int32Type(), llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
 		ctortype := llvm.StructType(elttypes, false)
-		ctors := make([]llvm.Value, len(compiler.initfuncs))
-		for i, fn := range compiler.initfuncs {
-			struct_values := []llvm.Value{
-				llvm.ConstInt(llvm.Int32Type(), 1, false),
-				fn.LLVMValue()}
-			ctors[i] = llvm.ConstStruct(struct_values, false)
+		var ctors []llvm.Value
+		for priority, initfuncs := range initfuncs {
+			priority := llvm.ConstInt(llvm.Int32Type(), uint64(priority), false)
+			for _, fn := range initfuncs {
+				struct_values := []llvm.Value{priority, fn.LLVMValue()}
+				ctors = append(ctors, llvm.ConstStruct(struct_values, false))
+			}
 		}
-
 		global_ctors_init := llvm.ConstArray(ctortype, ctors)
-		global_ctors_var := llvm.AddGlobal(
-			compiler.module.Module, global_ctors_init.Type(),
-			"llvm.global_ctors")
+		global_ctors_var := llvm.AddGlobal(compiler.module.Module, global_ctors_init.Type(), "llvm.global_ctors")
 		global_ctors_var.SetInitializer(global_ctors_init)
 		global_ctors_var.SetLinkage(llvm.AppendingLinkage)
 	}
