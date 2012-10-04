@@ -34,5 +34,12 @@ func main() {
 
 	// rhs' type is converted lhs'
 	println(uint32(1) << uint64(2))
+
+	// There was a bug related to compound expressions involving
+	// multiple binary logical operators.
+	var a, b, c int
+	if a == 0 && (b != 0 || c != 0) {
+		println("!")
+	}
 }
 
