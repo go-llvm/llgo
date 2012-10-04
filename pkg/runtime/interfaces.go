@@ -29,16 +29,16 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 		atyp := (*type_)(unsafe.Pointer(atyp))
 		btyp := (*type_)(unsafe.Pointer(btyp))
 		algs := unsafe.Pointer(atyp.alg)
-		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(*atyp.alg))
+		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(algs))
 		eqFn := *(*equalalg)(eqPtr)
-		var avalptr, bvalptr *int8
+		var avalptr, bvalptr unsafe.Pointer
 		if atyp.size <= unsafe.Sizeof(aval) {
 			// value fits in pointer
-			avalptr = (*int8)(unsafe.Pointer(&aval))
-			bvalptr = (*int8)(unsafe.Pointer(&bval))
+			avalptr = unsafe.Pointer(&aval)
+			bvalptr = unsafe.Pointer(&bval)
 		} else {
-			avalptr = (*int8)(unsafe.Pointer(aval))
-			bvalptr = (*int8)(unsafe.Pointer(bval))
+			avalptr = unsafe.Pointer(aval)
+			bvalptr = unsafe.Pointer(bval)
 		}
 		return eqFn(atyp.size, avalptr, bvalptr)
 	}

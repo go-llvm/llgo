@@ -24,7 +24,7 @@ package runtime
 
 import "unsafe"
 
-type equalalg func(uintptr, *int8, *int8) bool
+type equalalg func(uintptr, unsafe.Pointer, unsafe.Pointer) bool
 
 func memequal(size uintptr, lhs, rhs unsafe.Pointer) bool {
 	if lhs == rhs {

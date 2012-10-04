@@ -32,7 +32,7 @@ type type_ struct {
 	commonType
 }
 
-// This is based on commonType from src/pkg/reflect/type.go.
+// These types are based on those from runtime/type.go
 type commonType struct {
 	size       uintptr
 	hash       uint32
@@ -41,10 +41,25 @@ type commonType struct {
 	fieldAlign uint8
 	kind       uint8
 	alg        *uintptr
-	gc         uintptr
+	gc         unsafe.Pointer
 	string     *string
 	_          uintptr // *uncommonType
 	_          uintptr // *runtimeType
+}
+
+type uncommonType struct {
+	name    *string
+	pkgPath *string
+	methods []_method
+}
+
+type _method struct {
+	name    *string
+	pkgPath *string
+	mtyp    *interface{}
+	typ     *interface{}
+	ifn     unsafe.Pointer
+	tfn     unsafe.Pointer
 }
 
 type sliceType struct {

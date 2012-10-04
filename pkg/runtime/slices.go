@@ -25,9 +25,9 @@ package runtime
 import "unsafe"
 
 type slice struct {
-	elements *int8
-	length   int32
-	capacity int32
+	array *uint8
+	len uint
+	cap uint
 }
 
 // sliceappend takes a slice type and two slices, and returns the
@@ -36,40 +36,40 @@ type slice struct {
 func sliceappend(t unsafe.Pointer, a, b slice) slice {
 	typ := (*type_)(t)
 	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
-	if a.capacity-a.length < b.length {
-		a = slicegrow(slicetyp, a, a.capacity+(b.length-(a.capacity-a.length)))
+	if a.cap-a.len < b.len {
+		a = slicegrow(slicetyp, a, a.cap+(b.len-(a.cap-a.len)))
 	}
-	end := uintptr(unsafe.Pointer(a.elements))
-	end += uintptr(a.length) * slicetyp.elem.size
-	copylen := int(slicetyp.elem.size*uintptr(b.length))
-	memmove(unsafe.Pointer(end), unsafe.Pointer(b.elements), copylen)
-	a.length += b.length
+	end := uintptr(unsafe.Pointer(a.array))
+	end += uintptr(a.len) * slicetyp.elem.size
+	copylen := int(slicetyp.elem.size * uintptr(b.len))
+	memmove(unsafe.Pointer(end), unsafe.Pointer(b.array), copylen)
+	a.len += b.len
 	return a
 }
 
-func slicegrow(t *sliceType, a slice, newcap int32) slice {
+func slicegrow(t *sliceType, a slice, newcap uint) slice {
 	mem := malloc(int(t.elem.size * uintptr(newcap)))
-	if a.length > 0 {
-		size := uintptr(a.length) * t.elem.size
-		memcpy(mem, unsafe.Pointer(a.elements), int(size))
+	if a.len > 0 {
+		size := uintptr(a.len) * t.elem.size
+		memcpy(mem, unsafe.Pointer(a.array), int(size))
 	}
-	return slice{(*int8)(mem), a.length, newcap}
+	return slice{(*uint8)(mem), a.len, newcap}
 }
 
 func sliceslice(t unsafe.Pointer, a slice, low, high int32) slice {
 	if high == -1 {
-		high = a.length
+		high = a.len
 	} else {
 		// TODO check upper bound
 	}
-	a.capacity -= low
-	a.length = high - low
+	a.cap -= low
+	a.len = high - low
 	if low > 0 {
 		typ := (*type_)(t)
 		slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
-		newptr := uintptr(unsafe.Pointer(a.elements))
+		newptr := uintptr(unsafe.Pointer(a.array))
 		newptr += uintptr(slicetyp.elem.size * uintptr(low))
-		a.elements = (*int8)(unsafe.Pointer(newptr))
+		a.array = (*uint8)(unsafe.Pointer(newptr))
 	}
 	return a
 }

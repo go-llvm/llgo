@@ -24,37 +24,37 @@ package runtime
 
 import "unsafe"
 
-type str struct {
-	ptr  *uint8
-	size int
+type _string struct {
+	str *uint8
+	len int
 }
 
-func strcat(a, b str) str {
-	if a.size == 0 {
+func strcat(a, b _string) _string {
+	if a.len == 0 {
 		return b
-	} else if b.size == 0 {
+	} else if b.len == 0 {
 		return a
 	}
 
-	mem := malloc(a.size + b.size)
+	mem := malloc(a.len + b.len)
 	if mem == unsafe.Pointer(uintptr(0)) {
 		// TODO panic? abort?
 	}
 
-	memcpy(mem, unsafe.Pointer(a.ptr), a.size)
-	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.size)), unsafe.Pointer(b.ptr), b.size)
+	memcpy(mem, unsafe.Pointer(a.str), a.len)
+	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.len)), unsafe.Pointer(b.str), b.len)
 
-	a.ptr = (*uint8)(mem)
-	a.size = a.size + b.size
+	a.str = (*uint8)(mem)
+	a.len = a.len + b.len
 	return a
 }
 
-func strcmp(a, b str) int32 {
-	sz := a.size
-	if b.size < sz {
-		sz = b.size
+func strcmp(a, b _string) int32 {
+	sz := a.len
+	if b.len < sz {
+		sz = b.len
 	}
-	aptr, bptr := a.ptr, b.ptr
+	aptr, bptr := a.str, b.str
 	for i := 0; i < sz; i++ {
 		c1, c2 := *aptr, *bptr
 		switch {
@@ -67,26 +67,26 @@ func strcmp(a, b str) int32 {
 		bptr = (*uint8)(unsafe.Pointer((uintptr(unsafe.Pointer(bptr)) + 1)))
 	}
 	switch {
-	case a.size < b.size:
+	case a.len < b.len:
 		return -1
-	case a.size > b.size:
+	case a.len > b.len:
 		return 1
 	}
 	return 0
 }
 
-func stringslice(a str, low, high int32) str {
+func stringslice(a _string, low, high int32) _string {
 	if high == -1 {
-		high = a.size
+		high = a.len
 	} else {
 		// TODO check upper bound
 	}
 	if low > 0 {
-		newptr := uintptr(unsafe.Pointer(a.ptr))
+		newptr := uintptr(unsafe.Pointer(a.str))
 		newptr += uintptr(low)
-		a.ptr = (*uint8)(unsafe.Pointer(newptr))
+		a.str = (*uint8)(unsafe.Pointer(newptr))
 	}
-	a.size = high - low
+	a.len = high - low
 	return a
 }
 
