@@ -243,26 +243,27 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		return result.makePointee()
 	}
 
+	// We can index a pointer to an array.
+	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
+		value = value.makePointee()
+		typ = value.Type()
+	}
+
 	switch types.Underlying(typ).(type) {
 	case *types.Array, *types.Slice:
-		if !isIntType(index.Type()) {
-			panic("Array index expression must evaluate to an integer")
-		}
-		gep_indices := []llvm.Value{}
-
+		var gep_indices []llvm.Value
 		var ptr llvm.Value
 		var result_type types.Type
 		switch typ := types.Underlying(typ).(type) {
 		case *types.Array:
+			// FIXME what to do if value is not addressable?
+			// Do we have to load the array onto the stack?
 			result_type = typ.Elt
 			ptr = value.pointer.LLVMValue()
 			gep_indices = append(gep_indices, llvm.ConstNull(llvm.Int32Type()))
 		case *types.Slice:
 			result_type = typ.Elt
-			ptr = c.builder.CreateStructGEP(value.pointer.LLVMValue(), 0, "")
-			ptr = c.builder.CreateLoad(ptr, "")
-		default:
-			panic("unimplemented")
+			ptr = c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		}
 
 		gep_indices = append(gep_indices, index.LLVMValue())
@@ -274,7 +275,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		value, _ = c.mapLookup(value, index, false)
 		return value
 	}
-	panic("unreachable")
+	panic(fmt.Sprintf("unreachable (%s)", typ))
 }
 
 type selectorCandidate struct {
