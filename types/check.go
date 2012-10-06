@@ -11,6 +11,7 @@ import (
 	"go/ast"
 	"go/scanner"
 	"go/token"
+	"math/big"
 	"sort"
 	"strconv"
 )
@@ -273,10 +274,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				// operation and, for non-boolean operations, the result use
 				// the kind that appears later in this list:
 				//     integer, character, floating-point, complex.
-				switch x := untypedPriority(xType) - untypedPriority(yType); {
-				case x <= 0:
+				switch delta := untypedPriority(xType) - untypedPriority(yType); {
+				case delta >= 0:
 					return xType
-				case x > 0:
+				case delta < 0:
+					c.types[x.X] = yType
 					return yType
 				}
 			} else if xUntyped {
@@ -385,7 +387,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					// TODO check elem matches slice element type.
 					c.checkExpr(args[1], nil)
 					return s
-				//case "cap":
 				//case "close":
 				//case "complex":
 				case "copy":
@@ -405,7 +406,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 						// TODO check key is assignable to map's key type.
 						return nil
 					}
-				case "len":
+				case "cap", "len":
 					c.checkExpr(args[0], nil)
 					return Int
 				case "make":
@@ -703,6 +704,29 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 	panic(fmt.Sprintf("unreachable (%T)", x))
 }
 
+func evalConst(x ast.Expr) Const {
+	switch x := x.(type) {
+	case *ast.BasicLit:
+		return MakeConst(x.Kind, x.Value)
+	case *ast.Ident:
+		if x.Obj == nil {
+			panic("x.Obj == nil")
+		}
+		if x.Obj.Kind != ast.Con {
+			panic("x.Obj.Kind != ast.Con")
+		}
+		switch data := x.Obj.Data.(type) {
+		case int:
+			return Const{big.NewInt(int64(data))}
+		case Const:
+			return data
+		default:
+			panic(fmt.Sprintf("unhandled (%T)", x.Obj.Data))
+		}
+	}
+	panic(fmt.Sprintf("unhandled (%T)", x))
+}
+
 // makeType makes a new type for an AST type specification x or returns
 // the type referred to by a type name x. If cycleOk is set, a type may
 // refer to itself directly or indirectly; otherwise cycles are errors.
@@ -769,12 +793,8 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 			if _, ok := t.Len.(*ast.Ellipsis); ok {
 				len_ = 0
 			} else {
-				// TODO this properly, evaluating complex expressions, etc.
-				n, err := strconv.Atoi(t.Len.(*ast.BasicLit).Value)
-				if err != nil {
-					panic(err)
-				}
-				len_ = uint64(n)
+				constval := evalConst(t.Len)
+				len_ = uint64(constval.Val.(*big.Int).Int64())
 			}
 			return &Array{Elt: c.makeType(t.Elt, cycleOk), Len: len_}
 		}
@@ -1032,6 +1052,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				}
 			}
 		}
+
+	case *ast.DeferStmt:
+		c.checkExpr(s.Call, nil)
 
 	default:
 		panic(fmt.Sprintf("unimplemented %T", s))

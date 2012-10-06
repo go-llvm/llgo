@@ -430,7 +430,8 @@ func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			// XXX or are they always the same type as the operands?
 		}
 
-		return ConstValue{lhs.Const.BinaryOp(op, rhs.Const), c, typ}
+		a, b := lhs.Const.Match(rhs.Const)
+		return ConstValue{a.BinaryOp(op, b), c, typ}
 	}
 	panic("unimplemented")
 }

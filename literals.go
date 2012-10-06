@@ -30,7 +30,11 @@ import (
 )
 
 func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
-	return c.NewConstValue(lit.Kind, lit.Value)
+	v := c.NewConstValue(lit.Kind, lit.Value)
+	if typ, ok := c.types.expr[lit]; ok {
+		v.typ = typ
+	}
+	return v
 }
 
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
