@@ -49,40 +49,6 @@ func (c *compiler) ObjGetType(obj *ast.Object) types.Type {
 
 func (c *compiler) GetType(expr ast.Expr) types.Type {
 	switch x := (expr).(type) {
-	case *ast.Ident:
-		obj := c.LookupObj(x.Name)
-		return c.ObjGetType(obj)
-	case *ast.FuncType:
-		return c.VisitFuncType(x)
-	case *ast.MapType:
-		return c.VisitMapType(x)
-	case *ast.ArrayType:
-		elttype := c.GetType(x.Elt)
-		if x.Len == nil {
-			return &types.Slice{Elt: elttype}
-		} else {
-			result := &types.Array{Elt: elttype}
-			_, isellipsis := (x.Len).(*ast.Ellipsis)
-			if !isellipsis {
-				lenvalue := c.VisitExpr(x.Len)
-				constval, isconst := lenvalue.(ConstValue)
-				if !isconst {
-					panic("Array length must be a constant integer expression")
-				}
-				intval, isint := (constval.Val).(*big.Int)
-				if !isint {
-					panic("Array length must be a constant integer expression")
-				}
-				result.Len = uint64(intval.Int64())
-			}
-			return result
-		}
-	case *ast.StructType:
-		return c.VisitStructType(x)
-	case *ast.InterfaceType:
-		return c.VisitInterfaceType(x)
-	case *ast.StarExpr:
-		return &types.Pointer{Base: c.GetType(x.X)}
 	case *ast.Ellipsis:
 		return c.GetType(x.Elt)
 	default:
@@ -92,7 +58,30 @@ func (c *compiler) GetType(expr ast.Expr) types.Type {
 	return nil
 }
 
-func (c *compiler) VisitFuncType(f *ast.FuncType) *types.Func {
+func (c *compiler) VisitArrayType(a *ast.ArrayType) TypeValue {
+	elttype := c.GetType(a.Elt)
+	if a.Len == nil {
+		return TypeValue{&types.Slice{Elt: elttype}}
+	}
+
+	result := &types.Array{Elt: elttype}
+	_, isellipsis := a.Len.(*ast.Ellipsis)
+	if !isellipsis {
+		lenvalue := c.VisitExpr(a.Len)
+		constval, isconst := lenvalue.(ConstValue)
+		if !isconst {
+			panic("Array length must be a constant integer expression")
+		}
+		intval, isint := (constval.Val).(*big.Int)
+		if !isint {
+			panic("Array length must be a constant integer expression")
+		}
+		result.Len = uint64(intval.Int64())
+	}
+	return TypeValue{result}
+}
+
+func (c *compiler) VisitFuncType(f *ast.FuncType) TypeValue {
 	var fn_type types.Func
 
 	if f.Params != nil && len(f.Params.List) > 0 {
@@ -147,10 +136,10 @@ func (c *compiler) VisitFuncType(f *ast.FuncType) *types.Func {
 		}
 	}
 
-	return &fn_type
+	return TypeValue{&fn_type}
 }
 
-func (c *compiler) VisitStructType(s *ast.StructType) *types.Struct {
+func (c *compiler) VisitStructType(s *ast.StructType) TypeValue {
 	var typ = new(types.Struct)
 	if s.Fields != nil && s.Fields.List != nil {
 		tags := make(map[*ast.Object]string)
@@ -187,10 +176,10 @@ func (c *compiler) VisitStructType(s *ast.StructType) *types.Struct {
 			typ.Tags[i] = tags[field]
 		}
 	}
-	return typ
+	return TypeValue{typ}
 }
 
-func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *types.Interface {
+func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) TypeValue {
 	var iface types.Interface
 	if i.Methods != nil && i.Methods.List != nil {
 		for _, field := range i.Methods.List {
@@ -210,12 +199,12 @@ func (c *compiler) VisitInterfaceType(i *ast.InterfaceType) *types.Interface {
 			}
 		}
 	}
-	return &iface
+	return TypeValue{&iface}
 }
 
-func (c *compiler) VisitMapType(m *ast.MapType) *types.Map {
+func (c *compiler) VisitMapType(m *ast.MapType) TypeValue {
 	k, v := c.GetType(m.Key), c.GetType(m.Value)
-	return &types.Map{Key: k, Elt: v}
+	return TypeValue{&types.Map{Key: k, Elt: v}}
 }
 
 // vim: set ft=go :

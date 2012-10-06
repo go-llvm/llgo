@@ -453,6 +453,16 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 		return c.VisitTypeAssertExpr(x)
 	case *ast.SliceExpr:
 		return c.VisitSliceExpr(x)
+	case *ast.FuncType:
+		return c.VisitFuncType(x)
+	case *ast.MapType:
+		return c.VisitMapType(x)
+	case *ast.ArrayType:
+		return c.VisitArrayType(x)
+	case *ast.StructType:
+		return c.VisitStructType(x)
+	case *ast.InterfaceType:
+		return c.VisitInterfaceType(x)
 	case *ast.Ident:
 		if x.Obj == nil {
 			x.Obj = c.LookupObj(x.Name)
