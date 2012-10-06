@@ -19,6 +19,7 @@ var (
 	llvmcflags  string
 	llvmlibdir  string
 	llvmldflags string
+	llvmbindir  string
 )
 
 func errorf(format string, args ...interface{}) {
@@ -29,6 +30,14 @@ func errorf(format string, args ...interface{}) {
 func init() {
 	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config",
 		"Path to the llvm-config executable")
+}
+
+func llvmconfigValue(option string) (string, error) {
+	output, err := exec.Command(llvmconfig, option).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func initLlvm() error {
@@ -46,36 +55,38 @@ func initLlvm() error {
 	}
 
 	// llvm-config --version
-	var output []byte
-	output, err = exec.Command(llvmconfig, "--version").CombinedOutput()
+	llvmversion, err = llvmconfigValue("--version")
 	if err != nil {
 		return err
 	}
-	llvmversion = strings.TrimSpace(string(output))
 	log.Printf("LLVM version: %s", llvmversion)
 
-	// llvm-config --libdir
-	output, err = exec.Command(llvmconfig, "--libdir").CombinedOutput()
+	// llvm-config --bindir
+	llvmbindir, err = llvmconfigValue("--bindir")
 	if err != nil {
 		return err
 	}
-	llvmlibdir = strings.TrimSpace(string(output))
+	log.Printf("LLVM executables directory: %s", llvmbindir)
+
+	// llvm-config --libdir
+	llvmlibdir, err = llvmconfigValue("--libdir")
+	if err != nil {
+		return err
+	}
 	log.Printf("LLVM library directory: %s", llvmlibdir)
 
 	// llvm-config --ldflags
-	output, err = exec.Command(llvmconfig, "--ldflags").CombinedOutput()
+	llvmldflags, err = llvmconfigValue("--ldflags")
 	if err != nil {
 		return err
 	}
-	llvmldflags = strings.TrimSpace(string(output))
 	log.Printf("LLVM LDFLAGS: %s", llvmldflags)
 
 	// llvm-config --cflags
-	output, err = exec.Command(llvmconfig, "--cflags").CombinedOutput()
+	llvmcflags, err = llvmconfigValue("--ldflags")
 	if err != nil {
 		return err
 	}
-	llvmcflags = strings.TrimSpace(string(output))
 	log.Printf("LLVM CFLAGS: %s", llvmcflags)
 
 	return nil
@@ -87,6 +98,7 @@ func main() {
 	actions := []func() error{
 		initLlvm,
 		buildLlgo,
+		genSyscalls,
 		buildRuntime,
 	}
 	for _, action := range actions {

@@ -35,7 +35,8 @@ func getPackage(name string) (*build.Package, error) {
 		}
 
 		// Look for .ll files, treat them the same as .s.
-		// TODO look for build tags in the .ll file.
+		// TODO look for build tags in the .ll file, check filename
+		// for GOOS/GOARCH, etc.
 		var llfiles []string
 		llfiles, err = filepath.Glob(pkg.Dir + "/*.ll")
 		for _, file := range llfiles {
@@ -70,6 +71,20 @@ func buildPackage(name, pkgdir string) error {
 		return err
 	}
 
+	// Link .ll files in.
+	if len(pkg.SFiles) > 0 {
+		args = []string{"-o", outfile, outfile}
+		args = append(args, pkg.SFiles...)
+		llvmlink := filepath.Join(llvmbindir, "llvm-link")
+		cmd := exec.Command(llvmlink, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -91,7 +106,7 @@ func buildRuntime() error {
 		return err
 	}
 
-	runtimePackages := []string{"runtime"}
+	runtimePackages := []string{"runtime", "syscall"}
 	for _, name := range runtimePackages {
 		log.Printf("- %s", name)
 		err = buildPackage(name, outdir)
