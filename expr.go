@@ -83,6 +83,11 @@ func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	switch expr.Op {
 	case token.LOR, token.LAND:
+		if lhs, ok := lhs.(ConstValue); ok {
+			if expr.Op == token.LOR || lhs.Const.Val.(bool) {
+				return c.VisitExpr(expr.Y)
+			}
+		}
 		return c.compileLogicalOp(expr.Op, lhs, func() Value { return c.VisitExpr(expr.Y) })
 	case token.SHL, token.SHR:
 		rhs := c.VisitExpr(expr.Y)
