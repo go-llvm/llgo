@@ -322,6 +322,31 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		return v.convertV2I(interface_)
 	}
 
+	// string -> []byte
+	byteslice := &types.Slice{Elt: types.Byte}
+	if src_typ == types.String && types.Identical(dst_typ, byteslice) {
+		c := v.compiler
+		value := v.LLVMValue()
+		strdata := c.builder.CreateExtractValue(value, 0, "")
+		strlen := c.builder.CreateExtractValue(value, 1, "")
+		struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
+		struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
+		struct_ = c.builder.CreateInsertValue(struct_, strlen, 1, "")
+		struct_ = c.builder.CreateInsertValue(struct_, strlen, 2, "")
+		return c.NewLLVMValue(struct_, byteslice)
+	}
+	// []byte -> string
+	if types.Identical(src_typ, byteslice) && dst_typ == types.String {
+		c := v.compiler
+		value := v.LLVMValue()
+		data := c.builder.CreateExtractValue(value, 0, "")
+		len := c.builder.CreateExtractValue(value, 1, "")
+		struct_ := llvm.Undef(c.types.ToLLVM(types.String))
+		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")
+		struct_ = c.builder.CreateInsertValue(struct_, len, 1, "")
+		return c.NewLLVMValue(struct_, types.String)
+	}
+
 	// TODO other special conversions, e.g. int->string.
 	llvm_type := v.compiler.types.ToLLVM(dst_typ)
 
