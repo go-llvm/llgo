@@ -133,16 +133,22 @@ func (x Const) Match(y Const) (u, v Const) {
 // otherwise the result is invalid.
 func (x Const) Convert(typ *Type) Const {
 	// TODO(gri) implement this
-	/*
-			switch x := x.Val.(type) {
-			case bool:
-			case *big.Int:
-			case *big.Rat:
-			case cmplx:
-			case string:
-			}
-		    //panic("unimplemented")
-	*/
+	switch x := x.Val.(type) {
+	//case bool:
+	//case *big.Int:
+	case *big.Rat:
+		switch Underlying(*typ) {
+		case Byte, Int, Uint, Int8, Uint8, Int16, Uint16, Int32, Uint32, Int64, Uint64:
+			// Convert to an integer. Remove the fractional component.
+			num, denom := x.Num(), x.Denom()
+			var z big.Int
+			z.Quo(num, denom)
+			return Const{&z}
+		}
+		//case cmplx:
+		//case string:
+	}
+	//panic("unimplemented")
 	return x
 }
 

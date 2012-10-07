@@ -33,6 +33,7 @@ func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
 	v := c.NewConstValue(lit.Kind, lit.Value)
 	if typ, ok := c.types.expr[lit]; ok {
 		v.typ = typ
+		v.Const = v.Const.Convert(&typ)
 	}
 	return v
 }
