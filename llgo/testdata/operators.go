@@ -41,5 +41,10 @@ func main() {
 	if a == 0 && (b != 0 || c != 0) {
 		println("!")
 	}
+
+	var si int = -123
+	var ui int = 123
+	println(^si)
+	println(^ui)
 }
 

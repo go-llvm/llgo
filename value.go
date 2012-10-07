@@ -279,6 +279,11 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	case token.NOT:
 		value := b.CreateNot(v.LLVMValue(), "")
 		return v.compiler.NewLLVMValue(value, v.typ)
+	case token.XOR:
+		lhs := v.LLVMValue()
+		rhs := llvm.ConstAllOnes(lhs.Type())
+		value := b.CreateXor(lhs, rhs, "")
+		return v.compiler.NewLLVMValue(value, v.typ)
 	default:
 		panic("Unhandled operator: ") // + expr.Op)
 	}
