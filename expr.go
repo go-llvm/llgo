@@ -118,10 +118,16 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	switch x := (expr.Fun).(type) {
 	case *ast.Ident:
 		switch x.String() {
+		case "copy":
+			// TODO
+			zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
+			return c.NewLLVMValue(zero, types.Int)
 		case "print":
 			return c.VisitPrint(expr, false)
 		case "println":
 			return c.VisitPrint(expr, true)
+		case "cap":
+			return c.VisitCap(expr)
 		case "len":
 			return c.VisitLen(expr)
 		case "new":
@@ -322,7 +328,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
 		ftype := c.ObjGetType(iface.Methods[i]).(*types.Func)
 		method := c.NewLLVMValue(c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), ""), ftype)
-		method.receiver = c.NewLLVMValue(receiver, ftype.Recv.Type.(types.Type))
+		method.receiver = c.NewLLVMValue(receiver, &types.Pointer{Base: types.Int8})
 		return method
 	}
 

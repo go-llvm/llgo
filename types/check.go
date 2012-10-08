@@ -411,14 +411,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					return Int
 				case "make":
 					t := c.makeType(args[0], true)
-					// TODO check len/cap args.
-					/*
-						switch t := Underlying(t).(type) {
-						case *Slice:
-						case *Map:
-						case *Chan:
-						}
-					*/
+					for i := 1; i < len(args); i++ {
+						c.checkExpr(args[i], nil)
+					}
 					return t
 				case "new":
 					t := c.makeType(args[0], true)
@@ -646,8 +641,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 
 	case *ast.TypeAssertExpr:
 		// x.Type == nil iff we're visiting x.(type) switch.
+		exprTyp := c.checkExpr(x.X, nil)
 		if x.Type == nil {
-			return nil
+			return exprTyp
 		}
 
 		// TODO perform static type assertions.
@@ -1038,7 +1034,15 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		if s.Init != nil {
 			c.checkStmt(s.Init)
 		}
+
+		var assignident *ast.Ident
+		var assigntyp Type
 		c.checkStmt(s.Assign)
+		if assign, ok := s.Assign.(*ast.AssignStmt); ok {
+			assignident = assign.Lhs[0].(*ast.Ident)
+			assigntyp = assignident.Obj.Type.(Type)
+		}
+
 		for _, s_ := range s.Body.List {
 			cc := s_.(*ast.CaseClause)
 			for _, e := range cc.List {
@@ -1050,6 +1054,20 @@ func (c *checker) checkStmt(s ast.Stmt) {
 					typ := c.makeType(e, true)
 					c.types[e] = typ
 				}
+			}
+
+			// In clauses with a case listing exactly one type, the variable
+			// has that type; otherwise, the variable has the type of the
+			// expression in the TypeSwitchGuard. 
+			if assignident != nil {
+				if len(cc.List) == 1 {
+					assignident.Obj.Type = c.types[cc.List[0]]
+				} else {
+					assignident.Obj.Type = assigntyp
+				}
+			}
+			for _, s := range cc.Body {
+				c.checkStmt(s)
 			}
 		}
 
@@ -1215,15 +1233,20 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 	}
 	sort.Strings(filenames)
 
-	for _, file := range pkg.Files {
+	for _, filename := range filenames {
+		file := pkg.Files[filename]
+
 		// Associate the type of repeat consts with each individual constant.
 		c.decomposeRepeatConsts(file)
 
 		// Collect methods, associating each with its receiver type's object.
 		c.collectMethods(file)
+	}
 
-		// Check init functions here, since they don't exist in the package scope.
+	for _, filename := range filenames {
+		file := pkg.Files[filename]
 		for _, decl := range file.Decls {
+			// Check init functions here, since they don't exist in the package scope.
 			if fdecl, ok := decl.(*ast.FuncDecl); ok && fdecl.Recv == nil && fdecl.Name.Name == "init" {
 				c.checkStmt(fdecl.Body)
 			}

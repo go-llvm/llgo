@@ -214,8 +214,13 @@ func (v *LLVMValue) loadI2V(typ types.Type) Value {
 		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")
 		return c.NewLLVMValue(ptr, typ).makePointee()
 	}
-	bits := c.target.TypeSizeInBits(c.types.ToLLVM(typ))
+
 	value := c.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
+		value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
+		return c.NewLLVMValue(value, typ)
+	}
+	bits := c.target.TypeSizeInBits(c.types.ToLLVM(typ))
 	value = c.builder.CreatePtrToInt(value, llvm.IntType(int(bits)), "")
 	value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
 	return c.NewLLVMValue(value, typ)

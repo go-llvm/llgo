@@ -37,4 +37,7 @@ func main() {
 	// formatting of the exponent.
 	//println(10 * 1e9)
 	println(darwinAMD64)
+
+	// Test conversion.
+	println(int64(10) * 1e9)
 }

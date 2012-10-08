@@ -31,6 +31,11 @@ import (
 	"unsafe"
 )
 
+func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
+	// TODO implement me
+	return c.VisitLen(expr)
+}
+
 func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	if len(expr.Args) > 1 {
 		panic("Expecting only one argument to len")

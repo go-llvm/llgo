@@ -505,8 +505,6 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		//	panic(fmt.Sprint("const ", int_val, " overflows int"))
 		//}
 		//return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
-	case types.Uint:
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 
 	case types.Int8:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)

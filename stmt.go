@@ -804,6 +804,10 @@ func (c *compiler) VisitLabeledStmt(stmt *ast.LabeledStmt) {
 	c.VisitStmt(stmt.Stmt)
 }
 
+func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
+	// TODO
+}
+
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.logger != nil {
 		c.logger.Println("Compile statement:", reflect.TypeOf(stmt),
@@ -838,6 +842,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitTypeSwitchStmt(x)
 	case *ast.LabeledStmt:
 		c.VisitLabeledStmt(x)
+	case *ast.DeferStmt:
+		c.VisitDeferStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}

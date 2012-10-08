@@ -137,6 +137,11 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 	} else {
 		high = llvm.ConstAllOnes(llvm.Int32Type()) // -1
 	}
+
+	if _, ok := types.Underlying(value.Type()).(*types.Pointer); ok {
+		value = value.(*LLVMValue).makePointee()
+	}
+
 	switch typ := types.Underlying(value.Type()).(type) {
 	case *types.Array:
 		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int32) slice")

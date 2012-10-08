@@ -284,6 +284,7 @@ func (tm *LLVMTypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
 		fntype.Recv = ast.NewObj(ast.Var, "")
 		fntype.Recv.Type = receiver_type
 		elements[n+2] = tm.ToLLVM(fntype)
+		fntype.Recv = nil
 	}
 	return llvm.StructType(elements, false)
 }
