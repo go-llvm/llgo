@@ -799,7 +799,9 @@ func (c *compiler) VisitLabeledStmt(stmt *ast.LabeledStmt) {
 		stmt.Label.Obj.Data = labeledBlock
 	}
 	labeledBlock.MoveAfter(currBlock)
-	c.builder.CreateBr(labeledBlock)
+	if in := currBlock.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
+		c.builder.CreateBr(labeledBlock)
+	}
 	c.builder.SetInsertPointAtEnd(labeledBlock)
 	c.VisitStmt(stmt.Stmt)
 }

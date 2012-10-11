@@ -10,6 +10,8 @@ target triple = "x86_64-unknown-linux"
 ; r1, r2, errno
 %syscallres = type {i64, i64, i64}
 
+; TODO check if LLVM will optimise a call from RawSyscall
+; to RawSyscall6 with constant zero arguments.
 define %syscallres @syscall.RawSyscall(i64, i64, i64, i64) {
 entry:
 	%4 = call {i64, i64} asm sideeffect "syscall\0A", "={ax},={dx},{ax},{di},{si},{dx},{r10},{r8},{r9}"(i64 %0, i64 %1, i64 %2, i64 %3, i64 0, i64 0, i64 0) nounwind
@@ -22,6 +24,19 @@ entry:
 	ret %syscallres %9
 }
 
+define %syscallres @syscall.RawSyscall6(i64, i64, i64, i64, i64, i64, i64) {
+entry:
+	%7 = call {i64, i64} asm sideeffect "syscall\0A", "={ax},={dx},{ax},{di},{si},{dx},{r10},{r8},{r9}"(i64 %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6) nounwind
+	%8 = extractvalue {i64, i64} %7, 0
+	%9 = extractvalue {i64, i64} %7, 1
+	%10 = insertvalue %syscallres undef, i64 %8, 0
+	%11 = insertvalue %syscallres %10, i64 %9, 1
+	%12 = insertvalue %syscallres %11, i64 0, 2
+	; TODO check result, update results appropriately.
+	ret %syscallres %12
+}
+
 ; No tie-in with runtime yet, since there's no scheduler. Just alias it.
 @syscall.Syscall = alias %syscallres (i64, i64, i64, i64)* @syscall.RawSyscall
+@syscall.Syscall6 = alias %syscallres (i64, i64, i64, i64, i64, i64, i64)* @syscall.RawSyscall6
 

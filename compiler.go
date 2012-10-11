@@ -153,7 +153,6 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			t := obj.Type.(types.Type)
 			name := c.pkgmap[obj] + "." + obj.Name
 			g := llvm.AddGlobal(module, c.types.ToLLVM(t), name)
-			g.SetLinkage(llvm.AvailableExternallyLinkage)
 			obj.Data = c.NewLLVMValue(g, &types.Pointer{Base: t}).makePointee()
 		}
 
@@ -319,7 +318,10 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	}
 
 	// Define intrinsics for use by the runtime: malloc, free, memcpy, etc.
-	compiler.defineRuntimeIntrinsics()
+	// These could be defined in LLVM IR, and may be moved there later.
+	if pkg.Name == "runtime" {
+		compiler.defineRuntimeIntrinsics()
+	}
 
 	// Create global constructors.
 	//

@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 )
 
-// genSyscalls generates the standard syscall package.
-func genSyscalls() error {
+// genSyscall generates the standard syscall package.
+func genSyscall() error {
 	log.Println("Generating syscall package")
 
 	// XXX currently just copying the already-generated Go files from the

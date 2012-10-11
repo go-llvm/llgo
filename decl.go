@@ -49,10 +49,12 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		if c.module.Name == "main" && fn_name == "main" {
 			exported = true
 		} else {
-			if f.Recv != nil {
+			if fn_type.Recv != nil {
 				recv := fn_type.Recv
 				if recvtyp, ok := recv.Type.(*types.Pointer); ok {
 					recv = recvtyp.Base.(*types.Name).Obj
+				} else {
+					recv = recv.Type.(*types.Name).Obj
 				}
 				pkgname := c.pkgmap[recv]
 				fn_name = pkgname + "." + recv.Name + "." + fn_name
@@ -264,7 +266,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		// If the name is "_", then we can just evaluate the expression
 		// and ignore the result. We handle package level variables
 		// specially, below.
-		ispackagelevel := len(c.functions) == 0
+		_, ispackagelevel := c.pkgmap[name_.Obj]
 		name := name_.String()
 		if name == "_" && !ispackagelevel {
 			if expr != nil {

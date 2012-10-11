@@ -10,7 +10,9 @@ start:
 	} else {
 		goto end
 	}
+	return
 end:
 	println("done")
+	return
 }
 

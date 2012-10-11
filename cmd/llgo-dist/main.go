@@ -83,7 +83,7 @@ func initLlvm() error {
 	log.Printf("LLVM LDFLAGS: %s", llvmldflags)
 
 	// llvm-config --cflags
-	llvmcflags, err = llvmconfigValue("--ldflags")
+	llvmcflags, err = llvmconfigValue("--cflags")
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func main() {
 	actions := []func() error{
 		initLlvm,
 		buildLlgo,
-		genSyscalls,
+		genSyscall,
 		buildRuntime,
 	}
 	for _, action := range actions {

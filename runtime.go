@@ -68,9 +68,6 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		ftype := fdecl.Name.Obj.Type.(*types.Func)
 		llvmfptrtype := c.types.ToLLVM(ftype)
 		f = llvm.AddFunction(c.module.Module, name, llvmfptrtype.ElementType())
-		if !strings.HasPrefix(name, "llvm.") {
-			f.SetLinkage(llvm.AvailableExternallyLinkage)
-		}
 	}
 	c.functions[name+":"+signature] = f
 	return f

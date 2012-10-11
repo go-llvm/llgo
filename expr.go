@@ -143,6 +143,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return nil
 		case "panic":
 			// TODO
+			c.builder.CreateUnreachable()
 			return nil
 		}
 

@@ -15,11 +15,12 @@ import (
 	"strings"
 )
 
-func getPackage(name string) (*build.Package, error) {
+const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
+
+func getPackage(pkgpath string) (*build.Package, error) {
 	var err error
 	var pkg *build.Package
 
-	pkgpath := "github.com/axw/llgo/pkg/" + name
 	pkg, err = build.Import(pkgpath, "", 0)
 	if err != nil {
 		return nil, err
@@ -47,20 +48,18 @@ func getPackage(name string) (*build.Package, error) {
 	return pkg, nil
 }
 
-func buildPackage(name, pkgdir string) error {
-	dir, file := path.Split(name)
-	pkgdir = path.Join(pkgdir, dir)
-	err := os.MkdirAll(pkgdir, os.FileMode(0755))
+func buildPackage(pkgpath, outfile string) error {
+	dir, _ := path.Split(outfile)
+	err := os.MkdirAll(dir, os.FileMode(0755))
 	if err != nil {
 		return err
 	}
 
-	pkg, err := getPackage(name)
+	pkg, err := getPackage(pkgpath)
 	if err != nil {
 		return err
 	}
 
-	outfile := path.Join(pkgdir, file) + ".a"
 	args := []string{"-c", "-o", outfile}
 	args = append(args, pkg.GoFiles...)
 	cmd := exec.Command(llgobin, args...)
@@ -106,10 +105,21 @@ func buildRuntime() error {
 		return err
 	}
 
-	runtimePackages := []string{"runtime", "syscall"}
-	for _, name := range runtimePackages {
-		log.Printf("- %s", name)
-		err = buildPackage(name, outdir)
+	type Package struct {
+		name string
+		path string
+	}
+	runtimePackages := [...]Package{
+		{"runtime", llgoPkgPrefix + "runtime"},
+		{"syscall", llgoPkgPrefix + "syscall"},
+		{"sync/atomic", llgoPkgPrefix + "sync/atomic"},
+		{"sync", "sync"},
+	}
+	for _, pkg := range runtimePackages {
+		log.Printf("- %s", pkg.name)
+		dir, file := path.Split(pkg.name)
+		outfile := path.Join(outdir, dir, file+".a")
+		err = buildPackage(pkg.path, outfile)
 		if err != nil {
 			return err
 		}
