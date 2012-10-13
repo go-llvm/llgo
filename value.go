@@ -297,20 +297,24 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 
 	// Get the underlying type, if any.
 	orig_dst_typ := dst_typ
-	if name, isname := dst_typ.(*types.Name); isname {
-		dst_typ = types.Underlying(name)
-	}
-
-	// Get the underlying type, if any.
-	if name, isname := src_typ.(*types.Name); isname {
-		src_typ = types.Underlying(name)
-	}
+	dst_typ = types.Underlying(dst_typ)
+	src_typ = types.Underlying(src_typ)
 
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.Identical(src_typ, dst_typ) {
-		dst_typ = orig_dst_typ
 		// TODO avoid load here by reusing pointer value, if exists.
-		return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
+		return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+	}
+
+	// Both pointer types with identical underlying types? Same as above.
+	if src_typ, ok := src_typ.(*types.Pointer); ok {
+		if dst_typ, ok := dst_typ.(*types.Pointer); ok {
+			src_typ := types.Underlying(src_typ.Base)
+			dst_typ := types.Underlying(dst_typ.Base)
+			if types.Identical(src_typ, dst_typ) {
+				return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+			}
+		}
 	}
 
 	// Convert from an interface type.
