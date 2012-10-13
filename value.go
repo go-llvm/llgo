@@ -208,19 +208,39 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 	switch op {
 	case token.MUL:
-		result = b.CreateMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.QUO:
-		result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.REM:
-		result = b.CreateURem(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFRem(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateURem(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.ADD:
-		result = b.CreateAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SUB:
-		result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SHL:
 		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
@@ -238,19 +258,39 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.EQL:
-		result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LSS:
-		result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatOLT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LEQ: // TODO signed/unsigned
-		result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatOLE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GTR:
-		result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatOGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GEQ:
-		result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if isfp {
+			result = b.CreateFCmp(llvm.FloatOGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -276,7 +316,16 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	b := v.compiler.builder
 	switch op {
 	case token.SUB:
-		return v.compiler.NewLLVMValue(b.CreateNeg(v.LLVMValue(), ""), v.typ)
+		var value llvm.Value
+		isfp := types.Identical(types.Underlying(v.typ), types.Float32) ||
+			types.Identical(types.Underlying(v.typ), types.Float64)
+		if isfp {
+			zero := llvm.ConstNull(v.compiler.types.ToLLVM(v.Type()))
+			value = b.CreateFSub(zero, v.LLVMValue(), "")
+		} else {
+			value = b.CreateNeg(v.LLVMValue(), "")
+		}
+		return v.compiler.NewLLVMValue(value, v.typ)
 	case token.ADD:
 		return v // No-op
 	case token.AND:
@@ -399,6 +448,18 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 			case delta > 0:
 				lv = v.compiler.builder.CreateTrunc(lv, llvm_type, "")
 			}
+			return v.compiler.NewLLVMValue(lv, dst_typ)
+		}
+	case llvm.DoubleTypeKind:
+		switch llvm_type.TypeKind() {
+		case llvm.FloatTypeKind:
+			lv = v.compiler.builder.CreateFPTrunc(lv, llvm_type, "")
+			return v.compiler.NewLLVMValue(lv, dst_typ)
+		}
+	case llvm.FloatTypeKind:
+		switch llvm_type.TypeKind() {
+		case llvm.DoubleTypeKind:
+			lv = v.compiler.builder.CreateFPExt(lv, llvm_type, "")
 			return v.compiler.NewLLVMValue(lv, dst_typ)
 		}
 	}
