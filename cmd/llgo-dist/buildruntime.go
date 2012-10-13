@@ -48,7 +48,7 @@ func getPackage(pkgpath string) (*build.Package, error) {
 	return pkg, nil
 }
 
-func buildPackage(pkgpath, outfile string) error {
+func buildPackage(name, pkgpath, outfile string) error {
 	dir, _ := path.Split(outfile)
 	err := os.MkdirAll(dir, os.FileMode(0755))
 	if err != nil {
@@ -60,7 +60,7 @@ func buildPackage(pkgpath, outfile string) error {
 		return err
 	}
 
-	args := []string{"-c", "-o", outfile}
+	args := []string{"-c", "-importpath", name, "-o", outfile}
 	args = append(args, pkg.GoFiles...)
 	cmd := exec.Command(llgobin, args...)
 	cmd.Stdout = os.Stdout
@@ -119,7 +119,7 @@ func buildRuntime() error {
 		log.Printf("- %s", pkg.name)
 		dir, file := path.Split(pkg.name)
 		outfile := path.Join(outdir, dir, file+".a")
-		err = buildPackage(pkg.path, outfile)
+		err = buildPackage(pkg.name, pkg.path, outfile)
 		if err != nil {
 			return err
 		}
