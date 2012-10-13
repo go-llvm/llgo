@@ -46,5 +46,6 @@ func main() {
 	var ui int = 123
 	println(^si)
 	println(^ui)
+	println(ui &^ 3)
 }
 

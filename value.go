@@ -255,6 +255,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+	case token.AND_NOT: // a &^ b
+		rhsval := rhs.LLVMValue()
+		rhsval = b.CreateXor(rhsval, llvm.ConstAllOnes(rhsval.Type()), "")
+		result = b.CreateAnd(lhs.LLVMValue(), rhsval, "")
+		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.OR: // a | b
 		result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
