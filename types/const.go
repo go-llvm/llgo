@@ -135,7 +135,13 @@ func (x Const) Convert(typ *Type) Const {
 	// TODO(gri) implement this
 	switch x := x.Val.(type) {
 	//case bool:
-	//case *big.Int:
+	case *big.Int:
+		switch Underlying(*typ) {
+		case Float32, Float64:
+			var z big.Rat
+			z.SetInt(x)
+			return Const{&z}
+		}
 	case *big.Rat:
 		switch Underlying(*typ) {
 		case Byte, Int, Uint, Int8, Uint8, Int16, Uint16, Int32, Uint32, Int64, Uint64:

@@ -18,10 +18,14 @@ const (
 )
 
 const (
-	expbits32 uint = 8
-	bias32         = -1<<(expbits32-1) + 1
-	darwinAMD64 = runtime.GOOS == "darwin" && runtime.GOARCH == "amd64"
+	expbits32   uint = 8
+	bias32           = -1<<(expbits32-1) + 1
+	darwinAMD64      = runtime.GOOS == "darwin" && runtime.GOARCH == "amd64"
 )
+
+func f1() float32 {
+	return 0
+}
 
 func main() {
 	println(a)

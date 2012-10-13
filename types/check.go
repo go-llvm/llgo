@@ -23,6 +23,9 @@ type checker struct {
 	errors  scanner.ErrorList
 	types   map[ast.Expr]Type
 	methods map[*ast.Object]ObjList
+
+	// function is the type of the function currently being checked
+	function *Func
 }
 
 func (c *checker) errorf(pos token.Pos, format string, args ...interface{}) string {
@@ -694,6 +697,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 	case *ast.FuncLit:
 		t := c.makeType(x.Type, false)
 		c.checkStmt(x.Body)
+		c.checkFunc(x.Body, t.(*Func))
 		return t
 	}
 
@@ -1003,6 +1007,15 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		// TODO we need to check the result type(s) against the
 		// current function's declared return type(s). We need
 		// context for that.
+		if c.function != nil {
+			// Propagate the return type of the current function
+			// so we implicitly convert constants.
+			if len(s.Results) == len(c.function.Results) {
+				for i, res := range c.function.Results {
+					c.types[s.Results[i]] = res.Type.(Type)
+				}
+			}
+		}
 		for _, e := range s.Results {
 			c.checkExpr(e, nil)
 		}
@@ -1204,13 +1217,20 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		} else {
 			// Only check body of non-method functions. We check method
 			// bodies later, to avoid references to incomplete types.
-			if fndecl.Body != nil {
-				c.checkStmt(fndecl.Body)
-			}
+			c.checkFunc(fndecl.Body, fn)
 		}
 
 	default:
 		panic("unreachable")
+	}
+}
+
+func (c *checker) checkFunc(body *ast.BlockStmt, ftyp *Func) {
+	if body != nil {
+		old := c.function
+		c.function = ftyp
+		c.checkStmt(body)
+		c.function = old
 	}
 }
 
@@ -1248,7 +1268,7 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 		for _, decl := range file.Decls {
 			// Check init functions here, since they don't exist in the package scope.
 			if fdecl, ok := decl.(*ast.FuncDecl); ok && fdecl.Recv == nil && fdecl.Name.Name == "init" {
-				c.checkStmt(fdecl.Body)
+				c.checkFunc(fdecl.Body, nil)
 			}
 
 			// Check unnamed var's.
@@ -1272,9 +1292,7 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 
 	for _, methods := range c.methods {
 		for _, m := range methods {
-			if f := m.Decl.(*ast.FuncDecl); f.Body != nil {
-				c.checkStmt(f.Body)
-			}
+			c.checkFunc(m.Decl.(*ast.FuncDecl).Body, m.Type.(*Func))
 		}
 	}
 
