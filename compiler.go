@@ -47,7 +47,7 @@ func (m Module) Dispose() {
 }
 
 type Compiler interface {
-	Compile(*token.FileSet, *ast.Package, map[ast.Expr]types.Type) (*Module, error)
+	Compile(fset *token.FileSet, pkg *ast.Package, importpath string, exprtypes map[ast.Expr]types.Type) (*Module, error)
 	SetTraceEnabled(bool)
 	SetTargetArch(string)
 	SetTargetOs(string)
@@ -66,6 +66,7 @@ type compiler struct {
 	initfuncs      []Value
 	varinitfuncs   []Value
 	pkg            *ast.Package
+	importpath     string
 	fileset        *token.FileSet
 	filescope      *ast.Scope
 	scope          *ast.Scope
@@ -172,16 +173,18 @@ func (c *compiler) Lookup(name string) (Value, *ast.Object) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func createPackageMap(pkg *ast.Package) map[*ast.Object]string {
+// createPackageMap maps package-level objects to the import path of the
+// package they're defined in.
+func createPackageMap(pkg *ast.Package, pkgid string) map[*ast.Object]string {
 	pkgmap := make(map[*ast.Object]string)
 	for _, obj := range pkg.Scope.Objects {
-		pkgmap[obj] = pkg.Name
+		pkgmap[obj] = pkgid
 	}
-	for _, pkgobj := range pkg.Imports {
-		pkgname := pkgobj.Name
+	for pkgid, pkgobj := range pkg.Imports {
 		scope := pkgobj.Data.(*ast.Scope)
 		for _, obj := range scope.Objects {
-			pkgmap[obj] = pkgname
+			// Use the package ID as the symbol name prefix.
+			pkgmap[obj] = pkgid
 		}
 	}
 	return pkgmap
@@ -253,11 +256,12 @@ func (compiler *compiler) GetTargetTriple() string {
 }
 
 func (compiler *compiler) Compile(fset *token.FileSet,
-	pkg *ast.Package,
+	pkg *ast.Package, importpath string,
 	exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg
+	compiler.importpath = importpath
 	compiler.initfuncs = nil
 	compiler.varinitfuncs = nil
 
@@ -304,7 +308,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.
-	compiler.pkgmap = createPackageMap(pkg)
+	compiler.pkgmap = createPackageMap(pkg, importpath)
 
 	// Compile each file in the package.
 	for _, file := range pkg.Files {

@@ -63,7 +63,7 @@ func getRuntimeModule() (m llvm.Module, err error) {
 	gofiles, err := getRuntimeFiles()
 	if err == nil {
 		var runtimeModule *llgo.Module
-		runtimeModule, err = compileFiles(gofiles)
+		runtimeModule, err = compileFiles(gofiles, "runtime")
 		if runtimeModule != nil {
 			m = runtimeModule.Module
 		}
@@ -179,7 +179,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 
 	// Now compile to and interpret the LLVM bitcode, comparing the output to
 	// the output of "go run" above.
-	m, err := compileFiles(files)
+	m, err := compileFiles(files, "main")
 	if err != nil {
 		return err
 	}

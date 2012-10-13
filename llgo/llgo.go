@@ -56,6 +56,10 @@ var trace = flag.Bool(
 	"trace", false,
 	"Trace the compilation process")
 
+var importpath = flag.String(
+	"importpath", "",
+	"Package import path of the source being compiled")
+
 var version = flag.Bool(
 	"version", false,
 	"Display version information and exit")
@@ -111,7 +115,7 @@ func isGoFilename(filename string) bool {
 		strings.HasSuffix(filename, ".go")
 }
 
-func compileFiles(filenames []string) (*llgo.Module, error) {
+func compileFiles(filenames []string, importpath string) (*llgo.Module, error) {
 	i := 0
 	for _, filename := range filenames {
 		switch _, err := os.Stat(filename); {
@@ -126,10 +130,10 @@ func compileFiles(filenames []string) (*llgo.Module, error) {
 		return nil, errors.New("No Go source files were specified")
 	}
 	fset := token.NewFileSet()
-	return compilePackage(fset, parseFiles(fset, filenames[0:i]))
+	return compilePackage(fset, parseFiles(fset, filenames[0:i]), importpath)
 }
 
-func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Module, error) {
+func compilePackage(fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
 	// make a package (resolve all identifiers)
 	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
 	if err != nil {
@@ -148,7 +152,7 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File) (*llgo.Modu
 		os.Exit(0)
 	}
 
-	return compiler.Compile(fset, pkg, exprTypes)
+	return compiler.Compile(fset, pkg, importpath, exprTypes)
 }
 
 func writeObjectFile(m *llgo.Module) error {
@@ -214,7 +218,7 @@ func main() {
 		displayTriple()
 	}
 
-	module, err := compileFiles(flag.Args())
+	module, err := compileFiles(flag.Args(), *importpath)
 	if err == nil {
 		defer module.Dispose()
 		if exitCode == 0 {
