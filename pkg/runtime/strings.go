@@ -1,24 +1,6 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 Andrew Wilkins.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package runtime
 
@@ -88,6 +70,36 @@ func stringslice(a _string, low, high int32) _string {
 	}
 	a.len = high - low
 	return a
+}
+
+// strnext returns the rune/codepoint at position i,
+// along with the number of bytes that make it up.
+func strnext(s _string, i int) (n int, value rune) {
+	ptr := uintptr(unsafe.Pointer(s.str)) + uintptr(i)
+	c0 := *(*int8)(unsafe.Pointer(ptr))
+	n = uint(ctlz8(^c0))
+	if n == 0 {
+		value = rune(c0)
+		n = 1
+		return
+	} else if i+n > s.len {
+		value = 0xFFFD
+		n = 1
+		return
+	}
+	value = rune(c0 & int8(0xFF>>n))
+	for j := uint(1); j < n; j++ {
+		c := *(*int8)(unsafe.Pointer(ptr) + uintptr(j))
+		// Make sure only the top bit is set.
+		if c&0xC0 != 0x80 {
+			n = 1
+			value = 0xFFFD
+			return
+		}
+		// only take the low 6 bits of continuation bytes.
+		value = (value << 6) | rune(c&0x3F)
+	}
+	return
 }
 
 // vim: set ft=go:

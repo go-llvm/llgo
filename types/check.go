@@ -982,6 +982,18 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				c.errorf(s.Pos(), "too many variables in range")
 				return
 			}
+		case *Name:
+			if x != String {
+				c.errorf(s.Pos(), "invalid type for range")
+				return
+			}
+			k, v = Int, Rune
+		case *Basic:
+			if x.Kind != StringKind {
+				c.errorf(s.Pos(), "invalid type for range")
+				return
+			}
+			k, v = Int, Rune
 		default:
 			c.errorf(s.Pos(), "invalid type for range")
 			return

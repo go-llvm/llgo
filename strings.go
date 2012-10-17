@@ -77,4 +77,15 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 	return c.NewLLVMValue(result, types.Bool)
 }
 
+func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Value) {
+	strnext := c.NamedFunction("runtime.strnext", "func f(s _string, i int) (int, rune)")
+	_string := strnext.Type().ElementType().ParamTypes()[0]
+	strval = c.coerceString(strval, _string)
+	args := []llvm.Value{strval, index}
+	result := c.builder.CreateCall(strnext, args, "")
+	consumed = c.builder.CreateExtractValue(result, 0, "")
+	value = c.builder.CreateExtractValue(result, 1, "")
+	return
+}
+
 // vim: set ft=go:

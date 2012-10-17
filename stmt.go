@@ -568,6 +568,8 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	case *types.Map:
 		goto maprange
 	case *types.Name:
+		stringvalue := x.LLVMValue()
+		length = c.builder.CreateExtractValue(stringvalue, 1, "")
 		goto stringrange
 	case *types.Array:
 		isarray = true
@@ -616,7 +618,30 @@ maprange:
 	}
 
 stringrange:
-	panic("string range unimplemented")
+	{
+		zero := llvm.ConstNull(llvm.Int32Type())
+		currBlock = c.builder.GetInsertBlock()
+		c.builder.CreateBr(condBlock)
+		c.builder.SetInsertPointAtEnd(condBlock)
+		index := c.builder.CreatePHI(llvm.Int32Type(), "index")
+		lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
+		c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
+		c.builder.SetInsertPointAtEnd(loopBlock)
+		consumed, value := c.stringNext(x.LLVMValue(), index)
+		if !keyPtr.IsNil() {
+			c.builder.CreateStore(index, keyPtr)
+		}
+		if !valuePtr.IsNil() {
+			c.builder.CreateStore(value, valuePtr)
+		}
+		c.VisitBlockStmt(stmt.Body, false)
+		c.maybeImplicitBranch(postBlock)
+		c.builder.SetInsertPointAtEnd(postBlock)
+		newindex := c.builder.CreateAdd(index, consumed, "")
+		c.builder.CreateBr(condBlock)
+		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+		return
+	}
 
 arrayrange:
 	{
@@ -648,6 +673,7 @@ arrayrange:
 		newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
 		c.builder.CreateBr(condBlock)
 		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+		return
 	}
 }
 
