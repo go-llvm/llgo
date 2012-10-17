@@ -5,8 +5,11 @@ import (
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
 	"go/build"
+	"io/ioutil"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -46,29 +49,68 @@ func addExterns(m *llgo.Module) {
 	fflush.SetFunctionCallConv(llvm.CCallConv)
 }
 
-func getRuntimeFiles() (files []string, err error) {
+func getRuntimeFiles() (gofiles []string, llfiles []string, err error) {
 	var pkg *build.Package
 	pkgpath := "github.com/axw/llgo/pkg/runtime"
 	pkg, err = build.Import(pkgpath, "", 0)
-	if err == nil {
-		files = make([]string, len(pkg.GoFiles))
-		for i, filename := range pkg.GoFiles {
-			files[i] = path.Join(pkg.Dir, filename)
-		}
+	if err != nil {
+		return
+	}
+	gofiles = make([]string, len(pkg.GoFiles))
+	for i, filename := range pkg.GoFiles {
+		gofiles[i] = path.Join(pkg.Dir, filename)
+	}
+	llfiles, err = filepath.Glob(pkg.Dir + "/*.ll")
+	if err != nil {
+		gofiles = nil
+		return
 	}
 	return
 }
 
-func getRuntimeModule() (m llvm.Module, err error) {
-	gofiles, err := getRuntimeFiles()
-	if err == nil {
-		var runtimeModule *llgo.Module
-		runtimeModule, err = compileFiles(gofiles, "runtime")
-		if runtimeModule != nil {
-			m = runtimeModule.Module
+func getRuntimeModule() (llvm.Module, error) {
+	gofiles, llfiles, err := getRuntimeFiles()
+	if err != nil {
+		return llvm.Module{}, err
+	}
+
+	var runtimeModule *llgo.Module
+	runtimeModule, err = compileFiles(gofiles, "runtime")
+	if err != nil {
+		return llvm.Module{}, err
+	}
+
+	if llfiles != nil {
+		outfile, err := ioutil.TempFile("", "runtime.ll")
+		if err != nil {
+			runtimeModule.Dispose()
+			return llvm.Module{}, err
+		}
+		defer func() {
+			outfile.Close()
+			os.Remove(outfile.Name())
+		}()
+		err = llvm.WriteBitcodeToFile(runtimeModule.Module, outfile)
+		if err != nil {
+			runtimeModule.Dispose()
+			return llvm.Module{}, err
+		}
+		runtimeModule.Dispose()
+		o := outfile.Name()
+		for _, llfile := range llfiles {
+			cmd := exec.Command("llvm-link", "-o", o, o, llfile)
+			_, err = cmd.CombinedOutput()
+			if err != nil {
+				return llvm.Module{}, err
+			}
+		}
+		runtimeModule.Module, err = llvm.ParseBitcodeFile(o)
+		if err != nil {
+			return llvm.Module{}, err
 		}
 	}
-	return
+
+	return runtimeModule.Module, nil
 }
 
 func addRuntime(m *llgo.Module) (err error) {
