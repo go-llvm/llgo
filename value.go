@@ -113,6 +113,20 @@ func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
 ///////////////////////////////////////////////////////////////////////////////
 // LLVMValue methods
 
+func signed(typ types.Type) bool {
+	if typ_, ok := typ.(*types.Name); ok {
+		typ = typ_.Underlying
+	}
+	if basic, ok := typ.(*types.Basic); ok {
+		switch basic.Kind {
+		case types.IntKind, types.Int8Kind, types.Int16Kind,
+		     types.Int32Kind, types.Int64Kind:
+			return true
+		}
+	}
+	return false
+}
+
 func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	if op == token.NEQ {
 		result := lhs.BinaryOp(token.EQL, rhs_)
@@ -455,11 +469,25 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		case llvm.FloatTypeKind:
 			lv = v.compiler.builder.CreateFPTrunc(lv, llvm_type, "")
 			return v.compiler.NewLLVMValue(lv, dst_typ)
+		case llvm.IntegerTypeKind:
+			if signed(dst_typ) {
+				lv = v.compiler.builder.CreateFPToSI(lv, llvm_type, "")
+			} else {
+				lv = v.compiler.builder.CreateFPToUI(lv, llvm_type, "")
+			}
+			return v.compiler.NewLLVMValue(lv, dst_typ)
 		}
 	case llvm.FloatTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.DoubleTypeKind:
 			lv = v.compiler.builder.CreateFPExt(lv, llvm_type, "")
+			return v.compiler.NewLLVMValue(lv, dst_typ)
+		case llvm.IntegerTypeKind:
+			if signed(dst_typ) {
+				lv = v.compiler.builder.CreateFPToSI(lv, llvm_type, "")
+			} else {
+				lv = v.compiler.builder.CreateFPToUI(lv, llvm_type, "")
+			}
 			return v.compiler.NewLLVMValue(lv, dst_typ)
 		}
 	}
