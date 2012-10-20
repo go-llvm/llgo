@@ -104,11 +104,15 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				case types.Int64Kind:
 					format += "%lld" // FIXME windows
 				case types.Float32Kind:
-					format += "%f"
+					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
+					fallthrough
 				case types.Float64Kind:
 					// Doesn't match up with gc's formatting, which allocates
 					// a minimum of three digits for the exponent.
-					format += "%+e"
+					printfloat := c.NamedFunction("runtime.printfloat", "func f(float64) string")
+					args := []llvm.Value{llvm_value}
+					llvm_value = c.builder.CreateCall(printfloat, args, "")
+					fallthrough
 				case types.StringKind:
 					ptrval := c.builder.CreateExtractValue(llvm_value, 0, "")
 					lenval := c.builder.CreateExtractValue(llvm_value, 1, "")

@@ -175,6 +175,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 		op := nonAssignmentToken(stmt.Tok)
 		lhs := c.VisitExpr(stmt.Lhs[0])
 		rhsValue := c.VisitExpr(stmt.Rhs[0])
+		rhsValue = rhsValue.Convert(lhs.Type())
 		newValue := lhs.BinaryOp(op, rhsValue).(*LLVMValue).LLVMValue()
 		c.builder.CreateStore(newValue, lhs.(*LLVMValue).pointer.LLVMValue())
 		return

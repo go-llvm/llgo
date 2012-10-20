@@ -47,5 +47,10 @@ func main() {
 	println(^si)
 	println(^ui)
 	println(ui &^ 3)
-}
 
+	// test case from math/modf.go
+	var x uint64 = 0xFFFFFFFFFFFFFFFF
+	var e uint = 40
+	x &^= 1<<(64-12-e) - 1
+	println(x)
+}

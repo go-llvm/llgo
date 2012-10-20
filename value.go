@@ -120,7 +120,7 @@ func signed(typ types.Type) bool {
 	if basic, ok := typ.(*types.Basic); ok {
 		switch basic.Kind {
 		case types.IntKind, types.Int8Kind, types.Int16Kind,
-		     types.Int32Kind, types.Int64Kind:
+			types.Int32Kind, types.Int64Kind:
 			return true
 		}
 	}
@@ -461,6 +461,13 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 				lv = v.compiler.builder.CreateZExt(lv, llvm_type, "")
 			case delta > 0:
 				lv = v.compiler.builder.CreateTrunc(lv, llvm_type, "")
+			}
+			return v.compiler.NewLLVMValue(lv, dst_typ)
+		case llvm.FloatTypeKind, llvm.DoubleTypeKind:
+			if signed(v.Type()) {
+				lv = v.compiler.builder.CreateSIToFP(lv, llvm_type, "")
+			} else {
+				lv = v.compiler.builder.CreateUIToFP(lv, llvm_type, "")
 			}
 			return v.compiler.NewLLVMValue(lv, dst_typ)
 		}
