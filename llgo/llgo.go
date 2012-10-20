@@ -80,7 +80,7 @@ func report(err error) {
 
 func parseFile(fset *token.FileSet, filename string) *ast.File {
 	// parse entire file
-	mode := parser.DeclarationErrors
+	mode := parser.DeclarationErrors | parser.ParseComments
 	//if *allErrors {
 	//    mode |= parser.SpuriousErrors
 	//}

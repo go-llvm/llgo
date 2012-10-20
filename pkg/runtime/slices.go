@@ -26,8 +26,8 @@ import "unsafe"
 
 type slice struct {
 	array *uint8
-	len uint
-	cap uint
+	len   uint
+	cap   uint
 }
 
 // sliceappend takes a slice type and two slices, and returns the

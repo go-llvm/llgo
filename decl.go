@@ -31,6 +31,7 @@ import (
 	"go/token"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
@@ -266,7 +267,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		// If the name is "_", then we can just evaluate the expression
 		// and ignore the result. We handle package level variables
 		// specially, below.
-		_, ispackagelevel := c.pkgmap[name_.Obj]
+		pkgname, ispackagelevel := c.pkgmap[name_.Obj]
 		name := name_.String()
 		if name == "_" && !ispackagelevel {
 			if expr != nil {
@@ -296,8 +297,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				// The variable should be allocated on the stack if it's
 				// declared inside a function.
 				var llvm_init llvm.Value
-				stack_value := c.builder.CreateAlloca(
-					c.types.ToLLVM(value_type), name)
+				stack_value := c.builder.CreateAlloca(c.types.ToLLVM(value_type), name)
 				if init_ == nil {
 					// If no initialiser was specified, set it to the
 					// zero value.
@@ -313,7 +313,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				// we'll have to do the assignment in a global constructor
 				// function.
 				export := name_.IsExported()
-				value = c.createGlobal(expr, value_type, name, export)
+				value = c.createGlobal(expr, value_type, pkgname+"."+name, export)
 			}
 		} else { // isconst
 			value = c.VisitExpr(expr).(ConstValue)
@@ -369,9 +369,30 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 			c.VisitValueSpec(valspec, true)
 		}
 	case token.VAR:
+		// Global variable attributes
+		// TODO only parse attributes for package-level var's.
+		var attributes []Attribute
+		if attributes == nil && decl.Doc != nil {
+			attributes = make([]Attribute, 0)
+			for _, comment := range decl.Doc.List {
+				text := comment.Text[2:]
+				if strings.HasPrefix(comment.Text, "/*") {
+					text = text[:len(text)-2]
+				}
+				attr := parseAttribute(strings.TrimSpace(text))
+				if attr != nil {
+					attributes = append(attributes, attr)
+				}
+			}
+		}
 		for _, spec := range decl.Specs {
 			valspec, _ := spec.(*ast.ValueSpec)
 			c.VisitValueSpec(valspec, false)
+			for _, attr := range attributes {
+				for _, name := range valspec.Names {
+					attr.Apply(name.Obj.Data.(Value))
+				}
+			}
 		}
 	}
 }
