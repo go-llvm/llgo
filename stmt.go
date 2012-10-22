@@ -51,23 +51,20 @@ func (c *compiler) maybeImplicitBranch(dest llvm.BasicBlock) {
 }
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
-	ptr := c.VisitExpr(stmt.X).(*LLVMValue).pointer
-	value := c.builder.CreateLoad(ptr.LLVMValue(), "")
-	one := llvm.ConstInt(value.Type(), 1, false)
-
-	switch stmt.Tok {
-	case token.INC:
-		value = c.builder.CreateAdd(value, one, "")
-	case token.DEC:
-		value = c.builder.CreateSub(value, one, "")
+	lhs := c.VisitExpr(stmt.X).(*LLVMValue)
+	rhs := c.NewConstValue(token.INT, "1").Convert(lhs.Type())
+	op := token.ADD
+	if stmt.Tok == token.DEC {
+		op = token.SUB
 	}
+	result := lhs.BinaryOp(op, rhs)
+	c.builder.CreateStore(result.LLVMValue(), lhs.pointer.LLVMValue())
 
 	// TODO make sure we cover all possibilities (maybe just delegate this to
 	// an assignment statement handler, and do it all in one place).
 	//
 	// In the case of a simple variable, we simply calculate the new value and
 	// update the value in the scope.
-	c.builder.CreateStore(value, ptr.LLVMValue())
 }
 
 func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {

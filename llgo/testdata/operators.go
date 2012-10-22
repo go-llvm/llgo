@@ -27,6 +27,10 @@ func main() {
 	println(-123 >> 1)
 	println(-123 << 1)
 
+	var f float64 = 123.456
+	f--
+	println(f)
+
 	// context of '&' op is used to type the untyped lhs
 	// operand of the shift expression.
 	shift := uint(2)
