@@ -153,11 +153,6 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	return fn
 }
 
-func isArray(t types.Type) bool {
-	_, isarray := t.(*types.Array)
-	return isarray
-}
-
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
 func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bool) (g *LLVMValue) {
@@ -168,10 +163,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 			gv.SetLinkage(llvm.PrivateLinkage)
 		}
 		gv.SetInitializer(llvm.ConstNull(llvmtyp))
-		g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-		if !isArray(t) {
-			return g.makePointee()
-		}
+		g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
 		return g
 	}
 
@@ -209,10 +201,7 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 	if !export {
 		gv.SetLinkage(llvm.PrivateLinkage)
 	}
-	g = c.NewLLVMValue(gv, &types.Pointer{Base: t})
-	if !isArray(t) {
-		g = g.makePointee()
-	}
+	g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
 	if isconst {
 		// Initialiser is constant; discard function and return global now.
 		gv.SetInitializer(init_.LLVMValue())
