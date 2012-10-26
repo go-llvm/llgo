@@ -146,7 +146,6 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 					llvm_value = llvm.AddGlobal(c.module.Module, init_value.Type(), "")
 					llvm_value.SetInitializer(init_value)
 					llvm_value.SetGlobalConstant(true)
-					//llvm_value.SetLinkage(llvm.PrivateLinkage)
 				case *LLVMValue:
 					llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
 					c.builder.CreateStore(init_value, llvm_value)

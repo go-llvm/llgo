@@ -302,13 +302,17 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 			//err = e.(error)
 		}
 	}()
-	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
-	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(llvmtypemap, exprTypes, compiler.FunctionCache)
 
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.
 	compiler.pkgmap = createPackageMap(pkg, importpath)
+
+	// Create a struct responsible for mapping static types to LLVM types,
+	// and to runtime/dynamic type values.
+	var resolver Resolver = compiler
+	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
+	compiler.FunctionCache = NewFunctionCache(compiler)
+	compiler.types = NewTypeMap(llvmtypemap, exprTypes, compiler.FunctionCache, compiler.pkgmap, resolver)
 
 	// Compile each file in the package.
 	for _, file := range pkg.Files {

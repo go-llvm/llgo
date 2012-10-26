@@ -131,6 +131,7 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 
 	err = llvm.VerifyModule(m.Module, llvm.ReturnStatusAction)
 	if err != nil {
+		err = fmt.Errorf("Verification failed: %v", err)
 		return
 	}
 

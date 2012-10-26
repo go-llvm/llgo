@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
+	"go/ast"
 	"go/token"
 	"math"
 	"math/big"
@@ -35,6 +36,11 @@ var (
 	maxBigInt32 = big.NewInt(math.MaxInt32)
 	minBigInt32 = big.NewInt(math.MinInt32)
 )
+
+// Resolver is an interface for resolving AST objects to values.
+type Resolver interface {
+	Resolve(*ast.Object) Value
+}
 
 // Value is an interface for representing values returned by Go expressions.
 type Value interface {
@@ -388,7 +394,8 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// Convert from an interface type.
 	if _, isinterface := src_typ.(*types.Interface); isinterface {
 		if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
-			return v.convertI2I(interface_)
+			result, _ := v.convertI2I(interface_)
+			return result
 		} else {
 			return v.convertI2V(dst_typ)
 		}
@@ -642,8 +649,16 @@ func (v ConstValue) LLVMValue() llvm.Value {
 
 	case types.String:
 		strval := (v.Val).(string)
-		ptr := v.compiler.builder.CreateGlobalStringPtr(strval, "")
-		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(strval)), false)
+		strlen := len(strval)
+		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+		var ptr llvm.Value
+		if strlen > 0 {
+			ptr = v.compiler.builder.CreateGlobalStringPtr(strval, "")
+			ptr = llvm.ConstBitCast(ptr, i8ptr)
+		} else {
+			ptr = llvm.ConstNull(i8ptr)
+		}
+		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(strlen), false)
 		return llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
 
 	case types.Bool:

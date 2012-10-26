@@ -44,3 +44,46 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 	}
 	return false
 }
+
+// convertI2I takes a target interface type, a source interface value, and
+// attempts to convert the source to the target type, storing the result
+// in the provided structure.
+//
+// FIXME cache type-to-interface conversions.
+func convertI2I(typ_, from_, to_ uintptr) bool {
+	dyntypptr := (**type_)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
+	if dyntypptr == nil {
+		return false
+	}
+	dyntyp := *dyntypptr
+	if dyntyp.kind == ptrKind {
+		ptrtyp := (*ptrType)(unsafe.Pointer(&dyntyp.commonType))
+		dyntyp = ptrtyp.elem
+	}
+	if dyntyp.uncommonType != nil {
+		typ := (*type_)(unsafe.Pointer(typ_))
+		targettyp := (*interfaceType)(unsafe.Pointer(&typ.commonType))
+		if len(targettyp.methods) > len(dyntyp.methods) {
+			return false
+		}
+		for i, tm := range targettyp.methods {
+			// TODO speed this up by iterating through in lockstep.
+			found := false
+			for j, sm := range dyntyp.methods {
+				// TODO check method types are equal.
+				if *sm.name == *tm.name {
+					fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
+					fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
+					*fnptrslot = uintptr(sm.ifn)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}

@@ -22,5 +22,6 @@ func _TestInterfaceToInterfaceConversion(t *testing.T) {
 
 func TestStaticBasicV2I(t *testing.T)   { checkOutputEqual(t, "interfaces/basic.go") }
 func TestInterfaceMethods(t *testing.T) { checkOutputEqual(t, "interfaces/methods.go") }
+func TestInterfaceAssert(t *testing.T) { checkOutputEqual(t, "interfaces/assert.go") }
 
 // vim: set ft=go:

@@ -437,16 +437,9 @@ func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
-	if expr.Type == nil {
-		// .(type) switch
-		// XXX this will probably be handled in the switch statement.
-		panic("TODO")
-	} else {
-		lhs := c.VisitExpr(expr.X)
-		typ := c.GetType(expr.Type)
-		return lhs.Convert(typ)
-	}
-	return nil
+	typ := c.GetType(expr.Type)
+	lhs := c.VisitExpr(expr.X)
+	return lhs.Convert(typ)
 }
 
 func (c *compiler) VisitExpr(expr ast.Expr) Value {

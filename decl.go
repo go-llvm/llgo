@@ -38,7 +38,6 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	var fn_type *types.Func
 	fn_name := f.Name.String()
 
-	exported := ast.IsExported(fn_name)
 	if fn_name == "init" {
 		// Make "init" functions anonymous.
 		fn_name = ""
@@ -47,9 +46,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		fn_type = &types.Func{ /* no params or result */}
 	} else {
 		fn_type = f.Name.Obj.Type.(*types.Func)
-		if c.module.Name == "main" && fn_name == "main" {
-			exported = true
-		} else {
+		if c.module.Name != "main" && fn_name != "main" {
 			if fn_type.Recv != nil {
 				recv := fn_type.Recv
 				if recvtyp, ok := recv.Type.(*types.Pointer); ok {
@@ -68,9 +65,6 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
-	if exported {
-		fn.SetLinkage(llvm.ExternalLinkage)
-	}
 
 	result := c.NewLLVMValue(fn, fn_type)
 	if f.Name.Obj != nil {
@@ -155,13 +149,10 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
-func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bool) (g *LLVMValue) {
+func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string) (g *LLVMValue) {
 	if e == nil {
 		llvmtyp := c.types.ToLLVM(t)
 		gv := llvm.AddGlobal(c.module.Module, llvmtyp, name)
-		if !export {
-			gv.SetLinkage(llvm.PrivateLinkage)
-		}
 		gv.SetInitializer(llvm.ConstNull(llvmtyp))
 		g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
 		return g
@@ -173,7 +164,6 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 	fn_type := new(types.Func)
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
 	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
-	fn.SetLinkage(llvm.PrivateLinkage)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
@@ -198,9 +188,6 @@ func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string, export bo
 	// we'll have to do the assignment in a global constructor
 	// function.
 	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
-	if !export {
-		gv.SetLinkage(llvm.PrivateLinkage)
-	}
 	g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
 	if isconst {
 		// Initialiser is constant; discard function and return global now.
@@ -301,8 +288,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				// Set the initialiser. If it's a non-const value, then
 				// we'll have to do the assignment in a global constructor
 				// function.
-				export := name_.IsExported()
-				value = c.createGlobal(expr, value_type, pkgname+"."+name, export)
+				value = c.createGlobal(expr, value_type, pkgname+"."+name)
 			}
 		} else { // isconst
 			value = c.VisitExpr(expr).(ConstValue)

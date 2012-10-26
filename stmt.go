@@ -198,6 +198,14 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				value_ := c.builder.CreateExtractValue(aggregate, i, "")
 				values[i] = c.NewLLVMValue(value_, t)
 			}
+		case *ast.TypeAssertExpr:
+			// newvalue, ok := value.(Type)
+			// FIXME handle I2V assertions
+			lhs := c.VisitExpr(x.X).(*LLVMValue)
+			typ := c.GetType(x.Type)
+			value, ok := lhs.convertI2I(types.Underlying(typ).(*types.Interface))
+			values[0] = value
+			values[1] = ok
 		}
 	} else {
 		for i, expr := range stmt.Rhs {

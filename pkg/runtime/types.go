@@ -43,17 +43,17 @@ type commonType struct {
 	alg        *uintptr
 	gc         unsafe.Pointer
 	string     *string
-	_          uintptr // *uncommonType
-	_          uintptr // *runtimeType
+	*uncommonType
+	_ uintptr // *runtimeType
 }
 
 type uncommonType struct {
 	name    *string
 	pkgPath *string
-	methods []_method
+	methods []method
 }
 
-type _method struct {
+type method struct {
 	name    *string
 	pkgPath *string
 	mtyp    *interface{}
@@ -72,3 +72,49 @@ type mapType struct {
 	key  *type_
 	elem *type_
 }
+
+type imethod struct {
+	name    *string
+	pkgPath *string
+	typ     *type_
+}
+
+type interfaceType struct {
+	commonType
+	methods []imethod
+}
+
+type ptrType struct {
+	commonType
+	elem *type_
+}
+
+const (
+	invalidKind uint8 = iota
+	boolKind
+	intKind
+	int8Kind
+	int16Kind
+	int32Kind
+	int64Kind
+	uintKind
+	uint8Kind
+	uint16Kind
+	uint32Kind
+	uint64Kind
+	uintptrKind
+	float32Kind
+	float64Kind
+	complex64Kind
+	complex128Kind
+	arrayKind
+	chanKind
+	funcKind
+	interfaceKind
+	mapKind
+	ptrKind
+	sliceKind
+	stringKind
+	structKind
+	unsafePointerKind
+)

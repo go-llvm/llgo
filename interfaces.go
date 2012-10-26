@@ -87,12 +87,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	ptr = builder.CreateBitCast(ptr, element_types[0], "")
 	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
 
-	var runtimeType llvm.Value
-	if srcname != nil {
-		runtimeType = v.compiler.types.ToRuntime(srcname)
-	} else {
-		runtimeType = v.compiler.types.ToRuntime(srctyp)
-	}
+	runtimeType := v.compiler.types.ToRuntime(v.Type())
 	runtimeType = builder.CreateBitCast(runtimeType, element_types[1], "")
 	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 1, "")
 
@@ -104,6 +99,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 		// value or pointer receivers.
 
 		// Look up the method by name.
+		// TODO check embedded types.
 		methods := srcname.Methods
 		for i, m := range iface.Methods {
 			// TODO make this loop linear by iterating through the
@@ -128,21 +124,22 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 }
 
 // convertI2I converts an interface to another interface.
-func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
+func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Value) {
+	c := v.compiler
 	builder := v.compiler.builder
-	src_typ := v.Type()
+	src_typ := types.Underlying(v.Type())
 	vptr := v.pointer.LLVMValue()
-	src_typ = src_typ.(*types.Name).Underlying
 
-	iface_struct_type := v.compiler.types.ToLLVM(iface)
-	element_types := iface_struct_type.StructElementTypes()
-	iface_elements := make([]llvm.Value, len(element_types))
-	for i, _ := range iface_elements {
-		iface_elements[i] = llvm.ConstNull(element_types[i])
-	}
-	iface_struct := llvm.ConstStruct(iface_elements, false)
+	//iface_struct_type := c.types.ToLLVM(iface)
+	//element_types := iface_struct_type.StructElementTypes()
+	//iface_elements := make([]llvm.Value, len(element_types))
+	//for i, _ := range iface_elements {
+	//	iface_elements[i] = llvm.ConstNull(element_types[i])
+	//}
+	//iface_struct := llvm.ConstStruct(iface_elements, false)
+	iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
 	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
-	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 0, "")
+	dynamicType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
 
 	// TODO check whether the functions in the struct take
 	// value or pointer receivers.
@@ -156,13 +153,37 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) Value {
 			return methods[i].Name >= m.Name
 		})
 		if mi >= len(methods) || methods[mi].Name != m.Name {
-			panic("Failed to locate method: " + m.Name)
+			//panic("Failed to locate method: " + m.Name)
+			goto check_dynamic
+		} else {
+			method := builder.CreateStructGEP(vptr, mi+2, "")
+			fptr := builder.CreateLoad(method, "")
+			iface_struct = builder.CreateInsertValue(iface_struct, fptr, i+2, "")
 		}
-		method := builder.CreateStructGEP(vptr, mi+2, "")
-		iface_struct = builder.CreateInsertValue(
-			iface_struct, builder.CreateLoad(method, ""), i+2, "")
 	}
-	return v.compiler.NewLLVMValue(iface_struct, iface)
+	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 0, "")
+	iface_struct = builder.CreateInsertValue(iface_struct, dynamicType, 1, "")
+	result = c.NewLLVMValue(iface_struct, iface)
+	success = ConstValue{types.Const{true}, c, types.Bool}
+	return result, success
+
+check_dynamic:
+	runtimeConvertI2I := c.NamedFunction("runtime.convertI2I", "func f(typ, from, to uintptr) bool")
+	llvmUintptr := runtimeConvertI2I.Type().ElementType().ParamTypes()[0]
+
+	runtimeType := c.builder.CreatePtrToInt(c.types.ToRuntime(iface), llvmUintptr, "")
+	from := c.builder.CreatePtrToInt(vptr, llvmUintptr, "")
+	to := c.builder.CreateAlloca(iface_struct.Type(), "")
+	c.builder.CreateStore(iface_struct, to)
+	toUintptr := c.builder.CreatePtrToInt(to, llvmUintptr, "")
+	args := []llvm.Value{runtimeType, from, toUintptr}
+	ok := c.builder.CreateCall(runtimeConvertI2I, args, "")
+
+	value := c.builder.CreateLoad(to, "")
+	value = c.builder.CreateSelect(ok, value, iface_struct, "")
+	result = c.NewLLVMValue(value, iface)
+	success = c.NewLLVMValue(ok, types.Bool)
+	return result, success
 }
 
 // convertI2V converts an interface to a value.
