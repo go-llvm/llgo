@@ -48,6 +48,11 @@ func (c *compiler) ObjGetType(obj *ast.Object) types.Type {
 }
 
 func (c *compiler) GetType(expr ast.Expr) types.Type {
+	// Eventually, everything should be in here.
+	if typ, ok := c.types.expr[expr]; ok {
+		return typ
+	}
+
 	switch x := (expr).(type) {
 	case *ast.Ellipsis:
 		return c.GetType(x.Elt)

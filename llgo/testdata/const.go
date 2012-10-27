@@ -44,4 +44,11 @@ func main() {
 
 	// Test conversion.
 	println(int64(10) * 1e9)
+
+	// Ensure consts work just as well when declared inside a function.
+	const (
+		x_ = iota
+		y_
+	)
+	println(y_)
 }

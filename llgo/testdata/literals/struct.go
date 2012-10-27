@@ -38,4 +38,10 @@ func main() {
 	}
 
 	println(r.Lo, r.Hi, r.Stride)
+
+	// slice of structs
+	ss := []S{{nil, 1, 2}, {nil, 3, 4}}
+	for _, s := range ss {
+		println(s.a, s.b)
+	}
 }

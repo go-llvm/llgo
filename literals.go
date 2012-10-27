@@ -49,7 +49,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 }
 
 func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
-	typ := c.GetType(lit.Type)
+	typ := c.types.expr[lit]
 	var valuemap map[interface{}]Value
 	var valuelist []Value
 	_, isstruct := types.Underlying(typ).(*types.Struct)

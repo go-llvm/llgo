@@ -129,21 +129,16 @@ func (c *checker) collectMethods(file *ast.File) {
 // decomposeRepeatConsts looks for each instance of a constant list, and
 // for constants without a value, associates the preceding constant's
 // value and type (if any).
-func (c *checker) decomposeRepeatConsts(file *ast.File) {
-	for _, decl := range file.Decls {
-		gendecl, ok := decl.(*ast.GenDecl)
-		if ok && gendecl.Tok == token.CONST {
-			var predValueSpec *ast.ValueSpec
-			for _, spec := range gendecl.Specs {
-				valspec := spec.(*ast.ValueSpec)
-				if len(valspec.Values) > 0 {
-					// TODO assign type of rhs, if untyped.
-					predValueSpec = valspec
-				} else {
-					valspec.Type = predValueSpec.Type
-					valspec.Values = predValueSpec.Values
-				}
-			}
+func (c *checker) decomposeRepeatConsts(gendecl *ast.GenDecl) {
+	var predValueSpec *ast.ValueSpec
+	for _, spec := range gendecl.Specs {
+		valspec := spec.(*ast.ValueSpec)
+		if len(valspec.Values) > 0 {
+			// TODO assign type of rhs, if untyped.
+			predValueSpec = valspec
+		} else {
+			valspec.Type = predValueSpec.Type
+			valspec.Values = predValueSpec.Values
 		}
 	}
 }
@@ -170,6 +165,8 @@ func untypedPriority(t Type) int {
 // TODO get rid of the assignee crap, and keep a context stack.
 // We'll also need context for ReturnStmt (in checkStmt).
 func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
+	//fmt.Printf("Check expr: %T @ %s\n", x, c.fset.Position(x.Pos()))
+
 	defer func() {
 		if typ != nil {
 			c.types[x] = typ
@@ -223,13 +220,39 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 	case *ast.CompositeLit:
-		// TODO do this properly.
-		typ := c.makeType(x.Type, true)
+		var typ Type
+		if x.Type != nil {
+			typ = c.makeType(x.Type, true)
+		} else {
+			typ = c.types[x]
+			if typ == nil {
+				msg := c.errorf(x.Pos(), "could not deduce infer type from context")
+				return &Bad{Msg: msg}
+			}
+		}
+
+		var keytyp, valtyp Type
+		switch typ := typ.(type) {
+		case *Map:
+			keytyp = typ.Key
+			valtyp = typ.Elt
+		case *Slice:
+			valtyp = typ.Elt
+		case *Array:
+			valtyp = typ.Elt
+		}
+
 		for _, elt := range x.Elts {
 			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				// Provisionally set the key type to that of
+				// the outer map's key type. checkExpr will
+				// update it to the correct type.
+				c.types[kv.Key] = keytyp
+				c.types[kv.Value] = valtyp
 				c.checkExpr(kv.Key, nil)
 				c.checkExpr(kv.Value, nil)
 			} else {
+				c.types[elt] = valtyp
 				c.checkExpr(elt, nil)
 			}
 		}
@@ -873,6 +896,8 @@ func isType(x ast.Expr) bool {
 
 // checkStmt type checks a statement.
 func (c *checker) checkStmt(s ast.Stmt) {
+	//fmt.Printf("Check statement: %T @ %s\n", s, c.fset.Position(s.Pos()))
+
 	switch s := s.(type) {
 	case *ast.AssignStmt:
 		// TODO Each left-hand side operand must be addressable,
@@ -916,6 +941,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 	case *ast.DeclStmt:
 		// Only a GenDecl/ValueSpec is permissible in a statement.
 		decl := s.Decl.(*ast.GenDecl)
+		if decl.Tok == token.CONST {
+			c.decomposeRepeatConsts(decl)
+		}
 		for _, spec := range decl.Specs {
 			spec := spec.(*ast.ValueSpec)
 			for _, name := range spec.Names {
@@ -939,7 +967,8 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		c.checkStmt(s.Body)
 
 	//case *ast.IncDecStmt:
-	//case *ast.GoStmt:
+	case *ast.GoStmt:
+		c.checkExpr(s.Call, nil)
 
 	case *ast.IfStmt:
 		if s.Init != nil {
@@ -1002,7 +1031,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		// TODO check key, value are addressable and assignable from range
 		// values.
 		if ident, ok := s.Key.(*ast.Ident); ok && ident.Obj.Type == nil {
-			ident.Obj.Type = k
+			if ident.Obj != nil {
+				ident.Obj.Type = k
+			}
 		} else {
 			c.checkExpr(s.Key, nil)
 		}
@@ -1032,8 +1063,20 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			c.checkExpr(e, nil)
 		}
 
-	//case *ast.SelectStmt:
-	//case *ast.SendStmt:
+	case *ast.SelectStmt:
+		if s.Body != nil {
+			for _, s_ := range s.Body.List {
+				cc := s_.(*ast.CommClause)
+				c.checkStmt(cc.Comm)
+				for _, s := range cc.Body {
+					c.checkStmt(s)
+				}
+			}
+		}
+
+	case *ast.SendStmt:
+		c.checkExpr(s.Chan, nil)
+		c.checkExpr(s.Value, nil)
 
 	case *ast.SwitchStmt:
 		if s.Init != nil {
@@ -1269,7 +1312,11 @@ func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err 
 		file := pkg.Files[filename]
 
 		// Associate the type of repeat consts with each individual constant.
-		c.decomposeRepeatConsts(file)
+		for _, decl := range file.Decls {
+			if gendecl, ok := decl.(*ast.GenDecl); ok && gendecl.Tok == token.CONST {
+				c.decomposeRepeatConsts(gendecl)
+			}
+		}
 
 		// Collect methods, associating each with its receiver type's object.
 		c.collectMethods(file)
