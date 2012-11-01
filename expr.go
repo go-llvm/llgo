@@ -178,7 +178,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	fn := lhs.(*LLVMValue)
 	fn_type := types.Underlying(fn.Type()).(*types.Func)
 	args := make([]llvm.Value, 0)
-	if fn_type.Recv != nil {
+	if fn.receiver != nil {
 		// Don't dereference the receiver here. It'll have been worked out in
 		// the selector.
 		receiver := fn.receiver
@@ -327,9 +327,14 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		structValue := lhs.LLVMValue()
 		receiver := c.builder.CreateExtractValue(structValue, 0, "")
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
-		ftype := c.ObjGetType(iface.Methods[i]).(*types.Func)
-		method := c.NewLLVMValue(c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), ""), ftype)
-		method.receiver = c.NewLLVMValue(receiver, &types.Pointer{Base: types.Int8})
+		i8ptr := &types.Pointer{Base: types.Int8}
+		ftype := iface.Methods[i].Type.(*types.Func)
+		ftype.Recv = ast.NewObj(ast.Var, "")
+		ftype.Recv.Type = i8ptr
+		f = c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), "")
+		ftype.Recv = nil
+		method := c.NewLLVMValue(f, ftype)
+		method.receiver = c.NewLLVMValue(receiver, i8ptr)
 		return method
 	}
 

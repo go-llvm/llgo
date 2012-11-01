@@ -132,8 +132,8 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				format += "(%p,%p)"
 				ival := c.builder.CreateExtractValue(llvm_value, 0, "")
 				itype := c.builder.CreateExtractValue(llvm_value, 1, "")
-				args = append(args, itype)
-				llvm_value = ival
+				args = append(args, ival)
+				llvm_value = itype
 
 			case *types.Slice, *types.Array:
 				// If we see a constant array, we either:

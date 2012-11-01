@@ -113,10 +113,8 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			method_obj := methods[mi]
 			method := v.compiler.Resolve(method_obj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
-			llvm_value = builder.CreateBitCast(
-				llvm_value, element_types[i+2], "")
-			iface_struct = builder.CreateInsertValue(
-				iface_struct, llvm_value, i+2, "")
+			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
+			iface_struct = builder.CreateInsertValue(iface_struct, llvm_value, i+2, "")
 		}
 	}
 
@@ -137,7 +135,8 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 	//	iface_elements[i] = llvm.ConstNull(element_types[i])
 	//}
 	//iface_struct := llvm.ConstStruct(iface_elements, false)
-	iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
+	zero_iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
+	iface_struct := zero_iface_struct
 	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
 	dynamicType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
 
@@ -180,7 +179,7 @@ check_dynamic:
 	ok := c.builder.CreateCall(runtimeConvertI2I, args, "")
 
 	value := c.builder.CreateLoad(to, "")
-	value = c.builder.CreateSelect(ok, value, iface_struct, "")
+	value = c.builder.CreateSelect(ok, value, zero_iface_struct, "")
 	result = c.NewLLVMValue(value, iface)
 	success = c.NewLLVMValue(ok, types.Bool)
 	return result, success
