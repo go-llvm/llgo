@@ -83,6 +83,10 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 				return false
 			}
 		}
+		targetvalue := (*uintptr)(unsafe.Pointer(to_))
+		targetdyntyp := (**type_)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
+		*targetvalue = *(*uintptr)(unsafe.Pointer(from_))
+		*targetdyntyp = dyntyp
 		return true
 	}
 	return false

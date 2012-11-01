@@ -878,6 +878,8 @@ func (c *compiler) VisitStmt(stmt ast.Stmt) {
 		c.VisitLabeledStmt(x)
 	case *ast.DeferStmt:
 		c.VisitDeferStmt(x)
+	case *ast.SendStmt:
+		c.VisitSendStmt(x)
 	default:
 		panic(fmt.Sprintf("Unhandled Stmt node: %s", reflect.TypeOf(stmt)))
 	}

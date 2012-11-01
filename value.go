@@ -221,6 +221,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		panic("unimplemented")
 	}
 
+	// Numbers.
 	// Determine whether to use integer or floating point instructions.
 	// TODO determine the NaN rules.
 	isfp := types.Identical(types.Underlying(lhs.typ), types.Float32) ||
@@ -358,8 +359,10 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewLLVMValue(value, v.typ)
+	case token.ARROW:
+		return v.chanRecv()
 	default:
-		panic("Unhandled operator: ") // + expr.Op)
+		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
 	panic("unreachable")
 }
@@ -608,8 +611,12 @@ func (v ConstValue) Convert(dstTyp types.Type) Value {
 
 func (v ConstValue) LLVMValue() llvm.Value {
 	typ := types.Underlying(v.Type())
-	switch typ {
-	case types.Int, types.Uint:
+	if name, ok := typ.(*types.Name); ok {
+		typ = name.Underlying
+	}
+
+	switch typ.(*types.Basic).Kind {
+	case types.IntKind, types.UintKind:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
 		// TODO 32/64bit (probably wait for gc)
 		//int_val := v.Val.(*big.Int)
@@ -618,36 +625,36 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		//}
 		//return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
 
-	case types.Int8:
+	case types.Int8Kind:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)
-	case types.Uint8, types.Byte:
+	case types.Uint8Kind:
 		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), false)
 
-	case types.Int16:
+	case types.Int16Kind:
 		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), true)
-	case types.Uint16:
+	case types.Uint16Kind:
 		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
 
-	case types.Int32, types.Rune:
+	case types.Int32Kind:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
-	case types.Uint32:
+	case types.Uint32Kind:
 		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
 
-	case types.Int64:
+	case types.Int64Kind:
 		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
-	case types.Uint64:
-		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
+	case types.Uint64Kind:
+		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), false)
 
-	case types.Float32:
+	case types.Float32Kind:
 		return llvm.ConstFloat(llvm.FloatType(), float64(v.Float64()))
-	case types.Float64:
+	case types.Float64Kind:
 		return llvm.ConstFloat(llvm.DoubleType(), float64(v.Float64()))
 
-	case types.UnsafePointer, types.Uintptr:
+	case types.UnsafePointerKind, types.UintptrKind:
 		inttype := v.compiler.target.IntPtrType()
 		return llvm.ConstInt(inttype, uint64(v.Int64()), false)
 
-	case types.String:
+	case types.StringKind:
 		strval := (v.Val).(string)
 		strlen := len(strval)
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
@@ -661,7 +668,7 @@ func (v ConstValue) LLVMValue() llvm.Value {
 		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(strlen), false)
 		return llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
 
-	case types.Bool:
+	case types.BoolKind:
 		if v := v.Val.(bool); v {
 			return llvm.ConstAllOnes(llvm.Int1Type())
 		}

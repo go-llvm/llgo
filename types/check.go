@@ -950,8 +950,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				c.checkObj(name.Obj, true)
 			}
 		}
-	//case *ast.DeferStmt:
-	//case *ast.EmptyStmt:
+
+	case *ast.EmptyStmt:
+		// no-op
 
 	case *ast.ForStmt:
 		if s.Init != nil {
@@ -966,7 +967,6 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		}
 		c.checkStmt(s.Body)
 
-	//case *ast.IncDecStmt:
 	case *ast.GoStmt:
 		c.checkExpr(s.Call, nil)
 
@@ -1067,7 +1067,9 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		if s.Body != nil {
 			for _, s_ := range s.Body.List {
 				cc := s_.(*ast.CommClause)
-				c.checkStmt(cc.Comm)
+				if cc.Comm != nil {
+					c.checkStmt(cc.Comm)
+				}
 				for _, s := range cc.Body {
 					c.checkStmt(s)
 				}

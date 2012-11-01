@@ -29,7 +29,7 @@ import (
 )
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
-	typ := c.GetType(expr.Args[0])
+	typ := c.types.expr[expr]
 	switch utyp := types.Underlying(typ).(type) {
 	case *types.Slice:
 		var length, capacity Value
@@ -42,8 +42,19 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		}
 		slice := c.makeSlice(utyp.Elt, length, capacity)
 		return c.NewLLVMValue(slice, typ)
+	case *types.Chan:
+		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap int) uintptr")
+		dyntyp := c.types.ToRuntime(typ)
+		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+		var cap_ llvm.Value
+		if len(expr.Args) > 1 {
+			cap_ = c.VisitExpr(expr.Args[1]).LLVMValue()
+		}
+		args := []llvm.Value{dyntyp, cap_}
+		ptr := c.builder.CreateCall(f, args, "")
+		return c.NewLLVMValue(ptr, typ)
 	}
-	// TODO map, chan
+	// TODO map
 	return c.NewLLVMValue(llvm.ConstNull(c.types.ToLLVM(typ)), typ)
 }
 

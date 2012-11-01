@@ -313,7 +313,9 @@ func (tm *LLVMTypeMap) mapLLVMType(m *types.Map) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
-	panic("unimplemented")
+	// All channel details are in the runtime. We represent it
+	// here as an opaque pointer.
+	return tm.target.IntPtrType()
 }
 
 func (tm *LLVMTypeMap) nameLLVMType(n *types.Name) llvm.Type {
@@ -529,7 +531,22 @@ func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
-	panic("unimplemented")
+	commonType := tm.makeCommonType(c, reflect.Chan)
+	chanType := llvm.ConstNull(tm.runtimeChanType)
+	chanType = llvm.ConstInsertValue(chanType, commonType, []uint32{0})
+	chanType = llvm.ConstInsertValue(chanType, tm.ToRuntime(c.Elt), []uint32{1})
+
+	// go/ast and reflect disagree on values for direction.
+	var dir reflect.ChanDir
+	if c.Dir&ast.SEND != 0 {
+		dir = reflect.SendDir
+	}
+	if c.Dir&ast.RECV != 0 {
+		dir |= reflect.RecvDir
+	}
+	uintptrdir := llvm.ConstInt(tm.target.IntPtrType(), uint64(dir), false)
+	chanType = llvm.ConstInsertValue(chanType, uintptrdir, []uint32{2})
+	return tm.makeRuntimeTypeGlobal(chanType)
 }
 
 func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
@@ -538,6 +555,11 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	// TODO check if the package being compiled has the same path as the
 	// object's package; if it does not, simply create an "externally available"
 	// global and return that.
+
+	underlying := n.Underlying
+	if name, ok := underlying.(*types.Name); ok {
+		underlying = name.Underlying
+	}
 
 	global, ptr = tm.makeRuntimeType(n.Underlying)
 	globalInit := global.Initializer()

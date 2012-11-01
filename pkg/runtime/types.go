@@ -89,6 +89,12 @@ type ptrType struct {
 	elem *type_
 }
 
+type chanType struct {
+	commonType
+	elem *type_
+	dir uintptr
+}
+
 const (
 	invalidKind uint8 = iota
 	boolKind
