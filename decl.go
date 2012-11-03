@@ -149,195 +149,155 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 // Create a constructor function which initialises a global.
 // TODO collapse all global inits into one init function?
-func (c *compiler) createGlobal(e ast.Expr, t types.Type, name string) (g *LLVMValue) {
-	if e == nil {
-		llvmtyp := c.types.ToLLVM(t)
-		gv := llvm.AddGlobal(c.module.Module, llvmtyp, name)
-		gv.SetInitializer(llvm.ConstNull(llvmtyp))
-		g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
-		return g
+func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg string) {
+	globals := make([]*LLVMValue, len(idents))
+	for i, ident := range idents {
+		if ident.Name != "_" {
+			t := ident.Obj.Type.(types.Type)
+			llvmtyp := c.types.ToLLVM(t)
+			gv := llvm.AddGlobal(c.module.Module, llvmtyp, pkg+"."+ident.Name)
+			g := c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
+			globals[i] = g
+			ident.Obj.Data = g
+		}
 	}
 
+	if len(values) == 0 {
+		for _, g := range globals {
+			if g != nil {
+				initializer := llvm.ConstNull(g.pointer.value.Type().ElementType())
+				g.pointer.value.SetInitializer(initializer)
+			}
+		}
+		return
+	}
+
+	// FIXME Once we have constant folding, we can check first if the value is
+	// a constant. For now we'll create a function and then erase it if the
+	// computed value is a constant.
 	if block := c.builder.GetInsertBlock(); !block.IsNil() {
 		defer c.builder.SetInsertPointAtEnd(block)
 	}
-	fn_type := new(types.Func)
-	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
-	fn := llvm.AddFunction(c.module.Module, "", llvm_fn_type)
+	fntype := &types.Func{}
+	llvmfntype := c.types.ToLLVM(fntype).ElementType()
+	fn := llvm.AddFunction(c.module.Module, "", llvmfntype)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
-	// Visit the expression. Dereference if necessary, and generalise
-	// the type if one hasn't been specified.
-	init_ := c.VisitExpr(e)
-	_, isconst := init_.(ConstValue)
-	if t == nil {
-		t = init_.Type()
+	if len(values) == 1 && len(idents) > 1 {
+		// Compound values are always non-constant.
+		values := c.destructureExpr(values[0])
+		for i, ident := range idents {
+			if globals[i] != nil {
+				v := values[i].Convert(ident.Obj.Type.(types.Type))
+				gv := globals[i].pointer.value
+				gv.SetInitializer(llvm.Undef(gv.Type().ElementType()))
+				c.builder.CreateStore(v.LLVMValue(), gv)
+			}
+		}
 	} else {
-		init_ = init_.Convert(t)
+		allconst := true
+		for i, expr := range values {
+			if globals[i] != nil {
+				gv := globals[i].pointer.value
+				ident := idents[i]
+				value := c.VisitExpr(expr)
+				value = value.Convert(ident.Obj.Type.(types.Type))
+				_, isconst := value.(ConstValue)
+				if isconst {
+					gv.SetInitializer(value.LLVMValue())
+				} else {
+					allconst = false
+					gv.SetInitializer(llvm.Undef(gv.Type().ElementType()))
+					c.builder.CreateStore(value.LLVMValue(), gv)
+				}
+			}
+		}
+		if allconst {
+			fn.EraseFromParentAsFunction()
+			fn = llvm.Value{nil}
+		}
 	}
 
-	// If the result is a constant, discard the function before
-	// creating any llvm.Value's.
-	if isconst {
-		fn.EraseFromParentAsFunction()
-		fn = llvm.Value{nil}
-	}
-
-	// Set the initialiser. If it's a non-const value, then
-	// we'll have to do the assignment in a global constructor
-	// function.
-	gv := llvm.AddGlobal(c.module.Module, c.types.ToLLVM(t), name)
-	g = c.NewLLVMValue(gv, &types.Pointer{Base: t}).makePointee()
-	if isconst {
-		// Initialiser is constant; discard function and return global now.
-		gv.SetInitializer(init_.LLVMValue())
-	} else {
-		gv.SetInitializer(llvm.ConstNull(c.types.ToLLVM(t)))
-		c.builder.CreateStore(init_.LLVMValue(), gv)
-	}
-
+	// FIXME order global ctors
 	if !fn.IsNil() {
 		c.builder.CreateRetVoid()
-		// FIXME order global ctors
-		fn_value := c.NewLLVMValue(fn, fn_type)
-		c.varinitfuncs = append(c.varinitfuncs, fn_value)
+		fnvalue := c.NewLLVMValue(fn, fntype)
+		c.varinitfuncs = append(c.varinitfuncs, fnvalue)
 	}
-	return g
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
-	var iota_obj *ast.Object = types.Universe.Lookup("iota")
+	// Check if the value-spec has already been visited (referenced
+	// before definition visited.)
+	if len(valspec.Names) > 0 {
+		if _, ok := valspec.Names[0].Obj.Data.(Value); ok {
+			return
+		}
+	}
+
+	var iotaObj *ast.Object = types.Universe.Lookup("iota")
 	defer func(data interface{}) {
-		iota_obj.Data = data
-	}(iota_obj.Data)
+		iotaObj.Data = data
+	}(iotaObj.Data)
 
-	var value_type types.Type
-	for i, name_ := range valspec.Names {
-		// We may resolve constants in the process of resolving others.
-		obj := name_.Obj
-		if _, isvalue := (obj.Data).(Value); isvalue {
+	pkgname, ispackagelevel := c.pkgmap[valspec.Names[0].Obj]
+	if ispackagelevel && !isconst {
+		c.createGlobals(valspec.Names, valspec.Values, pkgname)
+		return
+	}
+
+	var values []Value
+	if len(valspec.Values) == 1 && len(valspec.Names) > 1 {
+		values = c.destructureExpr(valspec.Values[0])
+	} else if len(valspec.Values) > 0 {
+		values = make([]Value, len(valspec.Names))
+		for i, name_ := range valspec.Names {
+			if isconst {
+				if iota_, isint := (name_.Obj.Data).(int); isint {
+					iotaValue := c.NewConstValue(token.INT, strconv.Itoa(iota_))
+					iotaObj.Data = iotaValue
+				}
+			}
+			values[i] = c.VisitExpr(valspec.Values[i])
+		}
+	}
+
+	for i, name := range valspec.Names {
+		if name.Name == "_" {
 			continue
-		}
-
-		// Expression may have side-effects, so compute it regardless of
-		// whether it'll be assigned to a name.
-		var expr ast.Expr
-		if i < len(valspec.Values) && valspec.Values[i] != nil {
-			expr = valspec.Values[i]
-		}
-
-		// Set iota if necessary.
-		if isconst {
-			if iota_, isint := (name_.Obj.Data).(int); isint {
-				iota_value := c.NewConstValue(token.INT, strconv.Itoa(iota_))
-				iota_obj.Data = iota_value
-
-				// Con objects with an iota have an embedded ValueSpec
-				// in the Decl field. We'll just pull it out and use it
-				// for evaluating the expression below.
-				valspec = (name_.Obj.Decl).(*ast.ValueSpec)
-			}
-		}
-
-		// If the name is "_", then we can just evaluate the expression
-		// and ignore the result. We handle package level variables
-		// specially, below.
-		pkgname, ispackagelevel := c.pkgmap[name_.Obj]
-		name := name_.String()
-		if name == "_" && !ispackagelevel {
-			if expr != nil {
-				c.VisitExpr(expr)
-			}
-			continue
-		} else {
-			if value_type == nil && valspec.Type != nil {
-				value_type = c.GetType(valspec.Type)
-			}
 		}
 
 		// For constants, we just pass the ConstValue around. Otherwise, we
 		// will convert it to an LLVMValue.
 		var value Value
-		if !isconst {
-			if !ispackagelevel {
-				// Visit the expression.
-				var init_ Value
-				if expr != nil {
-					init_ = c.VisitExpr(expr)
-					if value_type == nil {
-						value_type = init_.Type()
-					}
-				}
-
-				// The variable should be allocated on the stack if it's
-				// declared inside a function.
-				var llvm_init llvm.Value
-				stack_value := c.builder.CreateAlloca(c.types.ToLLVM(value_type), name)
-				if init_ == nil {
-					// If no initialiser was specified, set it to the
-					// zero value.
-					llvm_init = llvm.ConstNull(c.types.ToLLVM(value_type))
-				} else {
-					llvm_init = init_.Convert(value_type).LLVMValue()
-				}
-				c.builder.CreateStore(llvm_init, stack_value)
-				llvm_value := c.NewLLVMValue(stack_value, &types.Pointer{Base: value_type})
-				value = llvm_value.makePointee()
-			} else { // ispackagelevel
-				// Set the initialiser. If it's a non-const value, then
-				// we'll have to do the assignment in a global constructor
-				// function.
-				value = c.createGlobal(expr, value_type, pkgname+"."+name)
+		if isconst {
+			value = values[i].Convert(name.Obj.Type.(types.Type))
+		} else {
+			// The variable should be allocated on the stack if it's
+			// declared inside a function.
+			var llvmInit llvm.Value
+			typ := name.Obj.Type.(types.Type)
+			ptr := c.builder.CreateAlloca(c.types.ToLLVM(typ), name.Name)
+			if values == nil || values[i] == nil {
+				// If no initialiser was specified, set it to the
+				// zero value.
+				llvmInit = llvm.ConstNull(c.types.ToLLVM(typ))
+			} else {
+				llvmInit = values[i].Convert(typ).LLVMValue()
 			}
-		} else { // isconst
-			value = c.VisitExpr(expr).(ConstValue)
-			if value_type != nil {
-				value = value.Convert(value_type)
-			}
+			c.builder.CreateStore(llvmInit, ptr)
+			value = c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
 		}
-		obj.Data = value
+		name.Obj.Data = value
 	}
-}
-
-func (c *compiler) VisitTypeSpec(spec *ast.TypeSpec) {
-	obj := spec.Name.Obj
-	type_, istype := (obj.Type).(types.Type)
-	if !istype {
-		type_ = c.GetType(spec.Type)
-		if name, isname := type_.(*types.Name); isname {
-			type_ = types.Underlying(name)
-		}
-		obj.Type = &types.Name{Underlying: type_, Obj: obj}
-	}
-}
-
-func (c *compiler) VisitImportSpec(spec *ast.ImportSpec) {
-	/*
-	   path, err := strconv.Unquote(spec.Path.Value)
-	   if err != nil {panic(err)}
-	   imported := c.pkg.Imports[path]
-	   pkg, err := types.GcImporter(c.imports, path)
-	   if err != nil {panic(err)}
-
-	   // TODO handle spec.Name (local package name), if not nil
-	   // Insert the package object into the scope.
-	   c.filescope.Outer.Insert(pkg)
-	*/
 }
 
 func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 	switch decl.Tok {
-	case token.IMPORT:
-		for _, spec := range decl.Specs {
-			importspec, _ := spec.(*ast.ImportSpec)
-			c.VisitImportSpec(importspec)
-		}
-	case token.TYPE:
-		for _, spec := range decl.Specs {
-			typespec, _ := spec.(*ast.TypeSpec)
-			c.VisitTypeSpec(typespec)
-		}
+	case token.IMPORT, token.TYPE:
+		// Already handled in type-checking.
+		break
 	case token.CONST:
 		for _, spec := range decl.Specs {
 			valspec, _ := spec.(*ast.ValueSpec)

@@ -221,8 +221,15 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 
 	case *ast.CompositeLit:
 		var typ Type
+		var ellipsisArray *Array
 		if x.Type != nil {
 			typ = c.makeType(x.Type, true)
+			// If the array's len is ..., fill it in (at the end).
+			if node, ok := x.Type.(*ast.ArrayType); ok {
+				if _, ok := node.Len.(*ast.Ellipsis); ok {
+					ellipsisArray = typ.(*Array)
+				}
+			}
 		} else {
 			typ = c.types[x]
 			if typ == nil {
@@ -232,7 +239,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 		var keytyp, valtyp Type
-		switch typ := typ.(type) {
+		switch typ := Underlying(typ).(type) {
 		case *Map:
 			keytyp = typ.Key
 			valtyp = typ.Elt
@@ -242,7 +249,8 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			valtyp = typ.Elt
 		}
 
-		for _, elt := range x.Elts {
+		var maxindex uint64
+		for i, elt := range x.Elts {
 			if kv, ok := elt.(*ast.KeyValueExpr); ok {
 				// Provisionally set the key type to that of
 				// the outer map's key type. checkExpr will
@@ -251,11 +259,24 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				c.types[kv.Value] = valtyp
 				c.checkExpr(kv.Key, nil)
 				c.checkExpr(kv.Value, nil)
+				if ellipsisArray != nil {
+					constval := evalConst(kv.Key)
+					index := uint64(constval.Val.(*big.Int).Int64())
+					if index > maxindex {
+						maxindex = index
+					}
+				}
 			} else {
 				c.types[elt] = valtyp
 				c.checkExpr(elt, nil)
+				maxindex = uint64(i)
 			}
 		}
+
+		if ellipsisArray != nil && len(x.Elts) > 0 {
+			ellipsisArray.Len = maxindex + 1
+		}
+
 		return typ
 
 	case *ast.BinaryExpr:

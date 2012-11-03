@@ -5,7 +5,8 @@ func xyz() (int, int) {
 }
 
 func abc() (int, int) {
-	return xyz()
+	var a, b = xyz()
+	return a, b
 }
 
 func main() {

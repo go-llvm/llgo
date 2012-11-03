@@ -99,8 +99,10 @@ func getRuntimeModule() (llvm.Module, error) {
 		o := outfile.Name()
 		for _, llfile := range llfiles {
 			cmd := exec.Command("llvm-link", "-o", o, o, llfile)
-			_, err = cmd.CombinedOutput()
+			output, err := cmd.CombinedOutput()
 			if err != nil {
+				err = fmt.Errorf("llvm-link failed: %s", err)
+				fmt.Fprintf(os.Stderr, string(output))
 				return llvm.Module{}, err
 			}
 		}
@@ -216,7 +218,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("go run failed: %s", err)
 	}
 	expected := strings.Split(strings.TrimSpace(string(gorun_out)), "\n")
 

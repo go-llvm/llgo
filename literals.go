@@ -150,7 +150,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			}
 		}
 		for i, value := range values {
-			elttype := c.ObjGetType(typ.Fields[i])
+			elttype := typ.Fields[i].Type.(types.Type)
 			var llvm_value llvm.Value
 			if value == nil {
 				llvm_value = llvm.ConstNull(c.types.ToLLVM(elttype))

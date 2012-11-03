@@ -165,6 +165,38 @@ func nonAssignmentToken(t token.Token) token.Token {
 	return token.ILLEGAL
 }
 
+// destructureExpr evaluates the right-hand side of a
+// multiple assignment where the right-hand side is a single expression.
+func (c *compiler) destructureExpr(x ast.Expr) []Value {
+	var values []Value
+	switch x := x.(type) {
+	case *ast.IndexExpr:
+		// value, ok := m[k]
+		m := c.VisitExpr(x.X).(*LLVMValue)
+		index := c.VisitExpr(x.Index)
+		value, notnull := c.mapLookup(m, index, false)
+		values = []Value{value, notnull}
+	case *ast.CallExpr:
+		value := c.VisitExpr(x)
+		aggregate := value.LLVMValue()
+		struct_type := value.Type().(*types.Struct)
+		values = make([]Value, len(struct_type.Fields))
+		for i, f := range struct_type.Fields {
+			t := f.Type.(types.Type)
+			value_ := c.builder.CreateExtractValue(aggregate, i, "")
+			values[i] = c.NewLLVMValue(value_, t)
+		}
+	case *ast.TypeAssertExpr:
+		// newvalue, ok := value.(Type)
+		// FIXME handle I2V assertions
+		lhs := c.VisitExpr(x.X).(*LLVMValue)
+		typ := c.types.expr[x]
+		value, ok := lhs.convertI2I(types.Underlying(typ).(*types.Interface))
+		values = []Value{value, ok}
+	}
+	return values
+}
+
 func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	// x (add_op|mul_op)= y
 	if stmt.Tok != token.DEFINE && stmt.Tok != token.ASSIGN {
@@ -179,35 +211,11 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	}
 
 	// a, b, ... [:]= x, y, ...
-	values := make([]Value, len(stmt.Lhs))
+	var values []Value
 	if len(stmt.Rhs) == 1 && len(stmt.Lhs) > 1 {
-		switch x := stmt.Rhs[0].(type) {
-		case *ast.IndexExpr:
-			// value, ok := m[k]
-			m := c.VisitExpr(x.X).(*LLVMValue)
-			index := c.VisitExpr(x.Index)
-			value, notnull := c.mapLookup(m, index, false)
-			values[0] = value
-			values[1] = notnull
-		case *ast.CallExpr:
-			value := c.VisitExpr(x)
-			aggregate := value.LLVMValue()
-			struct_type := value.Type().(*types.Struct)
-			for i, f := range struct_type.Fields {
-				t := c.ObjGetType(f)
-				value_ := c.builder.CreateExtractValue(aggregate, i, "")
-				values[i] = c.NewLLVMValue(value_, t)
-			}
-		case *ast.TypeAssertExpr:
-			// newvalue, ok := value.(Type)
-			// FIXME handle I2V assertions
-			lhs := c.VisitExpr(x.X).(*LLVMValue)
-			typ := c.GetType(x.Type)
-			value, ok := lhs.convertI2I(types.Underlying(typ).(*types.Interface))
-			values[0] = value
-			values[1] = ok
-		}
+		values = c.destructureExpr(stmt.Rhs[0])
 	} else {
+		values = make([]Value, len(stmt.Lhs))
 		for i, expr := range stmt.Rhs {
 			values[i] = c.VisitExpr(expr)
 		}

@@ -5,8 +5,14 @@ func Blah() int {
     return 123
 }
 
+func F1() (int, float64) {
+	return 12, 3.45
+}
+
 var X = Y + Blah() // == 579
 var Y = 123 + Z // == 456
+
+var X1, Y1 = F1()
 
 const (
     _ = 333*iota
@@ -15,5 +21,6 @@ const (
 
 func main() {
     println(X, Y)
+    println(X1, Y1)
 }
 

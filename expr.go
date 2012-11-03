@@ -163,18 +163,16 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			}
 		}
 	}
-	lhs := c.VisitExpr(expr.Fun)
 
 	// Is it a type conversion?
-	if len(expr.Args) == 1 {
-		if _, ok := lhs.(TypeValue); ok {
-			typ := lhs.Type()
-			value := c.VisitExpr(expr.Args[0])
-			return value.Convert(typ)
-		}
+	if len(expr.Args) == 1 && isType(expr.Fun) {
+		typ := c.types.expr[expr]
+		value := c.VisitExpr(expr.Args[0])
+		return value.Convert(typ)
 	}
 
 	// Not a type conversion, so must be a function call.
+	lhs := c.VisitExpr(expr.Fun)
 	fn := lhs.(*LLVMValue)
 	fn_type := types.Underlying(fn.Type()).(*types.Func)
 	args := make([]llvm.Value, 0)
@@ -442,7 +440,7 @@ func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
-	typ := c.GetType(expr.Type)
+	typ := c.types.expr[expr]
 	lhs := c.VisitExpr(expr.X)
 	return lhs.Convert(typ)
 }
@@ -473,16 +471,6 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 		return c.VisitTypeAssertExpr(x)
 	case *ast.SliceExpr:
 		return c.VisitSliceExpr(x)
-	case *ast.FuncType:
-		return c.VisitFuncType(x)
-	case *ast.MapType:
-		return c.VisitMapType(x)
-	case *ast.ArrayType:
-		return c.VisitArrayType(x)
-	case *ast.StructType:
-		return c.VisitStructType(x)
-	case *ast.InterfaceType:
-		return c.VisitInterfaceType(x)
 	case *ast.Ident:
 		if x.Obj == nil {
 			x.Obj = c.LookupObj(x.Name)

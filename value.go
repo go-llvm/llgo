@@ -169,7 +169,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		struct_fields := typ.Fields
 		if element_types_count > 0 {
-			t := c.ObjGetType(struct_fields[0])
+			t := struct_fields[0].Type.(types.Type)
 			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
 			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
@@ -181,7 +181,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 			result := first
 			for i := 1; i < element_types_count; i++ {
-				t := c.ObjGetType(struct_fields[i])
+				t := struct_fields[i].Type.(types.Type)
 				next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 				next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
 				next := next_lhs.BinaryOp(op, next_rhs)
