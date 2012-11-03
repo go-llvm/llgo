@@ -160,6 +160,25 @@ func untypedPriority(t Type) int {
 	panic(fmt.Sprintf("unhandled (%T, %v)", t, t))
 }
 
+// convertUntyped takes an object, and, if it is untyped, gives it
+// a named builtin type: bool, rune, int, float64, complex128 or string.
+func maybeConvertUntyped(obj *ast.Object) {
+	switch obj.Type {
+	case Bool.Underlying:
+		obj.Type = Bool
+	case Rune.Underlying:
+		obj.Type = Rune
+	case Int.Underlying:
+		obj.Type = Int
+	case Float64.Underlying:
+		obj.Type = Float64
+	case Complex128.Underlying:
+		obj.Type = Complex128
+	case String.Underlying:
+		obj.Type = String
+	}
+}
+
 // checkExpr type checks an expression and returns its type.
 //
 // TODO get rid of the assignee crap, and keep a context stack.
@@ -172,6 +191,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			c.types[x] = typ
 		}
 	}()
+
 	// multi-value assignment handled within CallExpr.
 	if len(assignees) == 1 && assignees[0] != nil {
 		defer func() {
@@ -942,6 +962,7 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				if ident, ok := s.Lhs[i].(*ast.Ident); ok && ident.Obj != nil {
 					idents[0] = ident
 					c.checkExpr(e, idents)
+					maybeConvertUntyped(ident.Obj)
 				} else {
 					c.checkExpr(e, nil)
 				}
@@ -1268,6 +1289,7 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 				for i, name := range names {
 					if name.Obj != nil {
 						c.checkExpr(values[i], []*ast.Ident{name})
+						maybeConvertUntyped(name.Obj)
 					} else {
 						c.checkExpr(values[i], nil)
 					}

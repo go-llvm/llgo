@@ -110,7 +110,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			return NilValue{c}
 		} else {
 			var typ types.Type
-			switch x := obj.Type.(type) {
+			switch x := types.Underlying(obj.Type.(types.Type)).(type) {
 			case *types.Basic:
 				typ = x
 			case *types.Name:

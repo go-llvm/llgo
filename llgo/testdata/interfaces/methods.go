@@ -15,6 +15,10 @@ func (y *Y) String() string {
 	return "Y()"
 }
 
+func makeX() X {
+	return X(0)
+}
+
 func main() {
 	var z Stringer
 	z = X(0)
@@ -22,5 +26,9 @@ func main() {
 	//var y Y
 	//z = &y
 	//println(z.String())
-}
 
+	println(makeX().String())
+
+	// Should fail type-checking: can't take address of temporary.
+	//println(makeY().String())
+}

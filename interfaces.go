@@ -38,9 +38,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 		srctyp = name.Underlying
 	}
 
-	isptr := false
 	if p, fromptr := srctyp.(*types.Pointer); fromptr {
-		isptr = true
 		srctyp = p.Base
 		if name, isname := srctyp.(*types.Name); isname {
 			srcname = name
@@ -58,13 +56,13 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 
 	builder := v.compiler.builder
 	var ptr llvm.Value
-	if isptr {
-		ptr = v.LLVMValue()
+	lv := v.LLVMValue()
+	if lv.Type().TypeKind() == llvm.PointerTypeKind {
+		ptr = lv
 	} else {
 		// If the value fits exactly in a pointer, then we can just
 		// bitcast it. Otherwise we need to malloc, and create a shim
 		// function to load the receiver.
-		lv := v.LLVMValue()
 		c := v.compiler
 		ptrsize := c.target.PointerSize()
 		if c.target.TypeStoreSize(lv.Type()) <= uint64(ptrsize) {

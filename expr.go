@@ -384,11 +384,11 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 	// Get a pointer to the field/receiver.
 	recvValue := lhs.(*LLVMValue)
-	if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); !ok {
-		recvValue = recvValue.pointer
-	}
-	recvValue = c.NewLLVMValue(recvValue.LLVMValue(), recvValue.Type())
 	if len(result.Indices) > 0 {
+		if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); !ok {
+			recvValue = recvValue.pointer
+			//recvValue = c.NewLLVMValue(recvValue.LLVMValue(), recvValue.Type())
+		}
 		for _, v := range result.Indices {
 			ptr := recvValue.LLVMValue()
 			field := types.Underlying(types.Deref(recvValue.typ)).(*types.Struct).Fields[v]
@@ -402,9 +402,6 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				recvValue = recvValue.makePointee()
 			}
 		}
-	}
-	if !types.Identical(recvValue.typ, expr.Sel.Obj.Type.(types.Type)) {
-		recvValue = recvValue.makePointee()
 	}
 
 	// Method?
@@ -421,6 +418,14 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		}
 		return method
 	} else {
+		resultType := expr.Sel.Obj.Type.(types.Type)
+		if types.Identical(recvValue.Type(), resultType) {
+			// no-op
+		} else if types.Identical(&types.Pointer{Base: recvValue.Type()}, resultType) {
+			recvValue = recvValue.pointer
+		} else {
+			recvValue = recvValue.makePointee()
+		}
 		return recvValue
 	}
 	panic("unreachable")
