@@ -250,7 +250,7 @@ func isIntType(t types.Type) bool {
 }
 
 func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
-	value := c.VisitExpr(expr.X).(*LLVMValue)
+	value := c.VisitExpr(expr.X)
 	index := c.VisitExpr(expr.Index)
 
 	typ := value.Type()
@@ -264,34 +264,38 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 	// We can index a pointer to an array.
 	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
-		value = value.makePointee()
+		value = value.(*LLVMValue).makePointee()
 		typ = value.Type()
 	}
 
 	switch types.Underlying(typ).(type) {
 	case *types.Array, *types.Slice:
-		var gep_indices []llvm.Value
-		var ptr llvm.Value
-		var result_type types.Type
+		index := index.LLVMValue()
 		switch typ := types.Underlying(typ).(type) {
 		case *types.Array:
-			// FIXME what to do if value is not addressable?
-			// Do we have to load the array onto the stack?
-			result_type = typ.Elt
-			ptr = value.pointer.LLVMValue()
-			gep_indices = append(gep_indices, llvm.ConstNull(llvm.Int32Type()))
+			var ptr llvm.Value
+			value := value.(*LLVMValue)
+			if value.pointer != nil {
+				ptr = value.pointer.LLVMValue()
+			} else {
+				init := value.LLVMValue()
+				ptr = c.builder.CreateAlloca(init.Type(), "")
+				c.builder.CreateStore(init, ptr)
+			}
+			zero := llvm.ConstNull(llvm.Int32Type())
+			element := c.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
+			result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+			return result.makePointee()
+
 		case *types.Slice:
-			result_type = typ.Elt
-			ptr = c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
+			ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
+			element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
+			result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+			return result.makePointee()
 		}
 
-		gep_indices = append(gep_indices, index.LLVMValue())
-		element := c.builder.CreateGEP(ptr, gep_indices, "")
-		result := c.NewLLVMValue(element, &types.Pointer{Base: result_type})
-		return result.makePointee()
-
 	case *types.Map:
-		value, _ = c.mapLookup(value, index, false)
+		value, _ = c.mapLookup(value.(*LLVMValue), index, false)
 		return value
 	}
 	panic(fmt.Sprintf("unreachable (%s)", typ))

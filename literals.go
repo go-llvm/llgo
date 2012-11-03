@@ -102,17 +102,25 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 	case *types.Array:
 		typ.Len = uint64(len(valuelist))
 		elttype := typ.Elt
+		llvmelttype := c.types.ToLLVM(elttype)
 		llvm_values := make([]llvm.Value, typ.Len)
 		for i, value := range valuelist {
 			if value == nil {
-				llvm_values[i] = llvm.ConstNull(c.types.ToLLVM(elttype))
-			} else {
+				llvm_values[i] = llvm.ConstNull(llvmelttype)
+			} else if _, ok := value.(ConstValue); ok || value.LLVMValue().IsConstant() {
 				llvm_values[i] = value.Convert(elttype).LLVMValue()
+			} else {
+				llvm_values[i] = llvm.Undef(llvmelttype)
 			}
 		}
-		// TODO set non-const values after creating const array.
-		return c.NewLLVMValue(
-			llvm.ConstArray(c.types.ToLLVM(elttype), llvm_values), origtyp)
+		array := llvm.ConstArray(llvmelttype, llvm_values)
+		for i, value := range valuelist {
+			if llvm_values[i].IsUndef() {
+				value := value.Convert(elttype).LLVMValue()
+				array = c.builder.CreateInsertValue(array, value, i, "")
+			}
+		}
+		return c.NewLLVMValue(array, origtyp)
 
 	case *types.Slice:
 		ptr := c.builder.CreateMalloc(c.types.ToLLVM(typ), "")

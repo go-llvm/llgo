@@ -781,11 +781,32 @@ func evalConst(x ast.Expr) Const {
 		}
 		switch data := x.Obj.Data.(type) {
 		case int:
-			return Const{big.NewInt(int64(data))}
+			spec := x.Obj.Decl.(*ast.ValueSpec)
+			for i, ident := range spec.Names {
+				if ident.Obj == x.Obj {
+					return evalConst(spec.Values[i])
+				}
+			}
 		case Const:
 			return data
 		default:
 			panic(fmt.Sprintf("unhandled (%T)", x.Obj.Data))
+		}
+	case *ast.SelectorExpr:
+		ident := x.X.(*ast.Ident)
+		pkgscope := ident.Obj.Data.(*ast.Scope)
+		obj := pkgscope.Lookup(x.Sel.Name)
+		return obj.Data.(Const)
+	case *ast.BinaryExpr:
+		return evalConst(x.X).BinaryOp(x.Op, evalConst(x.Y))
+	case *ast.CallExpr:
+		switch fun := x.Fun.(type) {
+		case *ast.Ident:
+			assert(fun.Name == "len") // TODO unsafe.*
+			// TODO support arrays.
+			value := evalConst(x.Args[0])
+			s := value.Val.(string)
+			return Const{big.NewInt(int64(len(s)))}
 		}
 	}
 	panic(fmt.Sprintf("unhandled (%T)", x))
@@ -937,7 +958,7 @@ func isType(x ast.Expr) bool {
 
 // checkStmt type checks a statement.
 func (c *checker) checkStmt(s ast.Stmt) {
-	//fmt.Printf("Check statement: %T @ %s\n", s, c.fset.Position(s.Pos()))
+	// fmt.Printf("Check statement: %T @ %s\n", s, c.fset.Position(s.Pos()))
 
 	switch s := s.(type) {
 	case *ast.AssignStmt:
@@ -1072,15 +1093,15 @@ func (c *checker) checkStmt(s ast.Stmt) {
 
 		// TODO check key, value are addressable and assignable from range
 		// values.
-		if ident, ok := s.Key.(*ast.Ident); ok && ident.Obj.Type == nil {
-			if ident.Obj != nil {
+		if s.Key != nil {
+			if ident, ok := s.Key.(*ast.Ident); ok && ident.Obj != nil && ident.Obj.Type == nil {
 				ident.Obj.Type = k
+			} else {
+				c.checkExpr(s.Key, nil)
 			}
-		} else {
-			c.checkExpr(s.Key, nil)
 		}
 		if s.Value != nil {
-			if ident, ok := s.Value.(*ast.Ident); ok && ident.Obj.Type == nil {
+			if ident, ok := s.Value.(*ast.Ident); ok && ident.Obj != nil && ident.Obj.Type == nil {
 				ident.Obj.Type = v
 			} else {
 				c.checkExpr(s.Value, nil)
