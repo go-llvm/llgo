@@ -38,6 +38,14 @@ func main() {
 
 	// rhs' type is converted lhs'
 	println(uint32(1) << uint64(2))
+	{
+		var _uint64 uint64
+		var _uint uint
+		x := _uint64 >> (63 - _uint)
+		if x == 2<<_uint {
+			println("!")
+		}
+	}
 
 	// There was a bug related to compound expressions involving
 	// multiple binary logical operators.

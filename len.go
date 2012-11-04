@@ -78,10 +78,17 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 
 	case *types.Basic:
 		if typ == types.String.Underlying {
-			ptr := value.(*LLVMValue).pointer
-			len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
-			len_value := c.builder.CreateLoad(len_field, "")
-			return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
+			switch value := value.(type) {
+			case *LLVMValue:
+				ptr := value.pointer
+				len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
+				len_value := c.builder.CreateLoad(len_field, "")
+				return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
+			case ConstValue:
+				s := value.Val.(string)
+				n := uint64(len(s))
+				return c.NewConstValue(token.INT, strconv.FormatUint(n, 10))
+			}
 		}
 	}
 	panic(fmt.Sprint("Unhandled value type: ", value.Type()))

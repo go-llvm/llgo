@@ -1,5 +1,14 @@
 package main
 
+func f1() {
+	goto labeled
+labeled:
+	goto done
+	return
+done:
+	println("!")
+}
+
 func main() {
 	i := 0
 start:
@@ -13,6 +22,6 @@ start:
 	return
 end:
 	println("done")
+	f1()
 	return
 }
-

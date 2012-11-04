@@ -81,11 +81,17 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 		c.builder.SetInsertPointAtEnd(newBlock)
 	}
 
+	// Visit each statement in the block. When we have a terminator,
+	// ignore everything until we get to a labeled statement.
 	for _, stmt := range stmt.List {
-		c.VisitStmt(stmt)
-		if _, ok := stmt.(*ast.BranchStmt); ok {
-			// Ignore anything after a branch statement.
-			break
+		currBlock := c.builder.GetInsertBlock()
+		in := currBlock.LastInstruction()
+		if in.IsNil() || in.IsATerminatorInst().IsNil() {
+			c.VisitStmt(stmt)
+		} else if _, ok := stmt.(*ast.LabeledStmt); ok {
+			// FIXME we might end up with a labeled statement
+			// with no predecessors, due to dead code elimination.
+			c.VisitStmt(stmt)
 		}
 	}
 
@@ -356,84 +362,86 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 }
 
 func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
-	//stmt.Call *ast.CallExpr
 	// TODO 
-	var fn *LLVMValue
-	switch x := (stmt.Call.Fun).(type) {
-	case *ast.Ident:
-		fn = c.Resolve(x.Obj).(*LLVMValue)
-		if fn == nil {
-			panic(fmt.Sprintf(
-				"No function found with name '%s'", x.String()))
+	c.builder.CreateUnreachable()
+	/*
+		var fn *LLVMValue
+		switch x := (stmt.Call.Fun).(type) {
+		case *ast.Ident:
+			fn = c.Resolve(x.Obj).(*LLVMValue)
+			if fn == nil {
+				panic(fmt.Sprintf(
+					"No function found with name '%s'", x.String()))
+			}
+		default:
+			fn = c.VisitExpr(stmt.Call.Fun).(*LLVMValue)
 		}
-	default:
-		fn = c.VisitExpr(stmt.Call.Fun).(*LLVMValue)
-	}
 
-	// Evaluate arguments, store in a structure on the stack.
-	var args_struct_type llvm.Type
-	var args_mem llvm.Value
-	var args_size llvm.Value
-	if stmt.Call.Args != nil {
-		param_types := make([]llvm.Type, 0)
-		fn_type := types.Deref(fn.Type()).(*types.Func)
-		for _, param := range fn_type.Params {
-			typ := param.Type.(types.Type)
-			param_types = append(param_types, c.types.ToLLVM(typ))
+		// Evaluate arguments, store in a structure on the stack.
+		var args_struct_type llvm.Type
+		var args_mem llvm.Value
+		var args_size llvm.Value
+		if stmt.Call.Args != nil {
+			param_types := make([]llvm.Type, 0)
+			fn_type := types.Deref(fn.Type()).(*types.Func)
+			for _, param := range fn_type.Params {
+				typ := param.Type.(types.Type)
+				param_types = append(param_types, c.types.ToLLVM(typ))
+			}
+			args_struct_type = llvm.StructType(param_types, false)
+			args_mem = c.builder.CreateAlloca(args_struct_type, "")
+			for i, expr := range stmt.Call.Args {
+				value_i := c.VisitExpr(expr)
+				value_i = value_i.Convert(fn_type.Params[i].Type.(types.Type))
+				arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
+					llvm.ConstInt(llvm.Int32Type(), 0, false),
+					llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
+				c.builder.CreateStore(value_i.LLVMValue(), arg_i)
+			}
+			args_size = llvm.SizeOf(args_struct_type)
+			args_size = llvm.ConstTrunc(args_size, llvm.Int32Type())
+		} else {
+			args_struct_type = llvm.VoidType()
+			args_mem = llvm.ConstNull(llvm.PointerType(args_struct_type, 0))
+			args_size = llvm.ConstInt(llvm.Int32Type(), 0, false)
 		}
-		args_struct_type = llvm.StructType(param_types, false)
-		args_mem = c.builder.CreateAlloca(args_struct_type, "")
-		for i, expr := range stmt.Call.Args {
-			value_i := c.VisitExpr(expr)
-			value_i = value_i.Convert(fn_type.Params[i].Type.(types.Type))
-			arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
-				llvm.ConstInt(llvm.Int32Type(), 0, false),
-				llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-			c.builder.CreateStore(value_i.LLVMValue(), arg_i)
+
+		// When done, return to where we were.
+		defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+
+		// Create a function that will take a pointer to a structure of the type
+		// defined above, or no parameters if there are none to pass.
+		indirect_fn_type := llvm.FunctionType(
+			llvm.VoidType(),
+			[]llvm.Type{llvm.PointerType(args_struct_type, 0)}, false)
+		indirect_fn := llvm.AddFunction(c.module.Module, "", indirect_fn_type)
+		indirect_fn.SetFunctionCallConv(llvm.CCallConv)
+
+		// Call "newgoroutine" with the indirect function and stored args.
+		newgoroutine := getnewgoroutine(c.module.Module)
+		ngr_param_types := newgoroutine.Type().ElementType().ParamTypes()
+		fn_arg := c.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
+		args_arg := c.builder.CreateBitCast(args_mem,
+			llvm.PointerType(llvm.Int8Type(), 0), "")
+		c.builder.CreateCall(newgoroutine,
+			[]llvm.Value{fn_arg, args_arg, args_size}, "")
+
+		entry := llvm.AddBasicBlock(indirect_fn, "entry")
+		c.builder.SetInsertPointAtEnd(entry)
+		var args []llvm.Value
+		if stmt.Call.Args != nil {
+			args_mem = indirect_fn.Param(0)
+			args = make([]llvm.Value, len(stmt.Call.Args))
+			for i := range stmt.Call.Args {
+				arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
+					llvm.ConstInt(llvm.Int32Type(), 0, false),
+					llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
+				args[i] = c.builder.CreateLoad(arg_i, "")
+			}
 		}
-		args_size = llvm.SizeOf(args_struct_type)
-		args_size = llvm.ConstTrunc(args_size, llvm.Int32Type())
-	} else {
-		args_struct_type = llvm.VoidType()
-		args_mem = llvm.ConstNull(llvm.PointerType(args_struct_type, 0))
-		args_size = llvm.ConstInt(llvm.Int32Type(), 0, false)
-	}
-
-	// When done, return to where we were.
-	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
-
-	// Create a function that will take a pointer to a structure of the type
-	// defined above, or no parameters if there are none to pass.
-	indirect_fn_type := llvm.FunctionType(
-		llvm.VoidType(),
-		[]llvm.Type{llvm.PointerType(args_struct_type, 0)}, false)
-	indirect_fn := llvm.AddFunction(c.module.Module, "", indirect_fn_type)
-	indirect_fn.SetFunctionCallConv(llvm.CCallConv)
-
-	// Call "newgoroutine" with the indirect function and stored args.
-	newgoroutine := getnewgoroutine(c.module.Module)
-	ngr_param_types := newgoroutine.Type().ElementType().ParamTypes()
-	fn_arg := c.builder.CreateBitCast(indirect_fn, ngr_param_types[0], "")
-	args_arg := c.builder.CreateBitCast(args_mem,
-		llvm.PointerType(llvm.Int8Type(), 0), "")
-	c.builder.CreateCall(newgoroutine,
-		[]llvm.Value{fn_arg, args_arg, args_size}, "")
-
-	entry := llvm.AddBasicBlock(indirect_fn, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
-	var args []llvm.Value
-	if stmt.Call.Args != nil {
-		args_mem = indirect_fn.Param(0)
-		args = make([]llvm.Value, len(stmt.Call.Args))
-		for i := range stmt.Call.Args {
-			arg_i := c.builder.CreateGEP(args_mem, []llvm.Value{
-				llvm.ConstInt(llvm.Int32Type(), 0, false),
-				llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-			args[i] = c.builder.CreateLoad(arg_i, "")
-		}
-	}
-	c.builder.CreateCall(fn.LLVMValue(), args, "")
-	c.builder.CreateRetVoid()
+		c.builder.CreateCall(fn.LLVMValue(), args, "")
+		c.builder.CreateRetVoid()
+	*/
 }
 
 func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {

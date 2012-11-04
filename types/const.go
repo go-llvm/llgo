@@ -141,6 +141,8 @@ func (x Const) Convert(typ *Type) Const {
 			var z big.Rat
 			z.SetInt(x)
 			return Const{&z}
+		case String:
+			return Const{string(x.Int64())}
 		}
 	case *big.Rat:
 		switch Underlying(*typ) {

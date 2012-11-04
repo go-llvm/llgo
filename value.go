@@ -174,18 +174,19 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
 
-			logical_op := token.LAND
+			logicalop := token.LAND
 			if op == token.NEQ {
-				logical_op = token.LOR
+				logicalop = token.LOR
 			}
 
 			result := first
 			for i := 1; i < element_types_count; i++ {
-				t := struct_fields[i].Type.(types.Type)
-				next_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
-				next_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-				next := next_lhs.BinaryOp(op, next_rhs)
-				result = result.BinaryOp(logical_op, next)
+				result = c.compileLogicalOp(logicalop, result, func() Value {
+					t := struct_fields[i].Type.(types.Type)
+					lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+					rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
+					return lhs.BinaryOp(op, rhs)
+				})
 			}
 			return result
 		}
@@ -422,6 +423,7 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		struct_ = c.builder.CreateInsertValue(struct_, strlen, 2, "")
 		return c.NewLLVMValue(struct_, byteslice)
 	}
+
 	// []byte -> string
 	if types.Identical(src_typ, byteslice) && dst_typ == types.String {
 		c := v.compiler
@@ -434,7 +436,12 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		return c.NewLLVMValue(struct_, types.String)
 	}
 
-	// TODO other special conversions, e.g. int->string.
+	// Rune to string conversion.
+	if types.Identical(src_typ, types.Rune) && dst_typ == types.String {
+		return v.runeToString()
+	}
+
+	// TODO other special conversions?
 	llvm_type := v.compiler.types.ToLLVM(dst_typ)
 
 	// Unsafe pointer conversions.

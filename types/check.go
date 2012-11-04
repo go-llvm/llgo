@@ -327,9 +327,11 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				typ := c.types[x]
 				if typ != nil {
 					return typ
+				} else {
+					return Int
 				}
 			}
-			return Int
+			return xType
 		default:
 			if xUntyped && yUntyped {
 				// Untyped string concatenation.
@@ -626,8 +628,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				}
 
 				if found > 1 {
-					msg := c.errorf(x.Pos(),
-						"ambiguous selector %s.%s", x.X, x.Sel)
+					msg := c.errorf(x.Pos(), "ambiguous selector %s.%s", x.X, x.Sel)
 					return &Bad{Msg: msg}
 				}
 				curr = next
@@ -635,8 +636,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 		if x.Sel.Obj == nil {
-			msg := c.errorf(x.Pos(),
-				"failed to resolve selector %s.%s", x.X, x.Sel)
+			msg := c.errorf(x.Pos(), "failed to resolve selector %s.%s", x.X, x.Sel)
 			return &Bad{Msg: msg}
 		} else {
 			c.checkObj(x.Sel.Obj, false)
@@ -980,11 +980,13 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		} else {
 			idents := make([]*ast.Ident, 1)
 			for i, e := range s.Rhs {
-				if ident, ok := s.Lhs[i].(*ast.Ident); ok && ident.Obj != nil {
+				lhs := s.Lhs[i]
+				if ident, ok := lhs.(*ast.Ident); ok && ident.Obj != nil {
 					idents[0] = ident
 					c.checkExpr(e, idents)
 					maybeConvertUntyped(ident.Obj)
 				} else {
+					c.checkExpr(lhs, nil)
 					c.checkExpr(e, nil)
 				}
 			}
