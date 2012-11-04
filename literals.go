@@ -100,22 +100,25 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 	origtyp := typ
 	switch typ := types.Underlying(typ).(type) {
 	case *types.Array:
-		typ.Len = uint64(len(valuelist))
 		elttype := typ.Elt
 		llvmelttype := c.types.ToLLVM(elttype)
-		llvm_values := make([]llvm.Value, typ.Len)
-		for i, value := range valuelist {
+		llvmvalues := make([]llvm.Value, typ.Len)
+		for i := range llvmvalues {
+			var value Value
+			if i < len(valuelist) {
+				value = valuelist[i]
+			}
 			if value == nil {
-				llvm_values[i] = llvm.ConstNull(llvmelttype)
+				llvmvalues[i] = llvm.ConstNull(llvmelttype)
 			} else if _, ok := value.(ConstValue); ok || value.LLVMValue().IsConstant() {
-				llvm_values[i] = value.Convert(elttype).LLVMValue()
+				llvmvalues[i] = value.Convert(elttype).LLVMValue()
 			} else {
-				llvm_values[i] = llvm.Undef(llvmelttype)
+				llvmvalues[i] = llvm.Undef(llvmelttype)
 			}
 		}
-		array := llvm.ConstArray(llvmelttype, llvm_values)
+		array := llvm.ConstArray(llvmelttype, llvmvalues)
 		for i, value := range valuelist {
-			if llvm_values[i].IsUndef() {
+			if llvmvalues[i].IsUndef() {
 				value := value.Convert(elttype).LLVMValue()
 				array = c.builder.CreateInsertValue(array, value, i, "")
 			}

@@ -21,10 +21,21 @@ var smallPowersOfTen = [...]extFloat{
 	{0x989680 << 40, -40, false}, // 1e7
 }
 
+var arrayWithHoles = [10]int {
+	2: 1,
+	4: 2,
+	6: 3,
+	8: 4,
+}
+
 func main() {
 	for i := range smallPowersOfTen {
 		s := smallPowersOfTen[i]
 		println(s.mant, s.exp, s.neg)
+	}
+
+	for i, value := range arrayWithHoles {
+		println(i, value)
 	}
 }
 
