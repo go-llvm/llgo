@@ -184,19 +184,17 @@ check_dynamic:
 }
 
 // convertI2V converts an interface to a value.
-func (v *LLVMValue) convertI2V(typ types.Type) Value {
+func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
 	typptrType := llvm.PointerType(llvm.Int8Type(), 0)
 	runtimeType := v.compiler.types.ToRuntime(typ)
 	runtimeType = llvm.ConstBitCast(runtimeType, typptrType)
-	vptr := v.pointer.LLVMValue()
+	vval := v.LLVMValue()
 
 	builder := v.compiler.builder
-	ifaceType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
+	ifaceType := builder.CreateExtractValue(vval, 1, "")
 	diff := builder.CreatePtrDiff(runtimeType, ifaceType, "")
 	zero := llvm.ConstNull(diff.Type())
 	predicate := builder.CreateICmp(llvm.IntEQ, diff, zero, "")
-	llvmtype := v.compiler.types.ToLLVM(typ)
-	result := builder.CreateAlloca(llvmtype, "")
 
 	// If result is zero, then we've got a match.
 	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
@@ -206,20 +204,27 @@ func (v *LLVMValue) convertI2V(typ types.Type) Value {
 	builder.CreateCondBr(predicate, match, nonmatch)
 
 	builder.SetInsertPointAtEnd(match)
-	value := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
-	value = builder.CreateBitCast(value, result.Type(), "")
-	value = builder.CreateLoad(value, "")
-	builder.CreateStore(value, result)
+	matchResultValue := v.loadI2V(typ).LLVMValue()
 	builder.CreateBr(end)
 
-	// TODO should return {value, ok}
 	builder.SetInsertPointAtEnd(nonmatch)
-	builder.CreateStore(llvm.ConstNull(llvmtype), result)
+	nonmatchResultValue := llvm.ConstNull(matchResultValue.Type())
 	builder.CreateBr(end)
 
-	//builder.SetInsertPointAtEnd(end)
-	result = builder.CreateLoad(result, "")
-	return v.compiler.NewLLVMValue(result, typ)
+	builder.SetInsertPointAtEnd(end)
+	successValue := builder.CreatePHI(llvm.Int1Type(), "")
+	resultValue := builder.CreatePHI(matchResultValue.Type(), "")
+
+	successValues := []llvm.Value{llvm.ConstAllOnes(llvm.Int1Type()), llvm.ConstNull(llvm.Int1Type())}
+	successBlocks := []llvm.BasicBlock{match, nonmatch}
+	successValue.AddIncoming(successValues, successBlocks)
+	success = v.compiler.NewLLVMValue(successValue, types.Bool)
+
+	resultValues := []llvm.Value{matchResultValue, nonmatchResultValue}
+	resultBlocks := []llvm.BasicBlock{match, nonmatch}
+	resultValue.AddIncoming(resultValues, resultBlocks)
+	result = v.compiler.NewLLVMValue(resultValue, typ)
+	return result, success
 }
 
 // loadI2V loads an interface value to a type, without checking

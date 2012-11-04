@@ -573,7 +573,12 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 		name := x.Sel.Name
-		t := c.checkExpr(x.X, nil)
+		var t Type
+		if isType(x.X) {
+			t = c.makeType(x.X, true)
+		} else {
+			t = c.checkExpr(x.X, nil)
+		}
 		if iface, ok := Underlying(t).(*Interface); ok {
 			i := sort.Search(len(iface.Methods), func(i int) bool {
 				return iface.Methods[i].Name >= name

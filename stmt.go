@@ -193,12 +193,16 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 			values[i] = c.NewLLVMValue(value_, t)
 		}
 	case *ast.TypeAssertExpr:
-		// newvalue, ok := value.(Type)
-		// FIXME handle I2V assertions
 		lhs := c.VisitExpr(x.X).(*LLVMValue)
 		typ := c.types.expr[x]
-		value, ok := lhs.convertI2I(types.Underlying(typ).(*types.Interface))
-		values = []Value{value, ok}
+		switch typ := types.Underlying(typ).(type) {
+		case *types.Interface:
+			value, ok := lhs.convertI2I(typ)
+			values = []Value{value, ok}
+		default:
+			value, ok := lhs.convertI2V(typ)
+			values = []Value{value, ok}
+		}
 	}
 	return values
 }
