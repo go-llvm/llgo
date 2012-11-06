@@ -4,6 +4,7 @@ import (
 	"testing"
 )
 
+func TestDereferencingAssignment(t *testing.T) { checkOutputEqual(t, "assignment/dereferencing.go") }
 func TestMultipleAssignment(t *testing.T)       { checkOutputEqual(t, "assignment/multi.go") }
 func TestBinaryOperatorAssignment(t *testing.T) { checkOutputEqual(t, "assignment/binop.go") }
 func TestNamedResultAssignment(t *testing.T)    { checkOutputEqual(t, "assignment/namedresult.go") }

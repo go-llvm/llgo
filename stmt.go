@@ -234,31 +234,27 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 		value := values[i]
 		switch x := expr.(type) {
 		case *ast.Ident:
-			if x.Name != "_" {
-				obj := x.Obj
-				if stmt.Tok == token.DEFINE {
-					value_type := value.LLVMValue().Type()
-					ptr := c.builder.CreateAlloca(value_type, x.Name)
-					c.builder.CreateStore(value.LLVMValue(), ptr)
-					llvm_value := c.NewLLVMValue(
-						ptr, &types.Pointer{Base: value.Type()})
-					obj.Data = llvm_value.makePointee()
-				} else {
-					if obj.Data == nil {
-						// FIXME this is crap, going to need to revisit
-						// how decl's are visited (should be in data
-						// dependent order.)
-						functions := c.functions
-						c.functions = nil
-						c.VisitValueSpec(obj.Decl.(*ast.ValueSpec), false)
-						c.functions = functions
-					}
-					ptr := (obj.Data).(*LLVMValue).pointer
-					value = value.Convert(types.Deref(ptr.Type()))
-					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
-				}
+			if x.Name == "_" {
+				continue
 			}
-			continue
+			obj := x.Obj
+			if stmt.Tok == token.DEFINE {
+				value_type := value.LLVMValue().Type()
+				ptr := c.builder.CreateAlloca(value_type, x.Name)
+				c.builder.CreateStore(value.LLVMValue(), ptr)
+				llvm_value := c.NewLLVMValue(ptr, &types.Pointer{Base: value.Type()})
+				obj.Data = llvm_value.makePointee()
+				continue
+			}
+			if obj.Data == nil {
+				// FIXME this is crap, going to need to revisit
+				// how decl's are visited (should be in data
+				// dependent order.)
+				functions := c.functions
+				c.functions = nil
+				c.VisitValueSpec(obj.Decl.(*ast.ValueSpec), false)
+				c.functions = functions
+			}
 		case *ast.IndexExpr:
 			if t, ok := c.types.expr[x.X]; ok {
 				if _, ok := t.(*types.Map); ok {
@@ -272,6 +268,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				}
 			}
 		}
+
 		// default (since we can't fallthrough in non-map index exprs)
 		ptr := c.VisitExpr(expr).(*LLVMValue).pointer
 		value = value.Convert(types.Deref(ptr.Type()))
