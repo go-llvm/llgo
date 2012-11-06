@@ -23,6 +23,7 @@ SOFTWARE.
 package llgo
 
 import (
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"sort"
@@ -106,7 +107,8 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				return methods[i].Name >= m.Name
 			})
 			if mi >= len(methods) || methods[mi].Name != m.Name {
-				panic("Failed to locate method: " + m.Name)
+				msg := fmt.Sprintf("Failed to locate (%s).%s", srcname.Obj.Name, m.Name)
+				panic(msg)
 			}
 			method_obj := methods[mi]
 			method := v.compiler.Resolve(method_obj).(*LLVMValue)

@@ -401,7 +401,7 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 			result, _ := v.convertI2I(interface_)
 			return result
 		} else {
-			result, _ := v.convertI2V(dst_typ)
+			result, _ := v.convertI2V(orig_dst_typ)
 			return result
 		}
 	}

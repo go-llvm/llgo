@@ -109,15 +109,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 		} else if obj == types.Nil {
 			return NilValue{c}
 		} else {
-			var typ types.Type
-			switch x := types.Underlying(obj.Type.(types.Type)).(type) {
-			case *types.Basic:
-				typ = x
-			case *types.Name:
-				typ = x.Underlying.(*types.Basic)
-			default:
-				panic(fmt.Sprintf("unreachable (%T)", x))
-			}
+			typ := obj.Type.(types.Type)
 			value = ConstValue{(obj.Data.(types.Const)), c, typ}
 			obj.Data = value
 		}
