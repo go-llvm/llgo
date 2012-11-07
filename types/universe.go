@@ -131,6 +131,7 @@ func init() {
 	Unsafe.Data = scope
 
 	UnsafePointer = defType("Pointer", UnsafePointerKind)
+	UnsafePointer.Package = "unsafe"
 
 	uintptrResult := ast.NewObj(ast.Var, "_")
 	uintptrResult.Type = Int

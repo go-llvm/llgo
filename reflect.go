@@ -93,7 +93,7 @@ func doParseReflect() {
 		return
 	}
 
-	_, err = types.Check(fset, pkg)
+	_, err = types.Check("reflect", fset, pkg)
 	if err != nil {
 		parseReflectResult, parseReflectError = nil, err
 		return

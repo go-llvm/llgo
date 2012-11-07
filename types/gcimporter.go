@@ -209,7 +209,7 @@ func (p *gcParser) declare(scope *ast.Scope, kind ast.ObjKind, name string) *ast
 	// a new type object is a named type and may be referred
 	// to before the underlying type is known - set it up
 	if kind == ast.Typ {
-		obj.Type = &Name{Obj: obj}
+		obj.Type = &Name{Package: p.id, Obj: obj}
 	}
 
 	return obj
@@ -447,7 +447,7 @@ func (p *gcParser) parseStructType() Type {
 	}
 	p.expect('}')
 
-	return &Struct{Fields: fields, Tags: tags, FieldIndices: indices}
+	return &Struct{Package: p.id, Fields: fields, Tags: tags, FieldIndices: indices}
 }
 
 // Parameter = ( identifier | "?" ) [ "..." ] Type [ string_lit ] .

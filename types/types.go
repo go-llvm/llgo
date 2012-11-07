@@ -102,6 +102,7 @@ func (s *Slice) String() string {
 // Anonymous fields are represented by objects with empty names.
 type Struct struct {
 	ImplementsType
+	Package      string
 	Fields       ObjList           // struct fields; or nil
 	Tags         []string          // corresponding tags; or nil
 	FieldIndices map[string]uint64 // fast field lookup (name -> index)
@@ -111,7 +112,7 @@ type Struct struct {
 }
 
 func (s *Struct) String() string {
-	str := "struct{"
+	str := "struct@" + s.Package + "{"
 	for i, field := range s.Fields {
 		if i > 0 {
 			str += "; "
@@ -222,6 +223,7 @@ func (c *Chan) String() string {
 // A Name represents a named type as declared in a type declaration.
 type Name struct {
 	ImplementsType
+	Package    string
 	Underlying Type        // nil if not fully declared
 	Obj        *ast.Object // corresponding declared object
 	Methods    ObjList
@@ -229,14 +231,10 @@ type Name struct {
 }
 
 func (n *Name) String() string {
-	u := n.Underlying
-	if u != nil {
-		n.Underlying = nil
-		res := fmt.Sprintf("%s(%s)", n.Obj.Name, u)
-		n.Underlying = u
-		return res
+	if n.Package != "" {
+		return n.Package + "." + n.Obj.Name
 	}
-	return fmt.Sprintf("%s(...)", n.Obj.Name)
+	return n.Obj.Name
 }
 
 // If typ is a pointer type, Deref returns the pointer's base type;

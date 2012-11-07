@@ -19,6 +19,7 @@ import (
 const debug = false
 
 type checker struct {
+	pkgid   string
 	fset    *token.FileSet
 	errors  scanner.ErrorList
 	types   map[ast.Expr]Type
@@ -413,35 +414,6 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 
 		args := x.Args
 		switch x := x.Fun.(type) {
-		case *ast.SelectorExpr:
-			// check for unsafe functions.
-			if ident, ok := x.X.(*ast.Ident); ok && ident.Obj.Data == Unsafe.Data {
-				switch x.Sel.Name {
-				case "Offsetof":
-					if len(args) > 0 {
-						if _, ok := args[0].(*ast.SelectorExpr); !ok {
-							// TODO format args
-							return &Bad{Msg: fmt.Sprintf("invalid expression %s.%s", x.X, x.Sel)}
-						}
-						// TODO check arg is a struct field selector.
-					}
-					fallthrough
-				case "Alignof":
-					fallthrough
-				case "Sizeof":
-					if len(args) < 1 {
-						return &Bad{Msg: fmt.Sprintf("missing argument for %s.%s", x.X, x.Sel)}
-					} else if len(args) > 1 {
-						return &Bad{Msg: fmt.Sprintf("extra arguments for %s.%s", x.X, x.Sel)}
-					}
-				default:
-					return &Bad{Msg: fmt.Sprintf("undefined: %s.%s", x.X, x.Sel)}
-				}
-				c.checkExpr(args[0], nil)
-				x.Sel.Obj = Unsafe.Data.(*ast.Scope).Lookup(x.Sel.Name)
-				return x.Sel.Obj.Type.(Type)
-			}
-
 		case *ast.Ident:
 			// check for builtin functions.
 			if x.Obj.Kind == ast.Fun && x.Obj.Decl == nil {
@@ -906,7 +878,7 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 				indices[f.Name] = uint64(i)
 			}
 		}
-		return &Struct{Fields: fields, Tags: tags, FieldIndices: indices}
+		return &Struct{Package: c.pkgid, Fields: fields, Tags: tags, FieldIndices: indices}
 
 	case *ast.FuncType:
 		params, _, isVariadic := c.collectFields(token.FUNC, t.Params, true)
@@ -1249,7 +1221,7 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 		}
 
 	case ast.Typ:
-		typ := &Name{Obj: obj}
+		typ := &Name{Package: c.pkgid, Obj: obj}
 		obj.Type = typ // "mark" object so recursion terminates
 		typ.Underlying = Underlying(c.makeType(obj.Decl.(*ast.TypeSpec).Type, ref))
 		if methobjs := c.methods[obj]; methobjs != nil {
@@ -1367,8 +1339,9 @@ func (c *checker) checkFunc(body *ast.BlockStmt, ftyp *Func) {
 // of types for all expression nodes in statements, and a scanner.ErrorList if
 // there are errors.
 //
-func Check(fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err error) {
+func Check(pkgid string, fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err error) {
 	var c checker
+	c.pkgid = pkgid
 	c.fset = fset
 	c.types = make(map[ast.Expr]Type)
 	c.methods = make(map[*ast.Object]ObjList)

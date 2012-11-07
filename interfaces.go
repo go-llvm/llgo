@@ -49,11 +49,8 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 
 	iface_struct_type := v.compiler.types.ToLLVM(iface)
 	element_types := iface_struct_type.StructElementTypes()
-	iface_elements := make([]llvm.Value, len(element_types))
-	for i, _ := range iface_elements {
-		iface_elements[i] = llvm.ConstNull(element_types[i])
-	}
-	iface_struct := llvm.ConstStruct(iface_elements, false)
+	zero_iface_struct := llvm.ConstNull(iface_struct_type)
+	iface_struct := zero_iface_struct
 
 	builder := v.compiler.builder
 	var ptr llvm.Value

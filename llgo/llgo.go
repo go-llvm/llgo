@@ -141,7 +141,7 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File, importpath 
 		return nil, err
 	}
 
-	exprTypes, err := types.Check(fset, pkg)
+	exprTypes, err := types.Check(importpath, fset, pkg)
 	if err != nil {
 		report(err)
 		return nil, err

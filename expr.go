@@ -268,11 +268,9 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		typ = value.Type()
 	}
 
-	switch types.Underlying(typ).(type) {
-	case *types.Array, *types.Slice:
-		index := index.LLVMValue()
-		switch typ := types.Underlying(typ).(type) {
+	switch typ := types.Underlying(typ).(type) {
 		case *types.Array:
+			index := index.LLVMValue()
 			var ptr llvm.Value
 			value := value.(*LLVMValue)
 			if value.pointer != nil {
@@ -288,11 +286,11 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 			return result.makePointee()
 
 		case *types.Slice:
+			index := index.LLVMValue()
 			ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 			element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
 			result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
 			return result.makePointee()
-		}
 
 	case *types.Map:
 		value, _ = c.mapLookup(value.(*LLVMValue), index, false)
@@ -318,10 +316,30 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		return c.Resolve(obj)
 	}
 
+	// Method expression. Returns an unbound function pointer.
+	// FIXME this is just the most basic case. It's also possible to
+	// create a pointer-receiver function from a method that has a
+	// value receiver (see Method Expressions in spec).
+	name := expr.Sel.Name
+	if _, ok := lhs.(TypeValue); ok {
+		methodobj := expr.Sel.Obj
+		value := c.Resolve(methodobj).(*LLVMValue)
+		ftyp := value.typ.(*types.Func)
+		methodParams := make(types.ObjList, len(ftyp.Params)+1)
+		methodParams[0] = ftyp.Recv
+		copy(methodParams[1:], ftyp.Params)
+		ftyp = &types.Func{
+			Recv:       nil,
+			Params:     methodParams,
+			Results:    ftyp.Results,
+			IsVariadic: ftyp.IsVariadic,
+		}
+		return c.NewLLVMValue(value.value, ftyp)
+	}
+
 	// TODO(?) record path to field/method during typechecking, so we don't
 	// have to search again here.
 
-	name := expr.Sel.Name
 	if iface, ok := types.Underlying(lhs.Type()).(*types.Interface); ok {
 		i := sort.Search(len(iface.Methods), func(i int) bool {
 			return iface.Methods[i].Name >= name

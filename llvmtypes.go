@@ -125,11 +125,10 @@ func (tm *LLVMTypeMap) ToLLVM(t types.Type) llvm.Type {
 	tstr := t.String()
 	lt, ok := tm.types[tstr]
 	if !ok {
-		lt = tm.makeLLVMType(t)
+		lt = tm.makeLLVMType(tstr, t)
 		if lt.IsNil() {
 			panic(fmt.Sprint("Failed to create LLVM type for: ", t))
 		}
-		tm.types[tstr] = lt
 	}
 	return lt
 }
@@ -146,30 +145,44 @@ func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 	return r
 }
 
-func (tm *LLVMTypeMap) makeLLVMType(t types.Type) llvm.Type {
+func (tm *LLVMTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 	switch t := t.(type) {
 	case *types.Bad:
 		return tm.badLLVMType(t)
 	case *types.Basic:
-		return tm.basicLLVMType(t)
+		lt := tm.basicLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Array:
-		return tm.arrayLLVMType(t)
+		lt := tm.arrayLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Slice:
-		return tm.sliceLLVMType(t)
+		return tm.sliceLLVMType(tstr, t)
 	case *types.Struct:
-		return tm.structLLVMType(t)
+		return tm.structLLVMType(tstr, t)
 	case *types.Pointer:
-		return tm.pointerLLVMType(t)
+		lt := tm.pointerLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Func:
-		return tm.funcLLVMType(t)
+		lt := tm.funcLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Interface:
-		return tm.interfaceLLVMType(t)
+		return tm.interfaceLLVMType(tstr, t)
 	case *types.Map:
-		return tm.mapLLVMType(t)
+		lt := tm.mapLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Chan:
-		return tm.chanLLVMType(t)
+		lt := tm.chanLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	case *types.Name:
-		return tm.nameLLVMType(t)
+		lt := tm.nameLLVMType(t)
+		tm.types[tstr] = lt
+		return lt
 	}
 	panic("unreachable")
 }
@@ -213,24 +226,26 @@ func (tm *LLVMTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
 	return llvm.ArrayType(tm.ToLLVM(a.Elt), int(a.Len))
 }
 
-func (tm *LLVMTypeMap) sliceLLVMType(s *types.Slice) llvm.Type {
-	elements := []llvm.Type{
-		llvm.PointerType(tm.ToLLVM(s.Elt), 0),
-		tm.ToLLVM(types.Uint),
-		tm.ToLLVM(types.Uint),
-	}
-	return llvm.StructType(elements, false)
-}
-
-func (tm *LLVMTypeMap) structLLVMType(s *types.Struct) llvm.Type {
-	// Types may be circular, so we need to first create an empty
-	// struct type, then fill in its body after visiting its
-	// members.
-	sstr := s.String()
-	typ, ok := tm.types[sstr]
+func (tm *LLVMTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
+	typ, ok := tm.types[tstr]
 	if !ok {
 		typ = llvm.GlobalContext().StructCreateNamed("")
-		tm.types[sstr] = typ
+		tm.types[tstr] = typ
+		elements := []llvm.Type{
+			llvm.PointerType(tm.ToLLVM(s.Elt), 0),
+			tm.ToLLVM(types.Uint),
+			tm.ToLLVM(types.Uint),
+		}
+		typ.StructSetBody(elements, false)
+	}
+	return typ
+}
+
+func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
+	typ, ok := tm.types[tstr]
+	if !ok {
+		typ = llvm.GlobalContext().StructCreateNamed("")
+		tm.types[tstr] = typ
 		elements := make([]llvm.Type, len(s.Fields))
 		for i, f := range s.Fields {
 			ft := f.Type.(types.Type)
@@ -277,23 +292,29 @@ func (tm *LLVMTypeMap) funcLLVMType(f *types.Func) llvm.Type {
 	return llvm.PointerType(fn_type, 0)
 }
 
-func (tm *LLVMTypeMap) interfaceLLVMType(i *types.Interface) llvm.Type {
-	valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
-	typptr_type := valptr_type // runtimeCommonType may not be defined yet
-	elements := make([]llvm.Type, 2+len(i.Methods))
-	elements[0] = valptr_type // value
-	elements[1] = typptr_type // type
-	for n, m := range i.Methods {
-		// Add an opaque pointer parameter to the function for the
-		// struct pointer.
-		fntype := m.Type.(*types.Func)
-		receiver_type := &types.Pointer{Base: types.Int8}
-		fntype.Recv = ast.NewObj(ast.Var, "")
-		fntype.Recv.Type = receiver_type
-		elements[n+2] = tm.ToLLVM(fntype)
-		fntype.Recv = nil
+func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.Type {
+	typ, ok := tm.types[tstr]
+	if !ok {
+		typ = llvm.GlobalContext().StructCreateNamed("")
+		tm.types[tstr] = typ
+		valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
+		typptr_type := valptr_type // runtimeCommonType may not be defined yet
+		elements := make([]llvm.Type, 2+len(i.Methods))
+		elements[0] = valptr_type // value
+		elements[1] = typptr_type // type
+		for n, m := range i.Methods {
+			// Add an opaque pointer parameter to the function for the
+			// struct pointer.
+			fntype := m.Type.(*types.Func)
+			receiver_type := &types.Pointer{Base: types.Int8}
+			fntype.Recv = ast.NewObj(ast.Var, "")
+			fntype.Recv.Type = receiver_type
+			elements[n+2] = tm.ToLLVM(fntype)
+			fntype.Recv = nil
+		}
+		typ.StructSetBody(elements, false)
 	}
-	return llvm.StructType(elements, false)
+	return typ
 }
 
 func (tm *LLVMTypeMap) mapLLVMType(m *types.Map) llvm.Type {
@@ -305,9 +326,7 @@ func (tm *LLVMTypeMap) mapLLVMType(m *types.Map) llvm.Type {
 	element_types := []llvm.Type{size_type, list_type}
 	typ := llvm.StructType(element_types, false)
 	tm.types[m.String()] = typ
-
-	list_element_types := []llvm.Type{
-		list_ptr_type, tm.ToLLVM(m.Key), tm.ToLLVM(m.Elt)}
+	list_element_types := []llvm.Type{list_ptr_type, tm.ToLLVM(m.Key), tm.ToLLVM(m.Elt)}
 	list_type.StructSetBody(list_element_types, false)
 	return typ
 }
