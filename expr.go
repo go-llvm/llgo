@@ -152,14 +152,28 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		if pkgobj, ok := x.X.(*ast.Ident); ok && pkgobj.Obj.Data == types.Unsafe.Data {
 			var value int
 			switch x.Sel.Name {
-			case "Alignof", "Offsetof":
-				panic("unimplemented")
+			case "Alignof":
+				argtype := c.types.expr[expr.Args[0]]
+				value = c.alignofType(argtype)
+				value := c.NewConstValue(token.INT, strconv.Itoa(value))
+				value.typ = types.Uintptr
+				return value
 			case "Sizeof":
 				argtype := c.types.expr[expr.Args[0]]
 				value = c.sizeofType(argtype)
 				value := c.NewConstValue(token.INT, strconv.Itoa(value))
 				value.typ = types.Uintptr
 				return value
+			case "Offsetof":
+				// FIXME this should be constant, but I'm lazy, and this ought
+				// to be done when we're doing constant folding anyway.
+				lhs := expr.Args[0].(*ast.SelectorExpr).X
+				baseaddr := c.VisitExpr(lhs).(*LLVMValue).pointer.LLVMValue()
+				addr := c.VisitExpr(expr.Args[0]).(*LLVMValue).pointer.LLVMValue()
+				baseaddr = c.builder.CreatePtrToInt(baseaddr, c.target.IntPtrType(), "")
+				addr = c.builder.CreatePtrToInt(addr, c.target.IntPtrType(), "")
+				diff := c.builder.CreateSub(addr, baseaddr, "")
+				return c.NewLLVMValue(diff, types.Uintptr)
 			}
 		}
 	}
@@ -253,7 +267,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	value := c.VisitExpr(expr.X)
 	index := c.VisitExpr(expr.Index)
 
-	typ := value.Type()
+	typ := types.Underlying(value.Type())
 	if typ == types.String {
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		gepindices := []llvm.Value{index.LLVMValue()}
@@ -263,34 +277,34 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	}
 
 	// We can index a pointer to an array.
-	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
+	if _, ok := typ.(*types.Pointer); ok {
 		value = value.(*LLVMValue).makePointee()
 		typ = value.Type()
 	}
 
 	switch typ := types.Underlying(typ).(type) {
-		case *types.Array:
-			index := index.LLVMValue()
-			var ptr llvm.Value
-			value := value.(*LLVMValue)
-			if value.pointer != nil {
-				ptr = value.pointer.LLVMValue()
-			} else {
-				init := value.LLVMValue()
-				ptr = c.builder.CreateAlloca(init.Type(), "")
-				c.builder.CreateStore(init, ptr)
-			}
-			zero := llvm.ConstNull(llvm.Int32Type())
-			element := c.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
-			result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
-			return result.makePointee()
+	case *types.Array:
+		index := index.LLVMValue()
+		var ptr llvm.Value
+		value := value.(*LLVMValue)
+		if value.pointer != nil {
+			ptr = value.pointer.LLVMValue()
+		} else {
+			init := value.LLVMValue()
+			ptr = c.builder.CreateAlloca(init.Type(), "")
+			c.builder.CreateStore(init, ptr)
+		}
+		zero := llvm.ConstNull(llvm.Int32Type())
+		element := c.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
+		result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+		return result.makePointee()
 
-		case *types.Slice:
-			index := index.LLVMValue()
-			ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
-			element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
-			result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
-			return result.makePointee()
+	case *types.Slice:
+		index := index.LLVMValue()
+		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
+		element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
+		result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+		return result.makePointee()
 
 	case *types.Map:
 		value, _ = c.mapLookup(value.(*LLVMValue), index, false)
