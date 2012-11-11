@@ -324,17 +324,9 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 }
 
 func (tm *LLVMTypeMap) mapLLVMType(m *types.Map) llvm.Type {
-	// XXX This map type will change in the future, when I get around to it.
-	// At the moment, it's representing a really dumb singly linked list.
-	list_type := llvm.GlobalContext().StructCreateNamed("")
-	list_ptr_type := llvm.PointerType(list_type, 0)
-	size_type := llvm.Int32Type()
-	element_types := []llvm.Type{size_type, list_type}
-	typ := llvm.StructType(element_types, false)
-	tm.types[m.String()] = typ
-	list_element_types := []llvm.Type{list_ptr_type, tm.ToLLVM(m.Key), tm.ToLLVM(m.Elt)}
-	list_type.StructSetBody(list_element_types, false)
-	return typ
+	// All map details are in the runtime. We represent it here as an
+	// opaque pointer.
+	return tm.target.IntPtrType()
 }
 
 func (tm *LLVMTypeMap) chanLLVMType(c *types.Chan) llvm.Type {

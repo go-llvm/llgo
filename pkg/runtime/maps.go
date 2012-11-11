@@ -25,13 +25,29 @@ package runtime
 import "unsafe"
 
 type map_ struct {
-	length int32
+	length int
 	head   *mapentry
 }
 
 type mapentry struct {
 	next *mapentry
 	// after this comes the key, then the value.
+}
+
+func mapalloc(t unsafe.Pointer) unsafe.Pointer {
+	m := (*map_)(malloc(unsafe.Sizeof(map_{})))
+	if m != nil {
+		m.length = 0
+		m.head = nil
+	}
+	return unsafe.Pointer(m)
+}
+
+func mapsize(m *map_) int {
+	if m != nil {
+		return m.length
+	}
+	return 0
 }
 
 func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {

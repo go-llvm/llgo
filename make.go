@@ -23,6 +23,7 @@ SOFTWARE.
 package llgo
 
 import (
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
@@ -53,9 +54,14 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		args := []llvm.Value{dyntyp, cap_}
 		ptr := c.builder.CreateCall(f, args, "")
 		return c.NewLLVMValue(ptr, typ)
+	case *types.Map:
+		f := c.NamedFunction("runtime.mapalloc", "func f(t uintptr) uintptr")
+		dyntyp := c.types.ToRuntime(typ)
+		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+		mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp}, "")
+		return c.NewLLVMValue(mapval, typ)
 	}
-	// TODO map
-	return c.NewLLVMValue(llvm.ConstNull(c.types.ToLLVM(typ)), typ)
+	panic(fmt.Sprintf("unhandled type: %s", typ))
 }
 
 // vim: set ft=go :

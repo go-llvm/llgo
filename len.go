@@ -24,6 +24,7 @@ package llgo
 
 import (
 	"fmt"
+	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
@@ -43,7 +44,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := typ.(*types.Name); ok {
+	if name, ok := types.Underlying(typ).(*types.Name); ok {
 		typ = name.Underlying
 	}
 
@@ -61,16 +62,15 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		return c.NewConstValue(token.INT, v)
 
 	case *types.Slice:
-		//ptr := value.(*LLVMValue).pointer
-		//len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
 		sliceval := value.LLVMValue()
-		lenval := c.builder.CreateExtractValue(sliceval, 1, "") //c.builder.CreateLoad(len_field, "")
+		lenval := c.builder.CreateExtractValue(sliceval, 1, "")
 		return c.NewLLVMValue(lenval, types.Int32).Convert(types.Int)
 
 	case *types.Map:
 		mapval := value.LLVMValue()
-		lenval := c.builder.CreateExtractValue(mapval, 0, "") //c.builder.CreateLoad(len_field, "")
-		return c.NewLLVMValue(lenval, types.Int32).Convert(types.Int)
+		f := c.NamedFunction("runtime.mapsize", "func f(m uintptr) int")
+		lenval := c.builder.CreateCall(f, []llvm.Value{mapval}, "")
+		return c.NewLLVMValue(lenval, types.Int)
 
 	case *types.Array:
 		v := strconv.FormatUint(typ.Len, 10)

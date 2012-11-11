@@ -36,7 +36,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 4)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
-	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
+	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	if insert {
 		args[3] = llvm.ConstAllOnes(llvm.Int1Type())
 	} else {
@@ -69,7 +69,7 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
-	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
+	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	if lv, islv := key.(*LLVMValue); islv && lv.pointer != nil {
 		args[2] = c.builder.CreatePtrToInt(lv.pointer.LLVMValue(), ptrType, "")
 	}
@@ -88,7 +88,7 @@ func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llv
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
-	args[1] = c.builder.CreatePtrToInt(m.pointer.LLVMValue(), ptrType, "")
+	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	args[2] = nextin
 	results := c.builder.CreateCall(mapnext, args, "")
 	nextout = c.builder.CreateExtractValue(results, 0, "")
