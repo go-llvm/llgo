@@ -369,6 +369,8 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 }
 
 func (v *LLVMValue) Convert(dst_typ types.Type) Value {
+	b := v.compiler.builder
+
 	// If it's a stack allocated value, we'll want to compare the
 	// value type, not the pointer type.
 	src_typ := v.typ
@@ -448,17 +450,17 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// Unsafe pointer conversions.
 	if dst_typ == types.UnsafePointer { // X -> unsafe.Pointer
 		if _, isptr := src_typ.(*types.Pointer); isptr {
-			value := v.compiler.builder.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, dst_typ)
+			value := b.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewLLVMValue(value, orig_dst_typ)
 		} else if src_typ == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
+			return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
 		}
 	} else if src_typ == types.UnsafePointer { // unsafe.Pointer -> X
 		if _, isptr := dst_typ.(*types.Pointer); isptr {
-			value := v.compiler.builder.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, dst_typ)
+			value := b.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewLLVMValue(value, orig_dst_typ)
 		} else if dst_typ == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), dst_typ)
+			return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
 		}
 	}
 
@@ -476,66 +478,74 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 			switch {
 			case delta < 0:
 				// TODO check if (un)signed, use S/ZExt accordingly.
-				lv = v.compiler.builder.CreateZExt(lv, llvm_type, "")
+				lv = b.CreateZExt(lv, llvm_type, "")
 			case delta > 0:
-				lv = v.compiler.builder.CreateTrunc(lv, llvm_type, "")
+				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		case llvm.FloatTypeKind, llvm.DoubleTypeKind:
 			if signed(v.Type()) {
-				lv = v.compiler.builder.CreateSIToFP(lv, llvm_type, "")
+				lv = b.CreateSIToFP(lv, llvm_type, "")
 			} else {
-				lv = v.compiler.builder.CreateUIToFP(lv, llvm_type, "")
+				lv = b.CreateUIToFP(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		}
 	case llvm.DoubleTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.FloatTypeKind:
-			lv = v.compiler.builder.CreateFPTrunc(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			lv = b.CreateFPTrunc(lv, llvm_type, "")
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		case llvm.IntegerTypeKind:
 			if signed(dst_typ) {
-				lv = v.compiler.builder.CreateFPToSI(lv, llvm_type, "")
+				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
-				lv = v.compiler.builder.CreateFPToUI(lv, llvm_type, "")
+				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		}
 	case llvm.FloatTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.DoubleTypeKind:
-			lv = v.compiler.builder.CreateFPExt(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			lv = b.CreateFPExt(lv, llvm_type, "")
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		case llvm.IntegerTypeKind:
 			if signed(dst_typ) {
-				lv = v.compiler.builder.CreateFPToSI(lv, llvm_type, "")
+				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
-				lv = v.compiler.builder.CreateFPToUI(lv, llvm_type, "")
+				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, dst_typ)
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
 		}
 	}
-	//bitcast_value := v.compiler.builder.CreateBitCast(lv, llvm_type, "")
 
-	/*
-	   value_type := value.Type()
-	   switch value_type.TypeKind() {
-	   case llvm.IntegerTypeKind:
-	       switch totype.TypeKind() {
-	       case llvm.IntegerTypeKind:
-	           //delta := value_type.IntTypeWidth() - totype.IntTypeWidth()
-	           //var 
-	           switch {
-	           case delta == 0: return value
-	           // TODO handle signed/unsigned (SExt/ZExt)
-	           case delta < 0: return c.compiler.builder.CreateZExt(value, totype, "")
-	           case delta > 0: return c.compiler.builder.CreateTrunc(value, totype, "")
-	           }
-	           return LLVMValue{lhs.compiler.builder, value}
-	       }
-	   }
-	*/
+	// Complex -> complex. Complexes are only convertible to other
+	// complexes, contant conversions aside. So we can just check the
+	// source type here; given that the types are not identical
+	// (checked above), we can assume the destination type is the alternate
+	// complex type.
+	if src_typ == types.Complex64 || src_typ == types.Complex128 {
+		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
+		var fptype llvm.Type
+		if src_typ == types.Complex64 {
+			fpcast = llvm.Builder.CreateFPExt
+			fptype = llvm.DoubleType()
+		} else {
+			fpcast = llvm.Builder.CreateFPTrunc
+			fptype = llvm.FloatType()
+		}
+		if fpcast != nil {
+			realv := b.CreateExtractValue(lv, 0, "")
+			imagv := b.CreateExtractValue(lv, 1, "")
+			realv = fpcast(b, realv, fptype, "")
+			imagv = fpcast(b, imagv, fptype, "")
+			lv = llvm.Undef(v.compiler.types.ToLLVM(dst_typ))
+			lv = b.CreateInsertValue(lv, realv, 0, "")
+			lv = b.CreateInsertValue(lv, imagv, 1, "")
+			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+		}
+	}
+
 	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", orig_dst_typ))
 }
 
@@ -554,6 +564,15 @@ func (v *LLVMValue) makePointee() *LLVMValue {
 	t := v.compiler.NewLLVMValue(llvm.Value{}, types.Deref(v.typ))
 	t.pointer = v
 	return t
+}
+
+func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
+	value := v.LLVMValue()
+	component := v.compiler.builder.CreateExtractValue(value, index, "")
+	if component.Type().TypeKind() == llvm.FloatTypeKind {
+		return v.compiler.NewLLVMValue(component, types.Float32)
+	}
+	return v.compiler.NewLLVMValue(component, types.Float64)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

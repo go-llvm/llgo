@@ -209,8 +209,14 @@ func (tm *LLVMTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 		return llvm.DoubleType()
 	case types.UnsafePointerKind, types.UintptrKind:
 		return tm.target.IntPtrType()
-	//case Complex64: TODO
-	//case Complex128:
+	case types.Complex64Kind:
+		f32 := llvm.FloatType()
+		elements := []llvm.Type{f32, f32}
+		return llvm.StructType(elements, false)
+	case types.Complex128Kind:
+		f64 := llvm.DoubleType()
+		elements := []llvm.Type{f64, f64}
+		return llvm.StructType(elements, false)
 	//case UntypedInt:
 	//case UntypedFloat:
 	//case UntypedComplex:
