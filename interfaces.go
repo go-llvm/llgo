@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
+	"go/ast"
 	"sort"
 )
 
@@ -96,19 +97,45 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 
 		// Look up the method by name.
 		// TODO check embedded types.
-		methods := srcname.Methods
 		for i, m := range iface.Methods {
 			// TODO make this loop linear by iterating through the
 			// interface methods and type methods together.
-			mi := sort.Search(len(methods), func(i int) bool {
-				return methods[i].Name >= m.Name
-			})
-			if mi >= len(methods) || methods[mi].Name != m.Name {
+			var methodobj *ast.Object
+			curr := []types.Type{srcname}
+			for methodobj == nil && len(curr) > 0 {
+				var next []types.Type
+				for _, typ := range curr {
+					if p, ok := types.Underlying(typ).(*types.Pointer); ok {
+						if _, ok := types.Underlying(p.Base).(*types.Struct); ok {
+							typ = p.Base
+						}
+					}
+					if n, ok := typ.(*types.Name); ok {
+						methods := n.Methods
+						mi := sort.Search(len(methods), func(i int) bool {
+							return methods[i].Name >= m.Name
+						})
+						if mi < len(methods) && methods[mi].Name == m.Name {
+							methodobj = methods[mi]
+							break
+						}
+					}
+					if typ, ok := types.Underlying(typ).(*types.Struct); ok {
+						for _, field := range typ.Fields {
+							if field.Name == "" {
+								typ := field.Type.(types.Type)
+								next = append(next, typ)
+							}
+						}
+					}
+				}
+				curr = next
+			}
+			if methodobj == nil {
 				msg := fmt.Sprintf("Failed to locate (%s).%s", srcname.Obj.Name, m.Name)
 				panic(msg)
 			}
-			method_obj := methods[mi]
-			method := v.compiler.Resolve(method_obj).(*LLVMValue)
+			method := v.compiler.Resolve(methodobj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
 			iface_struct = builder.CreateInsertValue(iface_struct, llvm_value, i+2, "")

@@ -196,7 +196,18 @@ type Interface struct {
 }
 
 func (i *Interface) String() string {
-	return fmt.Sprint("Interface(", i.Methods, ")")
+	str := "interface{"
+	for i, method := range i.Methods {
+		if i > 0 {
+			str += "; "
+		}
+		methodtyp := method.Type.(*Func)
+		recv := methodtyp.Recv
+		methodtyp.Recv = nil
+		str += fmt.Sprint(methodtyp)
+		methodtyp.Recv = recv
+	}
+	return str + "}"
 }
 
 // A Map represents a map type map[Key]Elt.
