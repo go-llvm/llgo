@@ -440,7 +440,7 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	}
 
 	// Rune to string conversion.
-	if types.Identical(src_typ, types.Rune) && dst_typ == types.String {
+	if dst_typ == types.String && isIntType(src_typ) {
 		return v.runeToString()
 	}
 

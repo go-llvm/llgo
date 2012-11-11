@@ -103,7 +103,7 @@ func strnext(s _string, i int) (n int, value rune) {
 }
 
 // strrune converts a rune to a string.
-func strrune(r rune) _string {
+func strrune(n int64) _string {
 	// TODO
 	return _string{}
 }

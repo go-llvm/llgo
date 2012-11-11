@@ -90,8 +90,8 @@ func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Va
 
 func (v *LLVMValue) runeToString() *LLVMValue {
 	c := v.compiler
-	strrune := c.NamedFunction("runtime.strrune", "func f(r rune) _string")
-	args := []llvm.Value{v.LLVMValue()}
+	strrune := c.NamedFunction("runtime.strrune", "func f(n int64) _string")
+	args := []llvm.Value{v.Convert(types.Int64).LLVMValue()}
 	result := c.builder.CreateCall(strrune, args, "")
 	result = c.coerceString(result, c.types.ToLLVM(types.String))
 	return c.NewLLVMValue(result, types.String)
