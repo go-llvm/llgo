@@ -759,7 +759,7 @@ func (p *gcParser) parseConstDecl() {
 		p.expect('+')
 		im := p.parseNumber()
 		p.expect(')')
-		x = Const{cmplx{re.Val.(*big.Rat), im.Val.(*big.Rat)}}
+		x = Const{Cmplx{re.Val.(*big.Rat), im.Val.(*big.Rat)}}
 		typ = Complex128.Underlying
 	case scanner.Char:
 		// char_lit

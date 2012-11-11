@@ -24,14 +24,14 @@ type Const struct {
 	// ideal bool     ->  bool
 	// ideal int      ->  *big.Int
 	// ideal float    ->  *big.Rat
-	// ideal complex  ->  cmplx
+	// ideal complex  ->  Cmplx
 	// ideal string   ->  string
 	Val interface{}
 }
 
 // Representation of complex values.
-type cmplx struct {
-	re, im *big.Rat
+type Cmplx struct {
+	Re, Im *big.Rat
 }
 
 func assert(cond bool) {
@@ -59,7 +59,7 @@ func MakeConst(tok token.Token, lit string) Const {
 		var im big.Rat
 		_, ok := im.SetString(lit[0 : len(lit)-1])
 		assert(ok)
-		return Const{cmplx{big.NewRat(0, 1), &im}}
+		return Const{Cmplx{big.NewRat(0, 1), &im}}
 	case token.CHAR:
 		assert(lit[0] == '\'' && lit[len(lit)-1] == '\'')
 		code, _, _, err := strconv.UnquoteChar(lit[1:len(lit)-1], '\'')
@@ -97,10 +97,10 @@ func (x Const) Match(y Const) (u, v Const) {
 			var z big.Rat
 			z.SetInt(a)
 			u, v = Const{&z}, y
-		case cmplx:
+		case Cmplx:
 			var z big.Rat
 			z.SetInt(a)
-			u, v = Const{cmplx{&z, big.NewRat(0, 1)}}, y
+			u, v = Const{Cmplx{&z, big.NewRat(0, 1)}}, y
 		}
 	case *big.Rat:
 		switch y.Val.(type) {
@@ -108,14 +108,14 @@ func (x Const) Match(y Const) (u, v Const) {
 			v, u = y.Match(x)
 		case *big.Rat:
 			u, v = x, y
-		case cmplx:
-			u, v = Const{cmplx{a, big.NewRat(0, 0)}}, y
+		case Cmplx:
+			u, v = Const{Cmplx{a, big.NewRat(0, 0)}}, y
 		}
-	case cmplx:
+	case Cmplx:
 		switch y.Val.(type) {
 		case *big.Int, *big.Rat:
 			v, u = y.Match(x)
-		case cmplx:
+		case Cmplx:
 			u, v = x, y
 		}
 	case string:
@@ -143,6 +143,10 @@ func (x Const) Convert(typ *Type) Const {
 			return Const{&z}
 		case String:
 			return Const{string(x.Int64())}
+		case Complex64, Complex128:
+			var z big.Rat
+			z.SetInt(x)
+			return Const{Cmplx{&z, &big.Rat{}}}
 		}
 	case *big.Rat:
 		switch Underlying(*typ) {
@@ -153,7 +157,7 @@ func (x Const) Convert(typ *Type) Const {
 			z.Quo(num, denom)
 			return Const{&z}
 		}
-		//case cmplx:
+		//case Cmplx:
 		//case string:
 	}
 	//panic("unimplemented")
@@ -174,9 +178,9 @@ func (x Const) String() string {
 	case *big.Rat:
 		// 10 digits of precision after decimal point seems fine
 		return x.FloatString(10)
-	case cmplx:
+	case Cmplx:
 		// TODO(gri) don't print 0 components
-		return x.re.FloatString(10) + " + " + x.im.FloatString(10) + "i"
+		return x.Re.FloatString(10) + " + " + x.Im.FloatString(10) + "i"
 	case string:
 		return x
 	}
@@ -192,7 +196,7 @@ func (x Const) UnaryOp(op token.Token) Const {
 		z = unaryIntOp(x, op)
 	case *big.Rat:
 		z = unaryFloatOp(x, op)
-	case cmplx:
+	case Cmplx:
 		z = unaryCmplxOp(x, op)
 	default:
 		panic("unreachable")
@@ -232,7 +236,7 @@ func unaryFloatOp(x *big.Rat, op token.Token) interface{} {
 	panic("unreachable")
 }
 
-func unaryCmplxOp(x cmplx, op token.Token) interface{} {
+func unaryCmplxOp(x Cmplx, op token.Token) interface{} {
 	switch op {
 	case token.ADD:
 	case token.SUB:
@@ -249,8 +253,8 @@ func (x Const) BinaryOp(op token.Token, y Const) Const {
 		z = binaryIntOp(x, op, y.Val.(*big.Int))
 	case *big.Rat:
 		z = binaryFloatOp(x, op, y.Val.(*big.Rat))
-	case cmplx:
-		z = binaryCmplxOp(x, op, y.Val.(cmplx))
+	case Cmplx:
+		z = binaryCmplxOp(x, op, y.Val.(Cmplx))
 	case string:
 		z = binaryStringOp(x, op, y.Val.(string))
 	default:
@@ -350,22 +354,22 @@ func binaryFloatOp(x *big.Rat, op token.Token, y *big.Rat) interface{} {
 	panic("unreachable")
 }
 
-func binaryCmplxOp(x cmplx, op token.Token, y cmplx) interface{} {
-	a, b := x.re, x.im
-	c, d := y.re, y.im
+func binaryCmplxOp(x Cmplx, op token.Token, y Cmplx) interface{} {
+	a, b := x.Re, x.Im
+	c, d := y.Re, y.Im
 	switch op {
 	case token.ADD:
 		// (a+c) + i(b+d)
 		var re, im big.Rat
 		re.Add(a, c)
 		im.Add(b, d)
-		return cmplx{&re, &im}
+		return Cmplx{&re, &im}
 	case token.SUB:
 		// (a-c) + i(b-d)
 		var re, im big.Rat
 		re.Sub(a, c)
 		im.Sub(b, d)
-		return cmplx{&re, &im}
+		return Cmplx{&re, &im}
 	case token.MUL:
 		// (ac-bd) + i(bc+ad)
 		var ac, bd, bc, ad big.Rat
@@ -376,7 +380,7 @@ func binaryCmplxOp(x cmplx, op token.Token, y cmplx) interface{} {
 		var re, im big.Rat
 		re.Sub(&ac, &bd)
 		im.Add(&bc, &ad)
-		return cmplx{&re, &im}
+		return Cmplx{&re, &im}
 	case token.QUO:
 		// (ac+bd)/s + i(bc-ad)/s, with s = cc + dd
 		var ac, bd, bc, ad, s big.Rat
@@ -390,7 +394,7 @@ func binaryCmplxOp(x cmplx, op token.Token, y cmplx) interface{} {
 		re.Quo(&re, &s)
 		im.Sub(&bc, &ad)
 		im.Quo(&im, &s)
-		return cmplx{&re, &im}
+		return Cmplx{&re, &im}
 	case token.EQL:
 		return a.Cmp(c) == 0 && b.Cmp(d) == 0
 	case token.NEQ:

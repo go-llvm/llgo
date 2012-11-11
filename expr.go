@@ -151,6 +151,14 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		case "imag":
 			cmplx := c.VisitExpr(expr.Args[0]).(*LLVMValue)
 			return cmplx.extractComplexComponent(1)
+		case "complex":
+			r := c.VisitExpr(expr.Args[0]).LLVMValue()
+			i := c.VisitExpr(expr.Args[1]).LLVMValue()
+			typ := c.types.expr[expr]
+			cmplx := llvm.Undef(c.types.ToLLVM(typ))
+			cmplx = c.builder.CreateInsertValue(cmplx, r, 0, "")
+			cmplx = c.builder.CreateInsertValue(cmplx, i, 1, "")
+			return c.NewLLVMValue(cmplx, typ)
 		}
 
 	case *ast.SelectorExpr:

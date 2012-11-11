@@ -253,6 +253,24 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
 	return result, success
 }
 
+// coerce yields a value of the the type specified, initialised
+// to the exact bit pattern as in the specified value.
+//
+// Note: the specified value must be a non-aggregate, and its type
+// and the specified type must have the same size.
+func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
+	switch t.TypeKind() {
+	case llvm.ArrayTypeKind, llvm.StructTypeKind:
+		ptr := c.builder.CreateAlloca(t, "")
+		ptrv := c.builder.CreateBitCast(ptr, llvm.PointerType(v.Type(), 0), "")
+		c.builder.CreateStore(v, ptrv)
+		return c.builder.CreateLoad(ptr, "")
+	default:
+		return c.builder.CreateBitCast(v, t, "")
+	}
+	panic("unreachable")
+}
+
 // loadI2V loads an interface value to a type, without checking
 // that the interface type matches.
 func (v *LLVMValue) loadI2V(typ types.Type) Value {
@@ -271,7 +289,7 @@ func (v *LLVMValue) loadI2V(typ types.Type) Value {
 	}
 	bits := c.target.TypeSizeInBits(c.types.ToLLVM(typ))
 	value = c.builder.CreatePtrToInt(value, llvm.IntType(int(bits)), "")
-	value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
+	value = c.coerce(value, c.types.ToLLVM(typ))
 	return c.NewLLVMValue(value, typ)
 }
 

@@ -677,6 +677,17 @@ func (v ConstValue) LLVMValue() llvm.Value {
 	case types.Float64Kind:
 		return llvm.ConstFloat(llvm.DoubleType(), float64(v.Float64()))
 
+	case types.Complex64Kind:
+		r_, i_ := v.Complex()
+		r := llvm.ConstFloat(llvm.FloatType(), r_)
+		i := llvm.ConstFloat(llvm.FloatType(), i_)
+		return llvm.ConstStruct([]llvm.Value{r, i}, false)
+	case types.Complex128Kind:
+		r_, i_ := v.Complex()
+		r := llvm.ConstFloat(llvm.DoubleType(), r_)
+		i := llvm.ConstFloat(llvm.DoubleType(), i_)
+		return llvm.ConstStruct([]llvm.Value{r, i}, false)
+
 	case types.UnsafePointerKind, types.UintptrKind:
 		inttype := v.compiler.target.IntPtrType()
 		return llvm.ConstInt(inttype, uint64(v.Int64()), false)
@@ -736,6 +747,13 @@ func (v ConstValue) Int64() int64 {
 func (v ConstValue) Float64() float64 {
 	r := v.Val.(*big.Rat)
 	return float64(r.Num().Int64()) / float64(r.Denom().Int64())
+}
+
+func (v ConstValue) Complex() (float64, float64) {
+	c := v.Val.(types.Cmplx)
+	r := float64(c.Re.Num().Int64()) / float64(c.Re.Denom().Int64())
+	i := float64(c.Im.Num().Int64()) / float64(c.Im.Denom().Int64())
+	return r, i
 }
 
 ///////////////////////////////////////////////////////////////////////////////
