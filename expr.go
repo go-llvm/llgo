@@ -145,6 +145,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			// TODO
 			c.builder.CreateUnreachable()
 			return nil
+		case "recover":
+			return c.visitRecover()
 		case "real":
 			cmplx := c.VisitExpr(expr.Args[0]).(*LLVMValue)
 			return cmplx.extractComplexComponent(0)

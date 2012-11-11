@@ -48,7 +48,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		typ = name.Underlying
 	}
 
-	switch typ := typ.(type) {
+	switch typ := types.Underlying(typ).(type) {
 	case *types.Pointer:
 		// XXX Converting to a string to be converted back to an int is
 		// silly. The values need an overhaul? Perhaps have types based

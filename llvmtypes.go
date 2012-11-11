@@ -518,19 +518,19 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 	}
 
 	var imethodsGlobalPtr llvm.Value
+	imethodPtrType := llvm.PointerType(tm.runtimeImethod, 0)
 	if len(imethods) > 0 {
 		imethodsArray := llvm.ConstArray(tm.runtimeImethod, imethods)
 		imethodsGlobalPtr = llvm.AddGlobal(tm.module, imethodsArray.Type(), "")
 		imethodsGlobalPtr.SetInitializer(imethodsArray)
+		imethodsGlobalPtr = llvm.ConstBitCast(imethodsGlobalPtr, imethodPtrType)
 	} else {
-		imethodsGlobalPtr = llvm.ConstNull(llvm.PointerType(tm.runtimeImethod, 0))
+		imethodsGlobalPtr = llvm.ConstNull(imethodPtrType)
 	}
 
 	len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(i.Methods)), false)
 	imethodsSliceType := tm.runtimeInterfaceType.StructElementTypes()[1]
 	imethodsSlice := llvm.ConstNull(imethodsSliceType)
-	i32zero := llvm.ConstNull(llvm.Int32Type())
-	imethodsGlobalPtr = llvm.ConstGEP(imethodsGlobalPtr, []llvm.Value{i32zero, i32zero})
 	imethodsSlice = llvm.ConstInsertValue(imethodsSlice, imethodsGlobalPtr, []uint32{0})
 	imethodsSlice = llvm.ConstInsertValue(imethodsSlice, len_, []uint32{1})
 	imethodsSlice = llvm.ConstInsertValue(imethodsSlice, len_, []uint32{2})

@@ -17,5 +17,6 @@ func TestSwitchStrings(t *testing.T)            { checkOutputEqual(t, "switch/st
 func TestTypeSwitch(t *testing.T)               { checkOutputEqual(t, "switch/type.go") }
 func TestIfLazy(t *testing.T)                   { checkOutputEqual(t, "if/lazy.go") }
 func TestGoto(t *testing.T)                     { checkOutputEqual(t, "goto.go") }
+func TestRecover(t *testing.T)                     { checkOutputEqual(t, "errors/recover.go") }
 
 // vim: set ft=go:

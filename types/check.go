@@ -429,7 +429,28 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					c.checkExpr(args[1], nil)
 					return s
 				//case "close":
-				//case "complex":
+				case "complex":
+					realType := c.checkExpr(args[0], nil)
+					imagType := c.checkExpr(args[1], nil)
+					_, realUntyped := realType.(*Basic)
+					_, imagUntyped := imagType.(*Basic)
+					if realUntyped && imagUntyped {
+						// result is untyped complex
+						return Complex128.Underlying
+					} else {
+						typ := realType
+						if realUntyped {
+							typ = imagType
+							c.types[args[0]] = typ
+						} else if imagUntyped {
+							c.types[args[1]] = typ
+						}
+						if Underlying(typ) == Float32 {
+							return Complex64
+						} else {
+							return Complex128
+						}
+					}
 				case "copy":
 					/*dst := */ c.checkExpr(args[0], nil)
 					/*src := */ c.checkExpr(args[1], nil)
@@ -481,7 +502,8 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				case "panic":
 					// TODO check arg is an expression.
 					return nil
-				//case "recover":
+				case "recover":
+					return Error
 				default:
 					panic(fmt.Sprintf("unhandled builtin function: %s", x.Name))
 				}
@@ -568,13 +590,8 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				found := 0
 				next := make([]Type, 0)
 				for _, t := range curr {
-					// Selectors automatically dereference pointers to structs.
-					// We can safely do this here because pointer types may not
-					// be method receivers.
 					if p, ok := Underlying(t).(*Pointer); ok {
-						if _, ok := Underlying(p.Base).(*Struct); ok {
-							t = p.Base
-						}
+						t = p.Base
 					}
 
 					if n, ok := t.(*Name); ok {
@@ -613,7 +630,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 		}
 
 		if x.Sel.Obj == nil {
-			msg := c.errorf(x.Pos(), "failed to resolve selector %s.%s", x.X, x.Sel)
+			msg := c.errorf(x.Pos(), "failed to resolve selector %s.%s (lhs type: %s)", x.X, x.Sel, t)
 			return &Bad{Msg: msg}
 		} else {
 			c.checkObj(x.Sel.Obj, false)

@@ -64,7 +64,8 @@ var (
 	Uintptr,
 	Rune,
 	UnsafePointer,
-	String *Name
+	String,
+	Error *Name
 )
 
 func init() {
@@ -95,7 +96,7 @@ func init() {
 	obj := define(ast.Typ, "error")
 	errorMethod := ast.NewObj(ast.Fun, "Error")
 	errorMethod.Type = &Func{Results: ObjList([]*ast.Object{String.Obj})}
-	Error := &Name{Underlying: &Interface{
+	Error = &Name{Underlying: &Interface{
 		Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
 	obj.Type = Error
 

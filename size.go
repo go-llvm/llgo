@@ -59,6 +59,8 @@ func (c *compiler) alignofType(t types.Type) int {
 		return 0
 	case *types.Array:
 		return c.alignofType(t.Elt)
+	case *types.Interface:
+		return c.target.PointerSize()
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}
@@ -112,10 +114,12 @@ func (c *compiler) sizeofType(t types.Type) int {
 			eltpad = eltalign - (eltsize % eltalign)
 		}
 		return (eltsize + eltpad) * int(t.Len)
+	case *types.Slice:
+		return c.target.PointerSize() + 2*c.sizeofType(types.Uint)
 	case *types.Interface:
 		// XXX This needs to change if/when interfaces are
 		// changed to dynamically lookup methods, like in gc.
-		return (2+len(t.Methods)) * c.target.PointerSize()
+		return (2 + len(t.Methods)) * c.target.PointerSize()
 	default:
 		panic(fmt.Sprintf("unhandled type: %T", t))
 	}

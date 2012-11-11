@@ -38,7 +38,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	var fn_type *types.Func
 	fn_name := f.Name.String()
 
-	if fn_name == "init" {
+	if f.Recv == nil && fn_name == "init" {
 		// Make "init" functions anonymous.
 		fn_name = ""
 		// "init" functions aren't recorded by the parser, so f.Name.Obj is
@@ -137,7 +137,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	c.buildFunction(fn, paramObjects, f.Body)
 
 	// Is it an 'init' function? Then record it.
-	if f.Name.Name == "init" {
+	if f.Recv == nil && f.Name.Name == "init" {
 		c.initfuncs = append(c.initfuncs, fn)
 	} else {
 		//if obj != nil {
