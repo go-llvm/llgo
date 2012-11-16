@@ -6,6 +6,8 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo/types"
+	"go/ast"
 	"strings"
 )
 
@@ -17,7 +19,28 @@ type Attribute interface {
 	Apply(Value)
 }
 
-// parseAttribute parses #llgo comment attributes associated with
+// parseAttribute parses zero or more #llgo comment attributes associated with
+// a global variable or function. The comment group provided will be processed
+// one line at a time using parseAttribute.
+func parseAttributes(doc *ast.CommentGroup) []Attribute {
+	var attributes []Attribute
+	if doc == nil {
+		return attributes
+	}
+	for _, comment := range doc.List {
+		text := comment.Text[2:]
+		if strings.HasPrefix(comment.Text, "/*") {
+			text = text[:len(text)-2]
+		}
+		attr := parseAttribute(strings.TrimSpace(text))
+		if attr != nil {
+			attributes = append(attributes, attr)
+		}
+	}
+	return attributes
+}
+
+// parseAttribute parses a single #llgo comment attribute associated with
 // a global variable or function. The string provided will be parsed
 // if it begins with AttributeCommentPrefix, otherwise nil is returned.
 func parseAttribute(line string) Attribute {
@@ -30,6 +53,8 @@ func parseAttribute(line string) Attribute {
 	switch key {
 	case "linkage":
 		return parseLinkageAttribute(value)
+	case "name":
+		return nameAttribute(strings.TrimSpace(value))
 	default:
 		// FIXME decide what to do here. return error? log warning?
 		panic("unknown attribute key: " + key)
@@ -82,4 +107,16 @@ func parseLinkageAttribute(value string) linkageAttribute {
 		}
 	}
 	return result
+}
+
+type nameAttribute string
+
+func (a nameAttribute) Apply(v Value) {
+	if _, isfunc := v.Type().(*types.Func); isfunc {
+		fn := v.LLVMValue()
+		fn.SetName(string(a))
+	} else {
+		global := v.(*LLVMValue).pointer.value
+		global.SetName(string(a))
+	}
 }

@@ -68,7 +68,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 
 	case *types.Map:
 		mapval := value.LLVMValue()
-		f := c.NamedFunction("runtime.mapsize", "func f(m uintptr) int")
+		f := c.NamedFunction("runtime.maplen", "func f(m uintptr) int")
 		lenval := c.builder.CreateCall(f, []llvm.Value{mapval}, "")
 		return c.NewLLVMValue(lenval, types.Int)
 

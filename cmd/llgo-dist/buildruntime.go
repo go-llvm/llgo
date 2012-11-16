@@ -31,9 +31,6 @@ func getPackage(pkgpath string) (*build.Package, error) {
 		for i, filename := range pkg.CFiles {
 			pkg.CFiles[i] = path.Join(pkg.Dir, filename)
 		}
-		for i, filename := range pkg.SFiles {
-			pkg.SFiles[i] = path.Join(pkg.Dir, filename)
-		}
 
 		// Look for .ll files, treat them the same as .s.
 		// TODO look for build tags in the .ll file, check filename
@@ -113,6 +110,7 @@ func buildRuntime() error {
 		{"runtime", llgoPkgPrefix + "runtime"},
 		{"syscall", llgoPkgPrefix + "syscall"},
 		{"sync/atomic", llgoPkgPrefix + "sync/atomic"},
+		{"math", llgoPkgPrefix + "math"},
 		{"sync", "sync"},
 	}
 	for _, pkg := range runtimePackages {

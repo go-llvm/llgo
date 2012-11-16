@@ -44,7 +44,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		slice := c.makeSlice(utyp.Elt, length, capacity)
 		return c.NewLLVMValue(slice, typ)
 	case *types.Chan:
-		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap int) uintptr")
+		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap uint32) uintptr")
 		dyntyp := c.types.ToRuntime(typ)
 		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 		var cap_ llvm.Value
@@ -55,7 +55,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		ptr := c.builder.CreateCall(f, args, "")
 		return c.NewLLVMValue(ptr, typ)
 	case *types.Map:
-		f := c.NamedFunction("runtime.mapalloc", "func f(t uintptr) uintptr")
+		f := c.NamedFunction("runtime.makemap", "func f(t uintptr) uintptr")
 		dyntyp := c.types.ToRuntime(typ)
 		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 		mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp}, "")

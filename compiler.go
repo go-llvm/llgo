@@ -140,12 +140,16 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 		}
 
 		// If it's an external variable, we'll need to create a global
-		// value reference here.
+		// value reference here. It may be possible for multiple objects
+		// to refer to the same variable.
 		if obj.Data == nil {
 			module := c.module.Module
 			t := obj.Type.(types.Type)
 			name := c.pkgmap[obj] + "." + obj.Name
-			g := llvm.AddGlobal(module, c.types.ToLLVM(t), name)
+			g := module.NamedGlobal(name)
+			if g.IsNil() {
+				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
+			}
 			obj.Data = c.NewLLVMValue(g, &types.Pointer{Base: t}).makePointee()
 		}
 

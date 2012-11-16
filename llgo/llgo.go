@@ -167,6 +167,10 @@ func writeObjectFile(m *llgo.Module) error {
 			return err
 		}
 	}
+	err := llvm.VerifyModule(m.Module, llvm.ReturnStatusAction)
+	if err != nil {
+		return fmt.Errorf("Verification failed: %v", err)
+	}
 	return llvm.WriteBitcodeToFile(m.Module, outfile)
 }
 

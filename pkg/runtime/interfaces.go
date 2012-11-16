@@ -91,3 +91,8 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 	}
 	return false
 }
+
+// #llgo name: reflect.ifaceE2I
+func reflect_ifaceE2I(t *type_, src interface{}, dst unsafe.Pointer) {
+	// TODO
+}

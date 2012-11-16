@@ -31,13 +31,17 @@ import (
 	"go/token"
 	"reflect"
 	"strconv"
-	"strings"
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
+	if f.Name.Obj != nil {
+		if result, ok := f.Name.Obj.Data.(*LLVMValue); ok {
+			return result
+		}
+	}
+
 	var fn_type *types.Func
 	fn_name := f.Name.String()
-
 	if f.Recv == nil && fn_name == "init" {
 		// Make "init" functions anonymous.
 		fn_name = ""
@@ -46,7 +50,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		fn_type = &types.Func{ /* no params or result */}
 	} else {
 		fn_type = f.Name.Obj.Type.(*types.Func)
-		if c.module.Name != "main" && fn_name != "main" {
+		if c.module.Name != "main" || fn_name != "main" {
 			if fn_type.Recv != nil {
 				recv := fn_type.Recv
 				if recvtyp, ok := recv.Type.(*types.Pointer); ok {
@@ -64,8 +68,12 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	}
 
 	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
-	fn := llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
 
+	// gcimporter may produce multiple AST objects for the same function.
+	fn := c.module.Module.NamedFunction(fn_name)
+	if fn.IsNil() {
+		fn = llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
+	}
 	result := c.NewLLVMValue(fn, fn_type)
 	if f.Name.Obj != nil {
 		f.Name.Obj.Data = result
@@ -124,6 +132,10 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		fn = c.Resolve(f.Name.Obj).(*LLVMValue)
 	} else {
 		fn = c.VisitFuncProtoDecl(f)
+	}
+	attributes := parseAttributes(f.Doc)
+	for _, attr := range attributes {
+		attr.Apply(fn)
 	}
 	if f.Body == nil {
 		return fn
@@ -306,20 +318,7 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 	case token.VAR:
 		// Global variable attributes
 		// TODO only parse attributes for package-level var's.
-		var attributes []Attribute
-		if attributes == nil && decl.Doc != nil {
-			attributes = make([]Attribute, 0)
-			for _, comment := range decl.Doc.List {
-				text := comment.Text[2:]
-				if strings.HasPrefix(comment.Text, "/*") {
-					text = text[:len(text)-2]
-				}
-				attr := parseAttribute(strings.TrimSpace(text))
-				if attr != nil {
-					attributes = append(attributes, attr)
-				}
-			}
-		}
+		attributes := parseAttributes(decl.Doc)
 		for _, spec := range decl.Specs {
 			valspec, _ := spec.(*ast.ValueSpec)
 			c.VisitValueSpec(valspec, false)

@@ -28,8 +28,7 @@ func errorf(format string, args ...interface{}) {
 }
 
 func init() {
-	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config",
-		"Path to the llvm-config executable")
+	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config", "Path to the llvm-config executable")
 }
 
 func llvmconfigValue(option string) (string, error) {
@@ -99,6 +98,7 @@ func main() {
 		initLlvm,
 		buildLlgo,
 		genSyscall,
+		genMath,
 		buildRuntime,
 	}
 	for _, action := range actions {

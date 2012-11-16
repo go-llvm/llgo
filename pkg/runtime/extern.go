@@ -24,7 +24,10 @@ func Goexit()
 // meaning of skip differs between Caller and Callers.) The return values report the
 // program counter, file name, and line number within the file of the corresponding
 // call.  The boolean ok is false if it was not possible to recover the information.
-func Caller(skip int) (pc uintptr, file string, line int, ok bool)
+func Caller(skip int) (pc uintptr, file string, line int, ok bool) {
+	// TODO
+	return
+}
 
 // Callers fills the slice pc with the program counters of function invocations
 // on the calling goroutine's stack.  The argument skip is the number of stack frames
@@ -48,7 +51,10 @@ type Func struct { // Keep in sync with runtime.h:struct Func
 
 // FuncForPC returns a *Func describing the function that contains the
 // given program counter address, or else nil.
-func FuncForPC(pc uintptr) *Func
+func FuncForPC(pc uintptr) *Func {
+	// TODO
+	return nil
+}
 
 // Name returns the name of the function.
 func (f *Func) Name() string { return f.name }
@@ -65,7 +71,10 @@ func (f *Func) FileLine(pc uintptr) (file string, line int) {
 }
 
 // implemented in symtab.c
-func funcline_go(*Func, uintptr) (string, int)
+func funcline_go(*Func, uintptr) (string, int) {
+	// TODO
+	return "TODO", 1
+}
 
 // mid returns the current os thread (m) id.
 func mid() uint32
@@ -108,9 +117,14 @@ func mid() uint32
 // A single goroutine runs all finalizers for a program, sequentially.
 // If a finalizer must run for a long time, it should do so by starting
 // a new goroutine.
-func SetFinalizer(x, f interface{})
+func SetFinalizer(x, f interface{}) {
+	// TODO
+}
 
-func getgoroot() string
+func getgoroot() string {
+	// TODO
+	return ""
+}
 
 // GOROOT returns the root of the Go tree.
 // It uses the GOROOT environment variable, if set,

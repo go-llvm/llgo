@@ -25,7 +25,7 @@ package runtime
 import "unsafe"
 
 type map_ struct {
-	length int
+	length int32
 	head   *mapentry
 }
 
@@ -34,7 +34,12 @@ type mapentry struct {
 	// after this comes the key, then the value.
 }
 
-func mapalloc(t unsafe.Pointer) unsafe.Pointer {
+// #llgo name: reflect.makemap
+func reflect_makemap(t *map_) unsafe.Pointer {
+	return makemap(unsafe.Pointer(t))
+}
+
+func makemap(t unsafe.Pointer) unsafe.Pointer {
 	m := (*map_)(malloc(unsafe.Sizeof(map_{})))
 	if m != nil {
 		m.length = 0
@@ -43,11 +48,35 @@ func mapalloc(t unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(m)
 }
 
-func mapsize(m *map_) int {
+// #llgo name: reflect.maplen
+func reflect_maplen(m unsafe.Pointer) int32 {
+	return int32(maplen((*map_)(m)))
+}
+
+func maplen(m *map_) int {
 	if m != nil {
-		return m.length
+		return int(m.length)
 	}
 	return 0
+}
+
+// #llgo name: reflect.mapassign
+func reflect_mapassign(t *type_, m_, key, val unsafe.Pointer, ok bool) {
+	m := (*map_)(m_)
+	if ok {
+		ptr := maplookup(t, m, key, true)
+		// TODO use copy alg
+		memmove(ptr, val, t.size)
+	} else {
+		mapdelete(t, m, key)
+	}
+}
+
+// #llgo name: reflect.mapaccess
+func reflect_mapaccess(t *type_, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
+	m := (*map_)(m_)
+	ptr := maplookup(t, m, key, false)
+	return ptr, ptr != nil
 }
 
 func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {
@@ -127,6 +156,23 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 		}
 		last = ptr
 	}
+}
+
+// #llgo name: reflect.mapiterinit
+func reflect_mapiterinit(t *type_, m_ unsafe.Pointer) *byte {
+	// TODO
+	return nil
+}
+
+// #llgo name: reflect.mapiterkey
+func reflect_mapiterkey(it *byte) (key unsafe.Pointer, ok bool) {
+	// TODO
+	return
+}
+
+// #llgo name: reflect.mapiternext
+func reflect_mapiternext(it *byte) {
+	// TODO
 }
 
 func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv unsafe.Pointer) {
