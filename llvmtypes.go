@@ -306,8 +306,8 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 		valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
 		typptr_type := valptr_type // runtimeCommonType may not be defined yet
 		elements := make([]llvm.Type, 2+len(i.Methods))
-		elements[0] = valptr_type // value
-		elements[1] = typptr_type // type
+		elements[0] = typptr_type // type
+		elements[1] = valptr_type // value
 		for n, m := range i.Methods {
 			// Add an opaque pointer parameter to the function for the
 			// struct pointer.
@@ -594,6 +594,9 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, namePtr, []uint32{0})
 	pkgpathPtr := tm.globalStringPtr(pkgpath)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
+
+	// Replace the commonType's string representation.
+	commonType = llvm.ConstInsertValue(commonType, namePtr, []uint32{8})
 
 	methods := make([]llvm.Value, len(n.Methods))
 	for index, m := range n.Methods {

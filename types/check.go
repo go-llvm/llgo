@@ -501,6 +501,9 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 					}
 				case "panic":
 					// TODO check arg is an expression.
+					if len(args) > 0 {
+						c.checkExpr(args[0], nil)
+					}
 					return nil
 				case "recover":
 					return Error

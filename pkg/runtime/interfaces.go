@@ -51,7 +51,7 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 //
 // FIXME cache type-to-interface conversions.
 func convertI2I(typ_, from_, to_ uintptr) bool {
-	dyntypptr := (**type_)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
+	dyntypptr := (**type_)(unsafe.Pointer(from_))
 	if dyntypptr == nil {
 		return false
 	}
@@ -83,9 +83,9 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 				return false
 			}
 		}
-		targetvalue := (*uintptr)(unsafe.Pointer(to_))
-		targetdyntyp := (**type_)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
-		*targetvalue = *(*uintptr)(unsafe.Pointer(from_))
+		targetvalue := (*uintptr)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
+		targetdyntyp := (**type_)(unsafe.Pointer(to_))
+		*targetvalue = *(*uintptr)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
 		*targetdyntyp = dyntyp
 		return true
 	}
@@ -95,4 +95,6 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 // #llgo name: reflect.ifaceE2I
 func reflect_ifaceE2I(t *type_, src interface{}, dst unsafe.Pointer) {
 	// TODO
+	println("TODO: reflect.ifaceE2I")
+	llvm_trap()
 }

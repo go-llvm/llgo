@@ -15,3 +15,9 @@ func (c *compiler) visitRecover() *LLVMValue {
 	return c.NewLLVMValue(errval, types.Error)
 }
 
+func (c *compiler) visitPanic(arg Value) {
+	f := c.NamedFunction("runtime.panic_", "func f(interface{})")
+	arg = arg.Convert(&types.Interface{})
+	c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
+	c.builder.CreateUnreachable()
+}

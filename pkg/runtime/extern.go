@@ -73,7 +73,7 @@ func (f *Func) FileLine(pc uintptr) (file string, line int) {
 // implemented in symtab.c
 func funcline_go(*Func, uintptr) (string, int) {
 	// TODO
-	return "TODO", 1
+	return "TODO: funcline_go", 1
 }
 
 // mid returns the current os thread (m) id.

@@ -175,7 +175,10 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
 	}
 	printf := getprintf(c.module.Module)
-	return c.NewLLVMValue(c.builder.CreateCall(printf, args, ""), types.Int32)
+	result := c.NewLLVMValue(c.builder.CreateCall(printf, args, ""), types.Int32)
+	fflush := c.NamedFunction("fflush", "func f(*int32) int32")
+	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
+	return result
 }
 
 func (c *compiler) VisitPrint(expr *ast.CallExpr, println_ bool) Value {

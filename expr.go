@@ -142,8 +142,11 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			c.mapDelete(m, key)
 			return nil
 		case "panic":
-			// TODO
-			c.builder.CreateUnreachable()
+			var arg Value
+			if len(expr.Args) > 0 {
+				arg = c.VisitExpr(expr.Args[0])
+			}
+			c.visitPanic(arg)
 			return nil
 		case "recover":
 			return c.visitRecover()
@@ -375,7 +378,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			return iface.Methods[i].Name >= name
 		})
 		structValue := lhs.LLVMValue()
-		receiver := c.builder.CreateExtractValue(structValue, 0, "")
+		receiver := c.builder.CreateExtractValue(structValue, 1, "")
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
 		i8ptr := &types.Pointer{Base: types.Int8}
 		ftype := iface.Methods[i].Type.(*types.Func)

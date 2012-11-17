@@ -774,7 +774,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 
 	// Evaluate the expression, then jump to the first condition block.
 	iface := c.VisitExpr(typeAssertExpr.X).(*LLVMValue)
-	typptr := c.builder.CreateExtractValue(iface.LLVMValue(), 1, "")
+	typptr := c.builder.CreateExtractValue(iface.LLVMValue(), 0, "")
 	typptr = c.builder.CreatePtrToInt(typptr, c.target.IntPtrType(), "")
 	if len(stmt.Body.List) == 1 && defaultBlock != endBlock {
 		c.builder.CreateBr(defaultBlock)

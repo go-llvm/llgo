@@ -345,11 +345,13 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		elttypes := []llvm.Type{llvm.Int32Type(), llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
 		ctortype := llvm.StructType(elttypes, false)
 		var ctors []llvm.Value
-		for priority, initfuncs := range initfuncs {
-			priority := llvm.ConstInt(llvm.Int32Type(), uint64(priority), false)
+		var priority uint64
+		for _, initfuncs := range initfuncs {
 			for _, fn := range initfuncs {
-				struct_values := []llvm.Value{priority, fn.LLVMValue()}
+				priorityval := llvm.ConstInt(llvm.Int32Type(), uint64(priority), false)
+				struct_values := []llvm.Value{priorityval, fn.LLVMValue()}
 				ctors = append(ctors, llvm.ConstStruct(struct_values, false))
+				priority++
 			}
 		}
 		global_ctors_init := llvm.ConstArray(ctortype, ctors)

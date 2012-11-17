@@ -4,6 +4,8 @@
 
 package runtime
 
+import "unsafe"
+
 // The Error interface identifies a run time error.
 type Error interface {
 	error
@@ -78,9 +80,9 @@ type stringer interface {
 	String() string
 }
 
-func typestring(interface{}) string {
-	// TODO
-	return "TODO"
+func typestring(t interface{}) string {
+	typ := *(**type_)(unsafe.Pointer(&t))
+	return *typ.string
 }
 
 // For calling from C.

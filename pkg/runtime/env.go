@@ -7,4 +7,5 @@ package runtime
 // #llgo name: syscall.setenv_c
 func setenv_c(k, v string) {
 	// TODO
+	println("TODO: setenv_c")
 }

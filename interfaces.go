@@ -57,7 +57,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	var ptr llvm.Value
 	lv := v.LLVMValue()
 	if lv.Type().TypeKind() == llvm.PointerTypeKind {
-		ptr = lv
+		ptr = builder.CreateBitCast(lv, element_types[1], "")
 	} else {
 		// If the value fits exactly in a pointer, then we can just
 		// bitcast it. Otherwise we need to malloc, and create a shim
@@ -68,25 +68,24 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			bits := c.target.TypeSizeInBits(lv.Type())
 			if bits > 0 {
 				lv = builder.CreateBitCast(lv, llvm.IntType(int(bits)), "")
-				ptr = builder.CreateIntToPtr(lv, element_types[0], "")
+				ptr = builder.CreateIntToPtr(lv, element_types[1], "")
 			} else {
-				ptr = llvm.ConstNull(element_types[0])
+				ptr = llvm.ConstNull(element_types[1])
 			}
 		} else {
 			ptr = builder.CreateMalloc(v.compiler.types.ToLLVM(srctyp), "")
 			builder.CreateStore(lv, ptr)
+			ptr = builder.CreateBitCast(ptr, element_types[1], "")
 			// TODO signal that shim functions are required. Probably later
 			// we'll have the CallExpr handler pick out the type, and check
 			// if the receiver is a pointer or a value type, and load as
 			// necessary.
 		}
 	}
-	ptr = builder.CreateBitCast(ptr, element_types[0], "")
-	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 0, "")
-
 	runtimeType := v.compiler.types.ToRuntime(v.Type())
-	runtimeType = builder.CreateBitCast(runtimeType, element_types[1], "")
-	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 1, "")
+	runtimeType = builder.CreateBitCast(runtimeType, element_types[0], "")
+	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 0, "")
+	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 1, "")
 
 	// TODO assert either source is a named type (or pointer to), or the
 	// interface has an empty methodset.
@@ -152,17 +151,10 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 	src_typ := types.Underlying(v.Type())
 	vptr := v.pointer.LLVMValue()
 
-	//iface_struct_type := c.types.ToLLVM(iface)
-	//element_types := iface_struct_type.StructElementTypes()
-	//iface_elements := make([]llvm.Value, len(element_types))
-	//for i, _ := range iface_elements {
-	//	iface_elements[i] = llvm.ConstNull(element_types[i])
-	//}
-	//iface_struct := llvm.ConstStruct(iface_elements, false)
 	zero_iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
 	iface_struct := zero_iface_struct
-	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
-	dynamicType := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
+	dynamicType := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
+	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
 
 	// TODO check whether the functions in the struct take
 	// value or pointer receivers.
@@ -184,8 +176,8 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 			iface_struct = builder.CreateInsertValue(iface_struct, fptr, i+2, "")
 		}
 	}
-	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 0, "")
-	iface_struct = builder.CreateInsertValue(iface_struct, dynamicType, 1, "")
+	iface_struct = builder.CreateInsertValue(iface_struct, dynamicType, 0, "")
+	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 1, "")
 	result = c.NewLLVMValue(iface_struct, iface)
 	success = ConstValue{types.Const{true}, c, types.Bool}
 	return result, success
@@ -217,7 +209,7 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
 	vval := v.LLVMValue()
 
 	builder := v.compiler.builder
-	ifaceType := builder.CreateExtractValue(vval, 1, "")
+	ifaceType := builder.CreateExtractValue(vval, 0, "")
 	diff := builder.CreatePtrDiff(runtimeType, ifaceType, "")
 	zero := llvm.ConstNull(diff.Type())
 	predicate := builder.CreateICmp(llvm.IntEQ, diff, zero, "")
@@ -276,13 +268,13 @@ func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
 func (v *LLVMValue) loadI2V(typ types.Type) Value {
 	c := v.compiler
 	if c.sizeofType(typ) > c.target.PointerSize() {
-		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
 		typ = &types.Pointer{Base: typ}
 		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")
 		return c.NewLLVMValue(ptr, typ).makePointee()
 	}
 
-	value := c.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+	value := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
 	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
 		value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
 		return c.NewLLVMValue(value, typ)
@@ -299,20 +291,12 @@ func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
 	c := lhs.compiler
 	b := c.builder
 
-	lhsValue := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
-	rhsValue := b.CreateExtractValue(rhs.LLVMValue(), 0, "")
-	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 1, "")
-	rhsType := b.CreateExtractValue(rhs.LLVMValue(), 1, "")
+	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
+	rhsType := b.CreateExtractValue(rhs.LLVMValue(), 0, "")
+	lhsValue := b.CreateExtractValue(lhs.LLVMValue(), 1, "")
+	rhsValue := b.CreateExtractValue(rhs.LLVMValue(), 1, "")
 
 	llvmUintptr := c.target.IntPtrType()
-	runtimeCompareI2I := c.module.Module.NamedFunction("runtime.compareI2I")
-	if runtimeCompareI2I.IsNil() {
-		args := []llvm.Type{llvmUintptr, llvmUintptr, llvmUintptr, llvmUintptr}
-		functype := llvm.FunctionType(llvm.Int1Type(), args, false)
-		runtimeCompareI2I = llvm.AddFunction(
-			c.module.Module, "runtime.compareI2I", functype)
-	}
-
 	args := []llvm.Value{
 		c.builder.CreatePtrToInt(lhsType, llvmUintptr, ""),
 		c.builder.CreatePtrToInt(rhsType, llvmUintptr, ""),
@@ -320,7 +304,8 @@ func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
 		c.builder.CreatePtrToInt(rhsValue, llvmUintptr, ""),
 	}
 
-	result := c.builder.CreateCall(runtimeCompareI2I, args, "")
+	f := c.NamedFunction("runtime.compareI2I", "func f(t1, t2, v1, v2 uintptr) bool")
+	result := c.builder.CreateCall(f, args, "")
 	return c.NewLLVMValue(result, types.Bool)
 }
 
