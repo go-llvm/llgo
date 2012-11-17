@@ -45,15 +45,15 @@ entry:
         ret i64 %new
 }
 
-define i1 @"sync/atomic.CompareAndSwapInt32"(i32*, i32, i32) {
-	%old = cmpxchg i32* %0, i32 %1, i32 %2 seq_cst
-	%success = icmp eq i32 %old, %2
+define i1 @"sync/atomic.CompareAndSwapInt32"(i32* %mem, i32 %cmp, i32 %new) {
+	%old = cmpxchg i32* %mem, i32 %cmp, i32 %new seq_cst
+	%success = icmp eq i32 %old, %cmp
 	ret i1 %success
 }
 
-define i1 @"sync/atomic.CompareAndSwapInt64"(i64*, i64, i64) {
-	%old = cmpxchg i64* %0, i64 %1, i64 %2 seq_cst
-	%success = icmp eq i64 %old, %2
+define i1 @"sync/atomic.CompareAndSwapInt64"(i64* %mem, i64 %cmp, i64 %new) {
+	%old = cmpxchg i64* %mem, i64 %cmp, i64 %new seq_cst
+	%success = icmp eq i64 %old, %cmp
 	ret i1 %success
 }
 
