@@ -151,10 +151,6 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	// Is it an 'init' function? Then record it.
 	if f.Recv == nil && f.Name.Name == "init" {
 		c.initfuncs = append(c.initfuncs, fn)
-	} else {
-		//if obj != nil {
-		//    obj.Data = fn
-		//}
 	}
 	return fn
 }
@@ -307,12 +303,19 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
 func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 	switch decl.Tok {
-	case token.IMPORT, token.TYPE:
+	case token.IMPORT:
 		// Already handled in type-checking.
 		break
+	case token.TYPE:
+		// Export runtime type information.
+		for _, spec := range decl.Specs {
+			typspec := spec.(*ast.TypeSpec)
+			typ := typspec.Name.Obj.Type.(types.Type)
+			c.types.ToRuntime(typ)
+		}
 	case token.CONST:
 		for _, spec := range decl.Specs {
-			valspec, _ := spec.(*ast.ValueSpec)
+			valspec := spec.(*ast.ValueSpec)
 			c.VisitValueSpec(valspec, true)
 		}
 	case token.VAR:

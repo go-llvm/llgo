@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"github.com/axw/llgo/types"
 	"go/ast"
 )
 
@@ -43,4 +44,33 @@ func isType(x ast.Expr) bool {
 		return true
 	}
 	return false
+}
+
+func (c *compiler) exportBuiltinRuntimeTypes() {
+	types := []types.Type{
+		types.Uint,
+		types.Uint8,
+		types.Uint16,
+		types.Uint32,
+		types.Uint64,
+		types.Int,
+		types.Int8,
+		types.Int16,
+		types.Int32,
+		types.Int64,
+		types.Float32,
+		types.Float64,
+		types.Complex64,
+		types.Complex128,
+		types.Byte,
+		types.Bool,
+		types.Uintptr,
+		types.Rune,
+		types.UnsafePointer,
+		types.String,
+		types.Error,
+	}
+	for _, typ := range types {
+		c.types.ToRuntime(typ)
+	}
 }

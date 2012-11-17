@@ -308,7 +308,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	var resolver Resolver = compiler
 	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(llvmtypemap, exprTypes, compiler.FunctionCache, compiler.pkgmap, resolver)
+	compiler.types = NewTypeMap(llvmtypemap, importpath, exprTypes, compiler.FunctionCache, compiler.pkgmap, resolver)
 
 	// Compile each file in the package.
 	for _, file := range pkg.Files {
@@ -325,6 +325,11 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	// These could be defined in LLVM IR, and may be moved there later.
 	if pkg.Name == "runtime" {
 		compiler.defineRuntimeIntrinsics()
+	}
+
+	// Export runtime type information.
+	if pkg.Name == "runtime" {
+		compiler.exportBuiltinRuntimeTypes()
 	}
 
 	// Create global constructors.

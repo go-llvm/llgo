@@ -38,6 +38,7 @@ type LLVMTypeMap struct {
 
 type TypeMap struct {
 	*LLVMTypeMap
+	pkgpath   string
 	types     map[types.Type]llvm.Value // runtime/reflect type representation
 	expr      map[ast.Expr]types.Type
 	pkgmap    map[*ast.Object]string
@@ -70,13 +71,16 @@ func NewLLVMTypeMap(module llvm.Module, target llvm.TargetData) *LLVMTypeMap {
 	return tm
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, exprTypes map[ast.Expr]types.Type, c *FunctionCache, p map[*ast.Object]string, r Resolver) *TypeMap {
-	tm := &TypeMap{LLVMTypeMap: llvmtm}
-	tm.types = make(map[types.Type]llvm.Value)
-	tm.expr = exprTypes
-	tm.pkgmap = p
-	tm.functions = c
-	tm.resolver = r
+func NewTypeMap(llvmtm *LLVMTypeMap, pkgpath string, exprTypes map[ast.Expr]types.Type, c *FunctionCache, p map[*ast.Object]string, r Resolver) *TypeMap {
+	tm := &TypeMap{
+		LLVMTypeMap: llvmtm,
+		pkgpath:     pkgpath,
+		types:       make(map[types.Type]llvm.Value),
+		expr:        exprTypes,
+		pkgmap:      p,
+		functions:   c,
+		resolver:    r,
+	}
 
 	// Load "reflect.go", and generate LLVM types for the runtime type
 	// structures.
@@ -568,17 +572,26 @@ func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
 
 func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	pkgpath := tm.pkgmap[n.Obj]
-	//globalname := "__llgo.reflect.type.name." + pkgpath + "." + n.Obj.Name
-	// TODO check if the package being compiled has the same path as the
-	// object's package; if it does not, simply create an "externally available"
-	// global and return that.
+	if pkgpath == "" {
+		// XXX "builtin"?
+		pkgpath = "runtime"
+	}
+	globalname := "__llgo.type.name." + pkgpath + "." + n.Obj.Name
+	if pkgpath != tm.pkgpath {
+		// We're not compiling the package from whence the type came,
+		// so we'll just create a pointer to it here.
+		global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
+		global.SetInitializer(llvm.ConstNull(tm.runtimeType))
+		global.SetLinkage(llvm.CommonLinkage)
+		return global, global
+	}
 
 	underlying := n.Underlying
 	if name, ok := underlying.(*types.Name); ok {
 		underlying = name.Underlying
 	}
 
-	global, ptr = tm.makeRuntimeType(n.Underlying)
+	global, ptr = tm.makeRuntimeType(underlying)
 	globalInit := global.Initializer()
 
 	// Locate the common type.
@@ -660,7 +673,7 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 		underlyingRuntimeType = commonType
 	}
 	globalInit = llvm.ConstInsertValue(globalInit, underlyingRuntimeType, []uint32{1})
-	//global.SetName(globalname)
+	global.SetName(globalname)
 	global.SetInitializer(globalInit)
 	return global, ptr
 }
