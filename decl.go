@@ -52,14 +52,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		fn_type = f.Name.Obj.Type.(*types.Func)
 		if c.module.Name != "main" || fn_name != "main" {
 			if fn_type.Recv != nil {
-				recv := fn_type.Recv
-				if recvtyp, ok := recv.Type.(*types.Pointer); ok {
-					recv = recvtyp.Base.(*types.Name).Obj
-				} else {
-					recv = recv.Type.(*types.Name).Obj
-				}
-				pkgname := c.pkgmap[recv]
-				fn_name = pkgname + "." + recv.Name + "." + fn_name
+				fn_name = fmt.Sprintf("%s.%s", fn_type.Recv.Type, fn_name)
 			} else {
 				pkgname := c.pkgmap[f.Name.Obj]
 				fn_name = pkgname + "." + fn_name

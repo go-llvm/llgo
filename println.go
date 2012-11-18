@@ -71,8 +71,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		for i, value := range values {
 			llvm_value := value.LLVMValue()
 
-			// If it's a named type, get the underlying type.
-			typ := value.Type()
+			typ := types.Underlying(value.Type())
 			if name, isname := typ.(*types.Name); isname {
 				typ = name.Underlying
 			}
@@ -157,7 +156,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				format += "0x%x"
 
 			default:
-				panic(fmt.Sprint("Unhandled type kind: ", typ))
+				panic(fmt.Sprintf("Unhandled type kind: %s (%T)", typ, typ))
 			}
 
 			args = append(args, llvm_value)

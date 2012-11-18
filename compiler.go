@@ -308,7 +308,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	var resolver Resolver = compiler
 	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(llvmtypemap, importpath, exprTypes, compiler.FunctionCache, compiler.pkgmap, resolver)
+	compiler.types = NewTypeMap(llvmtypemap, importpath, exprTypes, compiler.FunctionCache, resolver)
 
 	// Compile each file in the package.
 	for _, file := range pkg.Files {

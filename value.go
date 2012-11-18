@@ -400,11 +400,9 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// Convert from an interface type.
 	if _, isinterface := src_typ.(*types.Interface); isinterface {
 		if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
-			result, _ := v.convertI2I(interface_)
-			return result
+			return v.mustConvertI2I(interface_)
 		} else {
-			result, _ := v.convertI2V(orig_dst_typ)
-			return result
+			return v.mustConvertI2V(orig_dst_typ)
 		}
 	}
 

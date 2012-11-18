@@ -27,7 +27,9 @@ import (
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/token"
 	"sort"
+	"strconv"
 )
 
 // convertV2I converts a value to an interface.
@@ -201,18 +203,26 @@ check_dynamic:
 	return result, success
 }
 
+func (v *LLVMValue) mustConvertI2I(iface *types.Interface) Value {
+	result, ok := v.convertI2I(iface)
+
+	c, builder := v.compiler, v.compiler.builder
+	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
+	end.MoveAfter(builder.GetInsertBlock())
+	failed := llvm.InsertBasicBlock(end, "failed")
+	builder.CreateCondBr(ok.LLVMValue(), end, failed)
+	builder.SetInsertPointAtEnd(failed)
+
+	s := fmt.Sprintf("convertI2I(%s, %s) failed", v.typ, iface)
+	c.visitPanic(c.NewConstValue(token.STRING, strconv.Quote(s)))
+	builder.SetInsertPointAtEnd(end)
+	return result
+}
+
 // convertI2V converts an interface to a value.
 func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
-	typptrType := llvm.PointerType(llvm.Int8Type(), 0)
-	runtimeType := v.compiler.types.ToRuntime(typ)
-	runtimeType = llvm.ConstBitCast(runtimeType, typptrType)
-	vval := v.LLVMValue()
-
 	builder := v.compiler.builder
-	ifaceType := builder.CreateExtractValue(vval, 0, "")
-	diff := builder.CreatePtrDiff(runtimeType, ifaceType, "")
-	zero := llvm.ConstNull(diff.Type())
-	predicate := builder.CreateICmp(llvm.IntEQ, diff, zero, "")
+	predicate := v.interfaceTypeEquals(typ).LLVMValue()
 
 	// If result is zero, then we've got a match.
 	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
@@ -243,6 +253,22 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
 	resultValue.AddIncoming(resultValues, resultBlocks)
 	result = v.compiler.NewLLVMValue(resultValue, typ)
 	return result, success
+}
+
+func (v *LLVMValue) mustConvertI2V(typ types.Type) Value {
+	result, ok := v.convertI2V(typ)
+
+	c, builder := v.compiler, v.compiler.builder
+	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
+	end.MoveAfter(builder.GetInsertBlock())
+	failed := llvm.InsertBasicBlock(end, "failed")
+	builder.CreateCondBr(ok.LLVMValue(), end, failed)
+	builder.SetInsertPointAtEnd(failed)
+
+	s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
+	c.visitPanic(c.NewConstValue(token.STRING, strconv.Quote(s)))
+	builder.SetInsertPointAtEnd(end)
+	return result
 }
 
 // coerce yields a value of the the type specified, initialised
@@ -283,6 +309,18 @@ func (v *LLVMValue) loadI2V(typ types.Type) Value {
 	value = c.builder.CreatePtrToInt(value, llvm.IntType(int(bits)), "")
 	value = c.coerce(value, c.types.ToLLVM(typ))
 	return c.NewLLVMValue(value, typ)
+}
+
+func (lhs *LLVMValue) interfaceTypeEquals(typ types.Type) *LLVMValue {
+	c, b := lhs.compiler, lhs.compiler.builder
+	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
+	rhsType := c.types.ToRuntime(typ)
+	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *type_) bool")
+	t := f.Type().ElementType().ParamTypes()[0]
+	lhsType = b.CreateBitCast(lhsType, t, "")
+	rhsType = b.CreateBitCast(rhsType, t, "")
+	result := b.CreateCall(f, []llvm.Value{lhsType, rhsType}, "")
+	return c.NewLLVMValue(result, types.Bool)
 }
 
 // interfacesEqual compares two interfaces for equality, returning

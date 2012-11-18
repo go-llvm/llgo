@@ -92,7 +92,7 @@ type ptrType struct {
 type chanType struct {
 	commonType
 	elem *type_
-	dir uintptr
+	dir  uintptr
 }
 
 const (
@@ -124,3 +124,36 @@ const (
 	structKind
 	unsafePointerKind
 )
+
+// eqtyp takes two runtime types and returns true
+// iff they are equal.
+func eqtyp(t1, t2 *type_) bool {
+	if t1 == t2 {
+		return true
+	}
+	if t1.kind == t2.kind {
+		// TODO check rules for type equality.
+		//
+		// Named type equality is covered in the trivial
+		// case, since there is only one definition for
+		// each named type.
+		// 
+		// Basic types are not checked for explicitly,
+		// as we should never be comparing unnamed basic
+		// types.
+		switch t1.kind {
+		case arrayKind:
+		case chanKind:
+		case funcKind:
+		case interfaceKind:
+		case mapKind:
+		case ptrKind:
+			t1 := (*ptrType)(unsafe.Pointer(&t1.commonType))
+			t2 := (*ptrType)(unsafe.Pointer(&t2.commonType))
+			return eqtyp(t1.elem, t2.elem)
+		case sliceKind:
+		case structKind:
+		}
+	}
+	return false
+}
