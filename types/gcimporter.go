@@ -165,6 +165,7 @@ type gcParser struct {
 	lit     string                 // literal string; only valid for Ident, Int, String, Char tokens
 	id      string                 // package id of imported package
 	imports map[string]*ast.Object // package id -> package object
+	pkgids  map[*ast.Object]string // package object -> package id
 }
 
 func (p *gcParser) init(filename, id string, src io.Reader, imports map[string]*ast.Object) {
@@ -176,6 +177,10 @@ func (p *gcParser) init(filename, id string, src io.Reader, imports map[string]*
 	p.next()
 	p.id = id
 	p.imports = imports
+	p.pkgids = make(map[*ast.Object]string)
+	for id, pkg := range p.imports {
+		p.pkgids[pkg] = id
+	}
 }
 
 func (p *gcParser) next() {
@@ -297,6 +302,7 @@ func (p *gcParser) parsePkgId() *ast.Object {
 		pkg = ast.NewObj(ast.Pkg, "")
 		pkg.Data = ast.NewScope(nil)
 		p.imports[id] = pkg
+		p.pkgids[pkg] = id
 		//*/
 		//pkg, err = GcImport(p.imports, id)
 		//if err != nil {
@@ -622,7 +628,14 @@ func (p *gcParser) parseType() Type {
 	case '@':
 		// TypeName
 		pkg, name := p.parseExportedName()
-		return p.declare(pkg.Data.(*ast.Scope), ast.Typ, name).Type.(Type)
+		typ := p.declare(pkg.Data.(*ast.Scope), ast.Typ, name).Type.(Type)
+		switch typ := typ.(type) {
+		case *Struct:
+			typ.Package = p.pkgids[pkg]
+		case *Name:
+			typ.Package = p.pkgids[pkg]
+		}
+		return typ
 	case '[':
 		p.next() // look ahead
 		if p.tok == ']' {
@@ -909,6 +922,7 @@ func (p *gcParser) parseExport() *ast.Object {
 		pkg = ast.NewObj(ast.Pkg, name)
 		pkg.Data = ast.NewScope(nil)
 		p.imports[p.id] = pkg
+		p.pkgids[pkg] = p.id
 	}
 
 	for p.tok != '$' && p.tok != scanner.EOF {

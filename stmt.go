@@ -774,8 +774,6 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 
 	// Evaluate the expression, then jump to the first condition block.
 	iface := c.VisitExpr(typeAssertExpr.X).(*LLVMValue)
-	typptr := c.builder.CreateExtractValue(iface.LLVMValue(), 0, "")
-	typptr = c.builder.CreatePtrToInt(typptr, c.target.IntPtrType(), "")
 	if len(stmt.Body.List) == 1 && defaultBlock != endBlock {
 		c.builder.CreateBr(defaultBlock)
 	} else {
@@ -799,12 +797,12 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 			}
 			var cond llvm.Value
 			if isNilIdent(caseClause.List[0]) {
-				cond = c.builder.CreateIsNull(typptr, "")
+				iface := iface.LLVMValue()
+				ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
+				cond = c.builder.CreateIsNull(ifacetyp, "")
 			} else {
 				typ := c.types.expr[caseClause.List[0]]
-				check := c.types.ToRuntime(typ)
-				check = c.builder.CreatePtrToInt(check, c.target.IntPtrType(), "")
-				cond = c.builder.CreateICmp(llvm.IntEQ, typptr, check, "")
+				cond = iface.interfaceTypeEquals(typ).LLVMValue()
 			}
 			c.builder.CreateCondBr(cond, stmtBlock, nextCondBlock)
 			i++

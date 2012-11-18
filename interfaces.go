@@ -151,12 +151,12 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 	c := v.compiler
 	builder := v.compiler.builder
 	src_typ := types.Underlying(v.Type())
-	vptr := v.pointer.LLVMValue()
+	val := v.LLVMValue()
 
 	zero_iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
 	iface_struct := zero_iface_struct
-	dynamicType := builder.CreateLoad(builder.CreateStructGEP(vptr, 0, ""), "")
-	receiver := builder.CreateLoad(builder.CreateStructGEP(vptr, 1, ""), "")
+	dynamicType := builder.CreateExtractValue(val, 0, "")
+	receiver := builder.CreateExtractValue(val, 1, "")
 
 	// TODO check whether the functions in the struct take
 	// value or pointer receivers.
@@ -173,8 +173,7 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 			//panic("Failed to locate method: " + m.Name)
 			goto check_dynamic
 		} else {
-			method := builder.CreateStructGEP(vptr, mi+2, "")
-			fptr := builder.CreateLoad(method, "")
+			fptr := builder.CreateExtractValue(val, mi+2, "")
 			iface_struct = builder.CreateInsertValue(iface_struct, fptr, i+2, "")
 		}
 	}
@@ -187,6 +186,14 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 check_dynamic:
 	runtimeConvertI2I := c.NamedFunction("runtime.convertI2I", "func f(typ, from, to uintptr) bool")
 	llvmUintptr := runtimeConvertI2I.Type().ElementType().ParamTypes()[0]
+
+	var vptr llvm.Value
+	if v.pointer != nil {
+		vptr = v.pointer.LLVMValue()
+	} else {
+		vptr = c.builder.CreateAlloca(val.Type(), "")
+		c.builder.CreateStore(val, vptr)
+	}
 
 	runtimeType := c.builder.CreatePtrToInt(c.types.ToRuntime(iface), llvmUintptr, "")
 	from := c.builder.CreatePtrToInt(vptr, llvmUintptr, "")
