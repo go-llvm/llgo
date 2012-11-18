@@ -8,4 +8,9 @@ func main() {
 	for i := 0; i < len(x); i++ {
 		println(x[i])
 	}
+	y := []int{1,2,3}
+	x = append(x, y...)
+	for i := 0; i < len(x); i++ {
+		println(x[i])
+	}
 }

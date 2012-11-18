@@ -105,15 +105,21 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	sliceTyp := a_.Type()
 	a := c.coerceSlice(a_, i8slice)
 
-	// Construct a fresh []int8 for the temporary slice.
-	b_ := elem.LLVMValue()
-	one := llvm.ConstInt(llvm.Int32Type(), 1, false)
-	mem := c.builder.CreateAlloca(elem.LLVMValue().Type(), "")
-	c.builder.CreateStore(b_, mem)
-	b := llvm.Undef(i8slice)
-	b = c.builder.CreateInsertValue(b, c.builder.CreateBitCast(mem, i8ptr, ""), 0, "")
-	b = c.builder.CreateInsertValue(b, one, 1, "")
-	b = c.builder.CreateInsertValue(b, one, 2, "")
+	var b llvm.Value
+	if expr.Ellipsis.IsValid() {
+		// Pass the provided slice straight through.
+		b = c.coerceSlice(elem.LLVMValue(), i8slice)
+	} else {
+		// Construct a fresh []int8 for the temporary slice.
+		b_ := elem.LLVMValue()
+		one := llvm.ConstInt(llvm.Int32Type(), 1, false)
+		mem := c.builder.CreateAlloca(elem.LLVMValue().Type(), "")
+		c.builder.CreateStore(b_, mem)
+		b = llvm.Undef(i8slice)
+		b = c.builder.CreateInsertValue(b, c.builder.CreateBitCast(mem, i8ptr, ""), 0, "")
+		b = c.builder.CreateInsertValue(b, one, 1, "")
+		b = c.builder.CreateInsertValue(b, one, 2, "")
+	}
 
 	// Call runtime function, then coerce the result.
 	runtimeTyp := c.types.ToRuntime(s.Type())
