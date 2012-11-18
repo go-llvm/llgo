@@ -225,15 +225,21 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			args = append(args, value.Convert(param_type).LLVMValue())
 		}
 		if fn_type.IsVariadic {
-			param_type := fn_type.Params[nparams].Type.(*types.Slice).Elt
-			varargs := make([]llvm.Value, 0)
-			for i := nparams; i < len(expr.Args); i++ {
-				value := c.VisitExpr(expr.Args[i])
-				value = value.Convert(param_type)
-				varargs = append(varargs, value.LLVMValue())
+			if expr.Ellipsis.IsValid() {
+				// Calling f(x...). Just pass the slice directly.
+				slice_value := c.VisitExpr(expr.Args[nparams]).LLVMValue()
+				args = append(args, slice_value)
+			} else {
+				param_type := fn_type.Params[nparams].Type.(*types.Slice).Elt
+				varargs := make([]llvm.Value, 0)
+				for i := nparams; i < len(expr.Args); i++ {
+					value := c.VisitExpr(expr.Args[i])
+					value = value.Convert(param_type)
+					varargs = append(varargs, value.LLVMValue())
+				}
+				slice_value := c.makeLiteralSlice(varargs, param_type)
+				args = append(args, slice_value)
 			}
-			slice_value := c.makeLiteralSlice(varargs, param_type)
-			args = append(args, slice_value)
 		}
 	}
 
