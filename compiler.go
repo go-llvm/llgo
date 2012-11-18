@@ -357,7 +357,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		elttypes := []llvm.Type{llvm.Int32Type(), llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
 		ctortype := llvm.StructType(elttypes, false)
 		var ctors []llvm.Value
-		var priority uint64
+		var priority uint64 = 1
 		for _, initfuncs := range initfuncs {
 			for _, fn := range initfuncs {
 				priorityval := llvm.ConstInt(llvm.Int32Type(), uint64(priority), false)
