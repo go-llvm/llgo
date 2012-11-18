@@ -71,6 +71,13 @@ type compiler struct {
 	filescope      *ast.Scope
 	scope          *ast.Scope
 	pkgmap         map[*ast.Object]string
+
+	// forlabel, if non-nil, is a LabeledStmt immediately
+	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
+	// Upon processing the statement, the label data will be updated,
+	// and forlabel set to nil.
+	lastlabel *ast.Ident
+
 	*FunctionCache
 	types  *TypeMap
 	logger *log.Logger

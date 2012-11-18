@@ -327,6 +327,13 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 		postBlock = llvm.InsertBasicBlock(doneBlock, "post")
 	}
 
+	if c.lastlabel != nil {
+		labelData := c.labelData(c.lastlabel)
+		labelData.Break = doneBlock
+		labelData.Continue = postBlock
+		c.lastlabel = nil
+	}
+
 	c.breakblocks = append(c.breakblocks, doneBlock)
 	c.continueblocks = append(c.continueblocks, postBlock)
 	defer func() {
@@ -478,6 +485,12 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	endBlock.MoveAfter(startBlock)
 	defer c.builder.SetInsertPointAtEnd(endBlock)
 
+	if c.lastlabel != nil {
+		labelData := c.labelData(c.lastlabel)
+		labelData.Break = endBlock
+		c.lastlabel = nil
+	}
+
 	// Add a "break" block to the stack.
 	c.breakblocks = append(c.breakblocks, endBlock)
 	defer func() { c.breakblocks = c.breakblocks[:len(c.breakblocks)-1] }()
@@ -572,6 +585,13 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 				value.Obj.Data = c.NewLLVMValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
 			}
 		}
+	}
+
+	if c.lastlabel != nil {
+		labelData := c.labelData(c.lastlabel)
+		labelData.Break = doneBlock
+		labelData.Continue = postBlock
+		c.lastlabel = nil
 	}
 
 	c.breakblocks = append(c.breakblocks, doneBlock)
@@ -704,19 +724,24 @@ func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
 	// TODO handle labeled continue, break.
 	switch stmt.Tok {
 	case token.BREAK:
-		block := c.breakblocks[len(c.breakblocks)-1]
-		c.builder.CreateBr(block)
-	case token.CONTINUE:
-		block := c.continueblocks[len(c.continueblocks)-1]
-		c.builder.CreateBr(block)
-	case token.GOTO:
-		block, _ := stmt.Label.Obj.Data.(llvm.BasicBlock)
-		if block.IsNil() {
-			f := c.builder.GetInsertBlock().Parent()
-			block = llvm.AddBasicBlock(f, stmt.Label.Name)
-			stmt.Label.Obj.Data = block
+		var block llvm.BasicBlock
+		if stmt.Label == nil {
+			block = c.breakblocks[len(c.breakblocks)-1]
+		} else {
+			block = c.labelData(stmt.Label).Break
 		}
 		c.builder.CreateBr(block)
+	case token.CONTINUE:
+		var block llvm.BasicBlock
+		if stmt.Label == nil {
+		block = c.continueblocks[len(c.continueblocks)-1]
+		} else {
+			block = c.labelData(stmt.Label).Continue
+		}
+		c.builder.CreateBr(block)
+	case token.GOTO:
+		labelData := c.labelData(stmt.Label)
+		c.builder.CreateBr(labelData.Goto)
 	default:
 		// TODO implement goto, fallthrough
 		panic("unimplemented: " + stmt.Tok.String())
@@ -838,27 +863,19 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 	}
 }
 
-func (c *compiler) VisitLabeledStmt(stmt *ast.LabeledStmt) {
-	currBlock := c.builder.GetInsertBlock()
-	labeledBlock, _ := stmt.Label.Obj.Data.(llvm.BasicBlock)
-	if labeledBlock.IsNil() {
-		labeledBlock = llvm.AddBasicBlock(currBlock.Parent(), stmt.Label.Name)
-		stmt.Label.Obj.Data = labeledBlock
-	}
-	labeledBlock.MoveAfter(currBlock)
-	if in := currBlock.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-		c.builder.CreateBr(labeledBlock)
-	}
-	c.builder.SetInsertPointAtEnd(labeledBlock)
-	c.VisitStmt(stmt.Stmt)
-}
-
 func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
 	// TODO
 }
 
 func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 	// TODO
+	/*
+		if c.lastlabel != nil {
+			labelData := c.labelData(c.lastlabel)
+			labelData.Break = doneBlock
+			c.lastlabel = nil
+		}
+	*/
 }
 
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
