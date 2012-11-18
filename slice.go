@@ -107,7 +107,9 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 
 	var b llvm.Value
 	if expr.Ellipsis.IsValid() {
-		// Pass the provided slice straight through.
+		// Pass the provided slice straight through. If it's a string,
+		// convert it to a []byte first.
+		elem = elem.Convert(s.Type())
 		b = c.coerceSlice(elem.LLVMValue(), i8slice)
 	} else {
 		// Construct a fresh []int8 for the temporary slice.
