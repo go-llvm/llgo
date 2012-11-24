@@ -28,12 +28,7 @@ import (
 )
 
 func (c *compiler) defineRuntimeIntrinsics() {
-	fn := c.module.NamedFunction("runtime.malloc")
-	if !fn.IsNil() {
-		c.defineMallocFunction(fn)
-	}
-
-	fn = c.module.NamedFunction("runtime.free")
+	fn := c.module.NamedFunction("runtime.free")
 	if !fn.IsNil() {
 		c.defineFreeFunction(fn)
 	}
@@ -59,17 +54,6 @@ func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
 	ptr = c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	fill := llvm.ConstNull(llvm.Int8Type())
 	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
-}
-
-func (c *compiler) defineMallocFunction(fn llvm.Value) {
-	entry := llvm.AddBasicBlock(fn, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
-	size := fn.FirstParam()
-	ptr := c.builder.CreateArrayMalloc(llvm.Int8Type(), size, "")
-	c.memsetZero(ptr, size)
-	fn_type := fn.Type().ElementType()
-	result := c.builder.CreatePtrToInt(ptr, fn_type.ReturnType(), "")
-	c.builder.CreateRet(result)
 }
 
 func (c *compiler) defineFreeFunction(fn llvm.Value) {

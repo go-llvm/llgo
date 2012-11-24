@@ -54,13 +54,29 @@ type Compiler interface {
 	GetTargetTriple() string
 }
 
+type FunctionStack []*LLVMValue
+
+func (s *FunctionStack) Push(v *LLVMValue) {
+	*s = append(*s, v)
+}
+
+func (s *FunctionStack) Pop() *LLVMValue {
+	f := (*s)[len(*s)-1]
+	*s = (*s)[:len(*s)-1]
+	return f
+}
+
+func (s *FunctionStack) Top() *LLVMValue {
+	return (*s)[len(*s)-1]
+}
+
 type compiler struct {
 	builder        llvm.Builder
 	module         *Module
 	targetArch     string
 	targetOs       string
 	target         llvm.TargetData
-	functions      []Value
+	functions      FunctionStack
 	breakblocks    []llvm.BasicBlock
 	continueblocks []llvm.BasicBlock
 	initfuncs      []Value
@@ -339,13 +355,12 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		compiler.exportBuiltinRuntimeTypes()
 	}
 
-	// Create global constructors.
+	// Create global constructors. The initfuncs/varinitfuncs
+	// slices are in the order of visitation, and that is how
+	// their priorities are assigned.
 	//
-	// XXX When imports are handled, we'll need to defer creating
-	//     llvm.global_ctors until we create an executable. This is
-	//     due to (a) imports having to be initialised before the
-	//     importer, and (b) LLVM having no specified order of
-	//     initialisation for ctors with the same priority.
+	// The llgo linker (llgo-link) is responsible for reordering
+	// global constructors according to package dependency order.
 	var initfuncs [][]Value
 	if compiler.varinitfuncs != nil {
 		initfuncs = append(initfuncs, compiler.varinitfuncs)

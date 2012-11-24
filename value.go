@@ -70,6 +70,7 @@ type LLVMValue struct {
 	typ      types.Type
 	pointer  *LLVMValue // Pointer value that dereferenced to this value.
 	receiver *LLVMValue // Transient; only guaranteed to exist at call point.
+	stack    *LLVMValue // If a stack value, the Value for the containing function.
 }
 
 // ConstValue represents a constant value produced as the result of an
@@ -94,7 +95,7 @@ type NilValue struct {
 
 // Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
 func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, v, t, nil, nil}
+	return &LLVMValue{c, v, t, nil, nil, nil}
 }
 
 // Create a new constant value from a literal with accompanying type, as

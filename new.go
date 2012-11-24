@@ -35,7 +35,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 	ptrtyp := c.types.expr[expr].(*types.Pointer)
 	typ := ptrtyp.Base
 	llvmtyp := c.types.ToLLVM(typ)
-	mem := c.builder.CreateMalloc(llvmtyp, "")
+	mem := c.createTypeMalloc(llvmtyp)
 	c.builder.CreateStore(llvm.ConstNull(llvmtyp), mem)
 	return c.NewLLVMValue(mem, ptrtyp)
 }

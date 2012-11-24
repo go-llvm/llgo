@@ -38,13 +38,142 @@ func (c *compiler) VisitBasicLit(lit *ast.BasicLit) Value {
 	return v
 }
 
+type identVisitor struct {
+	*compiler
+	objects types.ObjList
+}
+
+func (i *identVisitor) Visit(node ast.Node) ast.Visitor {
+	switch node := node.(type) {
+	case *ast.Ident:
+		if value, ok := node.Obj.Data.(*LLVMValue); ok {
+			curfunc := i.functions.Top()
+			// FIXME this needs review; this will currently
+			// pick up globals.
+			if value.stack != curfunc && value.pointer != nil {
+				if value.stack != nil {
+					value.promoteStackVar()
+				}
+				// We're referring to a variable that was
+				// not declared on the current function's
+				// stack.
+				i.objects = append(i.objects, node.Obj)
+			}
+		}
+	case *ast.FuncLit:
+		// Don't recurse through multiple function literals.
+		return nil
+	}
+	return i
+}
+
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	ftyp := c.types.expr[lit].(*types.Func)
+
+	// Walk the function literal, promoting stack vars not defined
+	// in the function literal, and storing the ident's for non-const
+	// values not declared in the function literal.
+	//
+	// (First, set a dummy "stack" value for the params and results.)
+	var dummyfunc LLVMValue
+	dummyfunc.stack = &dummyfunc
+	for _, obj := range ftyp.Params {
+		obj.Data = dummyfunc
+	}
+	for _, obj := range ftyp.Results {
+		obj.Data = dummyfunc
+	}
+	c.functions.Push(&dummyfunc)
+	v := &identVisitor{compiler: c}
+	ast.Walk(v, lit.Body)
+	c.functions.Pop()
+
+	// Create closure by adding a "next" parameter to the function,
+	// and bind it with the values of the stack vars found in the
+	// step above.
+	//
+	// First, we store the existing values, and replace them with
+	// temporary values. Once we've created the function, we'll
+	// replace the temporary values with pointers from the nest
+	// parameter.
+	var origValues []*LLVMValue
+	if v.objects != nil {
+		origValues = make([]*LLVMValue, len(v.objects))
+		ptrObjects := make(types.ObjList, len(v.objects))
+		for i, obj := range v.objects {
+			origValues[i] = obj.Data.(*LLVMValue)
+			ptrObjects[i] = ast.NewObj(ast.Var, "")
+			ptrObjects[i].Type = &types.Pointer{Base: obj.Type.(types.Type)}
+		}
+		defer func() {
+			for i, obj := range v.objects {
+				obj.Data = origValues[i]
+			}
+		}()
+
+		// Add the nest param.
+		nestType := &types.Pointer{Base: &types.Struct{Fields: ptrObjects}}
+		nestParamObj := ast.NewObj(ast.Var, "")
+		nestParamObj.Type = nestType
+		ftyp.Params = append(types.ObjList{nestParamObj}, ftyp.Params...)
+		for _, obj := range v.objects {
+			ptrType := &types.Pointer{Base: obj.Type.(types.Type)}
+			ptrVal := c.builder.CreateAlloca(c.types.ToLLVM(ptrType.Base), "")
+			obj.Data = c.NewLLVMValue(ptrVal, ptrType).makePointee()
+		}
+	}
+
 	fn_value := llvm.AddFunction(c.module.Module, "", c.types.ToLLVM(ftyp).ElementType())
 	fn_value.SetFunctionCallConv(llvm.FastCallConv)
-	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	currBlock := c.builder.GetInsertBlock()
 	f := c.NewLLVMValue(fn_value, ftyp)
 	c.buildFunction(f, ftyp.Params, lit.Body)
+
+	// Closure? Erect a trampoline.
+	if v.objects != nil {
+		blockPtr := fn_value.FirstParam()
+		blockPtr.AddAttribute(llvm.NestAttribute)
+		ftyp.Params = ftyp.Params[1:]
+		paramTypes := fn_value.Type().ElementType().ParamTypes()
+		c.builder.SetInsertPointBefore(fn_value.EntryBasicBlock().FirstInstruction())
+		for i, obj := range v.objects {
+			tempPtrVal := obj.Data.(*LLVMValue).pointer.value
+			argPtrVal := c.builder.CreateStructGEP(blockPtr, i, "")
+			tempPtrVal.ReplaceAllUsesWith(c.builder.CreateLoad(argPtrVal, ""))
+		}
+		c.builder.SetInsertPointAtEnd(currBlock)
+
+		// FIXME This is only correct for x86. Not sure what the best
+		// thing to do is here; should we even create trampolines?
+		// Or is it better to pass a (block, funcptr) pair around?
+		memalign := c.NamedFunction("runtime.memalign", "func f(align, size uintptr) *int8")
+		align := uint64(c.target.PointerSize())
+		args := []llvm.Value{
+			llvm.ConstInt(c.target.IntPtrType(), align, false), // alignment
+			llvm.ConstInt(c.target.IntPtrType(), 100, false),   // size of trampoline
+		}
+		tramp := c.builder.CreateCall(memalign, args, "tramp")
+
+		// Store the free variables in the heap allocated block.
+		block := c.createTypeMalloc(paramTypes[0].ElementType())
+		for i, _ := range v.objects {
+			ptrVal := origValues[i].pointer.LLVMValue()
+			blockPtr := c.builder.CreateStructGEP(block, i, "")
+			c.builder.CreateStore(ptrVal, blockPtr)
+		}
+
+		initTrampFunc := c.NamedFunction("llvm.init.trampoline", "func f(tramp, fun, nval *int8)")
+		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+		funcptr := c.builder.CreateBitCast(fn_value, i8ptr, "")
+		block = c.builder.CreateBitCast(block, i8ptr, "")
+		c.builder.CreateCall(initTrampFunc, []llvm.Value{tramp, funcptr, block}, "")
+		adjustTrampFunc := c.NamedFunction("llvm.adjust.trampoline", "func f(tramp *int8) *int8")
+		funcptr = c.builder.CreateCall(adjustTrampFunc, []llvm.Value{tramp}, "")
+		f.value = c.builder.CreateBitCast(funcptr, c.types.ToLLVM(ftyp), "")
+	} else {
+		c.builder.SetInsertPointAtEnd(currBlock)
+	}
+
 	return f
 }
 
@@ -126,11 +255,16 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		return c.NewLLVMValue(array, origtyp)
 
 	case *types.Slice:
-		ptr := c.builder.CreateMalloc(c.types.ToLLVM(typ), "")
-		length := llvm.ConstInt(llvm.Int32Type(), uint64(len(valuelist)), false)
-		valuesPtr := c.builder.CreateArrayMalloc(c.types.ToLLVM(typ.Elt), length, "")
+		ptr := c.createTypeMalloc(c.types.ToLLVM(typ))
+
+		eltType := c.types.ToLLVM(typ.Elt)
+		arrayType := llvm.ArrayType(eltType, len(valuelist))
+		valuesPtr := c.createMalloc(llvm.SizeOf(arrayType))
+		valuesPtr = c.builder.CreateIntToPtr(valuesPtr, llvm.PointerType(eltType, 0), "")
+
 		//valuesPtr = c.builder.CreateBitCast(valuesPtr, llvm.PointerType(valuesPtr.Type(), 0), "")
 		// TODO check result of mallocs
+		length := llvm.ConstInt(llvm.Int32Type(), uint64(len(valuelist)), false)
 		c.builder.CreateStore(valuesPtr, c.builder.CreateStructGEP(ptr, 0, "")) // data
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 1, ""))    // len
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 2, ""))    // cap
@@ -149,7 +283,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 
 	case *types.Struct:
 		values := valuelist
-		struct_value := c.builder.CreateMalloc(c.types.ToLLVM(typ), "")
+		struct_value := c.createTypeMalloc(c.types.ToLLVM(typ))
 		if valuemap != nil {
 			for key, value := range valuemap {
 				fieldName := key.(string)
@@ -181,5 +315,3 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 	}
 	panic(fmt.Sprint("Unhandled type kind: ", typ))
 }
-
-// vim: set ft=go :

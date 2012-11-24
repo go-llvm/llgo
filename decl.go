@@ -76,6 +76,24 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	return result
 }
 
+// promoteStackVar takes a stack variable Value, and promotes it to the heap,
+// replacing all uses of the stack-allocated value in the process.
+func (stackvar *LLVMValue) promoteStackVar() {
+	c := stackvar.compiler
+	stackptrval := stackvar.pointer.value
+
+	currblock := c.builder.GetInsertBlock()
+	defer c.builder.SetInsertPointAtEnd(currblock)
+	c.builder.SetInsertPointBefore(stackptrval)
+
+	typ := stackptrval.Type().ElementType()
+	heapptrval := c.createTypeMalloc(typ)
+	heapptrval.SetName(stackptrval.Name())
+	stackptrval.ReplaceAllUsesWith(heapptrval)
+	stackvar.pointer.value = heapptrval
+	stackvar.stack = nil
+}
+
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
 func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.BlockStmt) {
@@ -93,7 +111,9 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), obj.Name)
 			c.builder.CreateStore(value, stackvalue)
 			ptrvalue := c.NewLLVMValue(stackvalue, &types.Pointer{Base: typ})
-			obj.Data = ptrvalue.makePointee()
+			stackvar := ptrvalue.makePointee()
+			stackvar.stack = f
+			obj.Data = stackvar
 		}
 	}
 
@@ -105,7 +125,9 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 			stackptr := c.builder.CreateAlloca(llvmtyp, obj.Name)
 			c.builder.CreateStore(llvm.ConstNull(llvmtyp), stackptr)
 			ptrvalue := c.NewLLVMValue(stackptr, &types.Pointer{Base: typ})
-			obj.Data = ptrvalue.makePointee()
+			stackvar := ptrvalue.makePointee()
+			stackvar.stack = f
+			obj.Data = stackvar
 		}
 	}
 
@@ -289,7 +311,9 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 				llvmInit = values[i].Convert(typ).LLVMValue()
 			}
 			c.builder.CreateStore(llvmInit, ptr)
-			value = c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
+			stackvar := c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
+			stackvar.stack = c.functions[len(c.functions)-1]
+			value = stackvar
 		}
 		name.Obj.Data = value
 	}

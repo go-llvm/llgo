@@ -243,7 +243,9 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				ptr := c.builder.CreateAlloca(value_type, x.Name)
 				c.builder.CreateStore(value.LLVMValue(), ptr)
 				llvm_value := c.NewLLVMValue(ptr, &types.Pointer{Base: value.Type()})
-				obj.Data = llvm_value.makePointee()
+				stackvar := llvm_value.makePointee()
+				stackvar.stack = c.functions[len(c.functions)-1]
+				obj.Data = stackvar
 				continue
 			}
 			if obj.Data == nil {
@@ -576,13 +578,17 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
 			keyType = key.Obj.Type.(types.Type)
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
-			key.Obj.Data = c.NewLLVMValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
+			stackvar := c.NewLLVMValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
+			stackvar.stack = c.functions[len(c.functions)-1]
+			key.Obj.Data = stackvar
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
 				valueType = value.Obj.Type.(types.Type)
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
-				value.Obj.Data = c.NewLLVMValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
+				stackvar := c.NewLLVMValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
+				stackvar.stack = c.functions[len(c.functions)-1]
+				value.Obj.Data = stackvar
 			}
 		}
 	}
@@ -734,7 +740,7 @@ func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
 	case token.CONTINUE:
 		var block llvm.BasicBlock
 		if stmt.Label == nil {
-		block = c.continueblocks[len(c.continueblocks)-1]
+			block = c.continueblocks[len(c.continueblocks)-1]
 		} else {
 			block = c.labelData(stmt.Label).Continue
 		}

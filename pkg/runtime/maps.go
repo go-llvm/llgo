@@ -40,7 +40,7 @@ func reflect_makemap(t *map_) unsafe.Pointer {
 }
 
 func makemap(t unsafe.Pointer) unsafe.Pointer {
-	m := (*map_)(malloc(unsafe.Sizeof(map_{})))
+	m := (*map_)(malloc(uintptr(unsafe.Sizeof(map_{}))))
 	if m != nil {
 		m.length = 0
 		m.head = nil
@@ -88,9 +88,9 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
-	keyoffset := align(ptrsize, maptyp.key.align)
+	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 	elemsize := uintptr(maptyp.elem.size)
-	elemoffset := align(keyoffset+keysize, maptyp.elem.align)
+	elemoffset := align(keyoffset+keysize, uintptr(maptyp.elem.align))
 	entrysize := elemoffset + elemsize
 
 	// Search for the entry with the specified key.
@@ -135,7 +135,7 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
-	keyoffset := align(ptrsize, maptyp.key.align)
+	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 
 	// Search for the entry with the specified key.
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
@@ -190,9 +190,9 @@ func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv 
 		maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
 		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 		keysize := uintptr(maptyp.key.size)
-		keyoffset := align(ptrsize, maptyp.key.align)
+		keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 		elemsize := uintptr(maptyp.elem.size)
-		elemoffset := align(keyoffset+keysize, maptyp.elem.align)
+		elemoffset := align(keyoffset+keysize, uintptr(maptyp.elem.align))
 		nextout = unsafe.Pointer(ptr)
 		pk = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		pv = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)

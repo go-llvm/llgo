@@ -18,7 +18,7 @@ func strcat(a, b _string) _string {
 		return a
 	}
 
-	mem := malloc(a.len + b.len)
+	mem := malloc(uintptr(a.len + b.len))
 	if mem == unsafe.Pointer(uintptr(0)) {
 		// TODO panic? abort?
 	}

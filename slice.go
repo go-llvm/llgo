@@ -31,8 +31,10 @@ import (
 // makeLiteralSlice allocates a new slice, storing in it the provided elements.
 func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
 	n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
-	llvmelttyp := c.types.ToLLVM(elttyp)
-	mem := c.builder.CreateArrayMalloc(llvmelttyp, n, "")
+	eltType := c.types.ToLLVM(elttyp)
+	arrayType := llvm.ArrayType(eltType, len(v))
+	mem := c.createMalloc(llvm.SizeOf(arrayType))
+	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
 	for i, value := range v {
 		indices := []llvm.Value{llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
 		ep := c.builder.CreateGEP(mem, indices, "")
@@ -62,10 +64,11 @@ func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Val
 		capacityValue = capacity.Convert(types.Int32).LLVMValue()
 	}
 
-	llvmelttyp := c.types.ToLLVM(elttyp)
-	mem := c.builder.CreateArrayMalloc(llvmelttyp, capacityValue, "")
-	sizeof := llvm.ConstTrunc(llvm.SizeOf(llvmelttyp), llvm.Int32Type())
+	eltType := c.types.ToLLVM(elttyp)
+	sizeof := llvm.ConstTrunc(llvm.SizeOf(eltType), llvm.Int32Type())
 	size := c.builder.CreateMul(capacityValue, sizeof, "")
+	mem := c.createMalloc(c.NewLLVMValue(size, types.Int32).Convert(types.Uintptr).LLVMValue())
+	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
 	c.memsetZero(mem, size)
 
 	slicetyp := types.Slice{Elt: elttyp}

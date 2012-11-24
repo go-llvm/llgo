@@ -75,7 +75,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				ptr = llvm.ConstNull(element_types[1])
 			}
 		} else {
-			ptr = builder.CreateMalloc(v.compiler.types.ToLLVM(srctyp), "")
+			ptr = c.createTypeMalloc(v.compiler.types.ToLLVM(srctyp))
 			builder.CreateStore(lv, ptr)
 			ptr = builder.CreateBitCast(ptr, element_types[1], "")
 			// TODO signal that shim functions are required. Probably later

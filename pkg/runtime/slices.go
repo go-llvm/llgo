@@ -48,7 +48,7 @@ func sliceappend(t unsafe.Pointer, a, b slice) slice {
 }
 
 func slicegrow(t *sliceType, a slice, newcap uint) slice {
-	mem := malloc(int(t.elem.size * uintptr(newcap)))
+	mem := malloc(uintptr(t.elem.size * uintptr(newcap)))
 	if a.len > 0 {
 		size := uintptr(a.len) * t.elem.size
 		memcpy(mem, unsafe.Pointer(a.array), int(size))

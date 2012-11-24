@@ -76,3 +76,14 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 	c.functions[name+":"+signature] = f
 	return f
 }
+
+func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
+	malloc := c.NamedFunction("runtime.malloc", "func f(uintptr) unsafe.Pointer")
+	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")
+}
+
+func (c *compiler) createTypeMalloc(t llvm.Type) llvm.Value {
+	ptr := c.createMalloc(llvm.SizeOf(t))
+	return c.builder.CreateIntToPtr(ptr, llvm.PointerType(t, 0), "")
+}
+

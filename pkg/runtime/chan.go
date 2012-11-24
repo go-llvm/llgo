@@ -63,7 +63,7 @@ func reflect_chansend(t *type_, c unsafe.Pointer, val unsafe.Pointer, nb bool) b
 func chansend(c_, ptr unsafe.Pointer) {
 	c := (*_chan)(c_)
 	elemsize := c.typ.elem.size
-	m := malloc(unsafe.Sizeof(_chanItem{}) + elemsize - 1)
+	m := malloc(uintptr(unsafe.Sizeof(_chanItem{}) + elemsize - 1))
 	item := (*_chanItem)(m)
 	if c.tail != nil {
 		c.tail.next = item
