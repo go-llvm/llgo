@@ -96,7 +96,13 @@ func buildRuntime() error {
 	triple := strings.TrimSpace(string(output))
 
 	// Create the package directory.
-	outdir := path.Join(runtime.GOROOT(), "pkg", "llgo", triple)
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		gopath = runtime.GOROOT()
+	} else {
+		gopath = filepath.SplitList(gopath)[0]
+	}
+	outdir := path.Join(gopath, "pkg", "llgo", triple)
 	err = os.MkdirAll(outdir, os.FileMode(0755))
 	if err != nil {
 		return err
