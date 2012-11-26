@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
+	"./types"
 	"go/ast"
 	"strings"
 )

@@ -24,7 +24,7 @@ package llgo
 
 import (
 	"fmt"
-	"github.com/axw/llgo/types"
+	"./types"
 )
 
 func (c *compiler) alignofType(t types.Type) int {

@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"github.com/axw/llgo/types"
+	"./types"
 	"go/ast"
 )
 

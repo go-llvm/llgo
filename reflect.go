@@ -24,7 +24,7 @@ package llgo
 
 import (
 	"fmt"
-	"github.com/axw/llgo/types"
+	"./types"
 	"go/ast"
 	"go/build"
 	"go/parser"
