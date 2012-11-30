@@ -173,13 +173,13 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			switch x.Sel.Name {
 			case "Alignof":
 				argtype := c.types.expr[expr.Args[0]]
-				value = c.alignofType(argtype)
+				value = c.Alignof(argtype)
 				value := c.NewConstValue(token.INT, strconv.Itoa(value))
 				value.typ = types.Uintptr
 				return value
 			case "Sizeof":
 				argtype := c.types.expr[expr.Args[0]]
-				value = c.sizeofType(argtype)
+				value = c.Sizeof(argtype)
 				value := c.NewConstValue(token.INT, strconv.Itoa(value))
 				value.typ = types.Uintptr
 				return value

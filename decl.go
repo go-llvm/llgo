@@ -30,7 +30,6 @@ import (
 	"go/scanner"
 	"go/token"
 	"reflect"
-	"strconv"
 )
 
 func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
@@ -260,13 +259,21 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		}
 	}
 
-	var iotaObj *ast.Object = types.Universe.Lookup("iota")
-	defer func(data interface{}) {
-		iotaObj.Data = data
-	}(iotaObj.Data)
+	// Constants are evaluated during typechecking. We can just pull
+	// out the value from the name's object data.
+	if isconst {
+		for _, name := range valspec.Names {
+			if name.Name != "_" && name.Obj != nil {
+				value := name.Obj.Data.(types.Const)
+				typ := name.Obj.Type.(types.Type)
+				name.Obj.Data = ConstValue{value, c, typ}
+			}
+		}
+		return
+	}
 
 	pkgname, ispackagelevel := c.pkgmap[valspec.Names[0].Obj]
-	if ispackagelevel && !isconst {
+	if ispackagelevel {
 		c.createGlobals(valspec.Names, valspec.Values, pkgname)
 		return
 	}
@@ -276,13 +283,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		values = c.destructureExpr(valspec.Values[0])
 	} else if len(valspec.Values) > 0 {
 		values = make([]Value, len(valspec.Names))
-		for i, name_ := range valspec.Names {
-			if isconst {
-				if iota_, isint := (name_.Obj.Data).(int); isint {
-					iotaValue := c.NewConstValue(token.INT, strconv.Itoa(iota_))
-					iotaObj.Data = iotaValue
-				}
-			}
+		for i := range valspec.Names {
 			values[i] = c.VisitExpr(valspec.Values[i])
 		}
 	}
@@ -292,30 +293,22 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 			continue
 		}
 
-		// For constants, we just pass the ConstValue around. Otherwise, we
-		// will convert it to an LLVMValue.
-		var value Value
-		if isconst {
-			value = values[i].Convert(name.Obj.Type.(types.Type))
+		// The variable should be allocated on the stack if it's
+		// declared inside a function.
+		var llvmInit llvm.Value
+		typ := name.Obj.Type.(types.Type)
+		ptr := c.builder.CreateAlloca(c.types.ToLLVM(typ), name.Name)
+		if values == nil || values[i] == nil {
+			// If no initialiser was specified, set it to the
+			// zero value.
+			llvmInit = llvm.ConstNull(c.types.ToLLVM(typ))
 		} else {
-			// The variable should be allocated on the stack if it's
-			// declared inside a function.
-			var llvmInit llvm.Value
-			typ := name.Obj.Type.(types.Type)
-			ptr := c.builder.CreateAlloca(c.types.ToLLVM(typ), name.Name)
-			if values == nil || values[i] == nil {
-				// If no initialiser was specified, set it to the
-				// zero value.
-				llvmInit = llvm.ConstNull(c.types.ToLLVM(typ))
-			} else {
-				llvmInit = values[i].Convert(typ).LLVMValue()
-			}
-			c.builder.CreateStore(llvmInit, ptr)
-			stackvar := c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
-			stackvar.stack = c.functions[len(c.functions)-1]
-			value = stackvar
+			llvmInit = values[i].Convert(typ).LLVMValue()
 		}
-		name.Obj.Data = value
+		c.builder.CreateStore(llvmInit, ptr)
+		stackvar := c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
+		stackvar.stack = c.functions[len(c.functions)-1]
+		name.Obj.Data = stackvar
 	}
 }
 
@@ -354,8 +347,8 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
 	// This is temporary. We'll return errors later, rather than panicking.
-	if c.logger != nil {
-		c.logger.Println("Compile declaration:", c.fileset.Position(decl.Pos()))
+	if c.Logger != nil {
+		c.Logger.Println("Compile declaration:", c.fileset.Position(decl.Pos()))
 	}
 	defer func() {
 		if e := recover(); e != nil {

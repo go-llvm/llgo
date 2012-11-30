@@ -63,7 +63,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 			panic(err)
 		}
 
-		_, err = types.Check("", fset, pkg)
+		_, err = types.Check("", c.compiler, fset, pkg)
 		if err != nil {
 			panic(err)
 		}

@@ -38,6 +38,7 @@ import (
 	"go/parser"
 	"go/scanner"
 	"go/token"
+	"log"
 	"os"
 	"runtime"
 	"sort"
@@ -71,7 +72,6 @@ var compileOnly = flag.Bool("c", false, "Compile only, don't link")
 var outputFile = flag.String("o", "-", "Output filename")
 
 var exitCode = 0
-var compiler = llgo.NewCompiler()
 
 func report(err error) {
 	scanner.PrintError(os.Stderr, err)
@@ -115,7 +115,7 @@ func isGoFilename(filename string) bool {
 		strings.HasSuffix(filename, ".go")
 }
 
-func compileFiles(filenames []string, importpath string) (*llgo.Module, error) {
+func compileFiles(compiler llgo.Compiler, filenames []string, importpath string) (*llgo.Module, error) {
 	i := 0
 	for _, filename := range filenames {
 		switch _, err := os.Stat(filename); {
@@ -130,10 +130,10 @@ func compileFiles(filenames []string, importpath string) (*llgo.Module, error) {
 		return nil, errors.New("No Go source files were specified")
 	}
 	fset := token.NewFileSet()
-	return compilePackage(fset, parseFiles(fset, filenames[0:i]), importpath)
+	return compilePackage(compiler, fset, parseFiles(fset, filenames[0:i]), importpath)
 }
 
-func compilePackage(fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
+func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
 	// make a package (resolve all identifiers)
 	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
 	if err != nil {
@@ -141,7 +141,7 @@ func compilePackage(fset *token.FileSet, files map[string]*ast.File, importpath 
 		return nil, err
 	}
 
-	exprTypes, err := types.Check(importpath, fset, pkg)
+	exprTypes, err := types.Check(importpath, compiler, fset, pkg)
 	if err != nil {
 		report(err)
 		return nil, err
@@ -201,9 +201,59 @@ func displayVersion() {
 	os.Exit(0)
 }
 
-func displayTriple() {
-	fmt.Println(compiler.GetTargetTriple())
-	os.Exit(0)
+// Convert the architecture name to the string used in LLVM triples.
+// See: llvm::Triple::getArchTypeName.
+//
+// TODO move this into the LLVM C API.
+func getTripleArchName(llvmArch string) string {
+	switch llvmArch {
+	case "x86":
+		return "i386"
+	case "x86-64":
+		return "x86_64"
+	case "ppc32":
+		return "powerpc"
+	case "ppc64":
+		return "powerpc64"
+	}
+	return llvmArch
+}
+
+func computeTriple() string {
+	// -arch is either an architecture name recognised by
+	// the gc compiler, or an LLVM architecture name.
+	targetArch := *arch
+	if targetArch == "" {
+		targetArch = runtime.GOARCH
+	}
+	switch targetArch {
+	case "386":
+		targetArch = "x86"
+	case "amd64", "x86_64":
+		targetArch = "x86-64"
+	}
+
+	// -os is either an OS name recognised by the gc
+	// compiler, or an LLVM OS name.
+	targetOS := *os_
+	if targetOS == "" {
+		targetOS = runtime.GOOS
+	}
+	switch targetOS {
+	case "windows":
+		targetOS = "win32"
+	}
+
+	tripleArch := getTripleArchName(targetArch)
+	return fmt.Sprintf("%s-unknown-%s", tripleArch, targetOS)
+}
+
+func initCompiler() (llgo.Compiler, error) {
+	opts := llgo.CompilerOptions{TargetTriple: computeTriple()}
+	if *trace {
+		opts.Logger = log.New(os.Stderr, "", 0)
+	}
+	return llgo.NewCompiler(opts)
 }
 
 func main() {
@@ -211,18 +261,30 @@ func main() {
 	llvm.InitializeAllTargetMCs()
 	llvm.InitializeAllTargetInfos()
 	flag.Parse()
+
 	if *version {
 		displayVersion()
 	}
 
-	compiler.SetTraceEnabled(*trace)
-	compiler.SetTargetArch(*arch)
-	compiler.SetTargetOs(*os_)
 	if *printTriple {
-		displayTriple()
+		fmt.Println(computeTriple())
+		os.Exit(0)
 	}
 
-	module, err := compileFiles(flag.Args(), *importpath)
+	opts := llgo.CompilerOptions{}
+	opts.TargetTriple = computeTriple()
+	if *trace {
+		opts.Logger = log.New(os.Stderr, "", 0)
+	}
+
+	compiler, err := initCompiler()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "initCompiler failed: %s\n", err)
+		os.Exit(1)
+	}
+	defer compiler.Dispose()
+
+	module, err := compileFiles(compiler, flag.Args(), *importpath)
 	if err == nil {
 		defer module.Dispose()
 		if exitCode == 0 {
@@ -236,7 +298,6 @@ func main() {
 			}
 		}
 	} else {
-		//fmt.Printf("llg.Compile(%v) failed: %v", file.Name, err)
 		report(err)
 	}
 	os.Exit(exitCode)

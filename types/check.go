@@ -18,12 +18,18 @@ import (
 
 const debug = false
 
+type TypeInfoConfig interface {
+	Alignof(t Type) int
+	Sizeof(t Type) int
+}
+
 type checker struct {
 	pkgid   string
 	fset    *token.FileSet
 	errors  scanner.ErrorList
 	types   map[ast.Expr]Type
 	methods map[*ast.Object]ObjList
+	config  TypeInfoConfig
 
 	// function is the type of the function currently being checked
 	function *Func
@@ -281,7 +287,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 				c.checkExpr(kv.Key, nil)
 				c.checkExpr(kv.Value, nil)
 				if ellipsisArray != nil {
-					constval := evalConst(kv.Key)
+					constval := c.evalConst(kv.Key)
 					index := uint64(constval.Val.(*big.Int).Int64())
 					if index > maxindex {
 						maxindex = index
@@ -765,7 +771,7 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 	panic(fmt.Sprintf("unreachable (%T)", x))
 }
 
-func evalConst(x ast.Expr) Const {
+func (c *checker) evalConst(x ast.Expr) Const {
 	switch x := x.(type) {
 	case *ast.BasicLit:
 		return MakeConst(x.Kind, x.Value)
@@ -781,7 +787,7 @@ func evalConst(x ast.Expr) Const {
 			spec := x.Obj.Decl.(*ast.ValueSpec)
 			for i, ident := range spec.Names {
 				if ident.Obj == x.Obj {
-					return evalConst(spec.Values[i])
+					return c.evalConst(spec.Values[i])
 				}
 			}
 		case Const:
@@ -795,15 +801,37 @@ func evalConst(x ast.Expr) Const {
 		obj := pkgscope.Lookup(x.Sel.Name)
 		return obj.Data.(Const)
 	case *ast.BinaryExpr:
-		return evalConst(x.X).BinaryOp(x.Op, evalConst(x.Y))
+		lhs, rhs := c.evalConst(x.X).Match(c.evalConst(x.Y))
+		return lhs.BinaryOp(x.Op, rhs)
+	case *ast.UnaryExpr:
+		return c.evalConst(x.X).UnaryOp(x.Op)
+	case *ast.ParenExpr:
+		return c.evalConst(x.X)
 	case *ast.CallExpr:
 		switch fun := x.Fun.(type) {
 		case *ast.Ident:
-			assert(fun.Name == "len") // TODO unsafe.*
-			// TODO support arrays.
-			value := evalConst(x.Args[0])
-			s := value.Val.(string)
-			return Const{big.NewInt(int64(len(s)))}
+			if fun.Obj.Kind == ast.Typ {
+				return c.evalConst(x.Args[0])
+			}
+			if fun.Obj == BuiltinLen {
+				// TODO support arrays.
+				value := c.evalConst(x.Args[0])
+				s := value.Val.(string)
+				return Const{big.NewInt(int64(len(s)))}
+			}
+		case *ast.SelectorExpr:
+			c.checkExpr(fun, nil)
+			switch fun.Sel.Obj {
+			case UnsafeSizeof:
+				typ := c.checkExpr(x.Args[0], nil)
+				size := c.config.Sizeof(typ)
+				return Const{big.NewInt(int64(size))}
+			case UnsafeAlignof:
+				typ := c.checkExpr(x.Args[0], nil)
+				size := c.config.Alignof(typ)
+				return Const{big.NewInt(int64(size))}
+				//case UnsafeOffsetof:
+			}
 		}
 	}
 	panic(fmt.Sprintf("unhandled (%T)", x))
@@ -875,7 +903,7 @@ func (c *checker) makeType(x ast.Expr, cycleOk bool) (typ Type) {
 			if _, ok := t.Len.(*ast.Ellipsis); ok {
 				len_ = 0
 			} else {
-				constval := evalConst(t.Len)
+				constval := c.evalConst(t.Len)
 				len_ = uint64(constval.Val.(*big.Int).Int64())
 			}
 			return &Array{Elt: c.makeType(t.Elt, cycleOk), Len: len_}
@@ -1231,12 +1259,21 @@ func (c *checker) checkObj(obj *ast.Object, ref bool) {
 			}
 		}
 		if valspec.Values != nil {
+			oldData := Iota.Data
 			for i, name := range valspec.Names {
 				if name.Obj != nil {
 					c.checkExpr(valspec.Values[i], []*ast.Ident{name})
+					iotaValue := name.Obj.Data.(int)
+					Iota.Data = Const{big.NewInt(int64(iotaValue))}
+					constValue := c.evalConst(valspec.Values[i])
+					typ := name.Obj.Type.(Type)
+					name.Obj.Data = constValue.Convert(&typ)
 				} else {
 					c.checkExpr(valspec.Values[i], nil)
 				}
+			}
+			if oldData != nil {
+				Iota.Data = oldData
 			}
 		}
 
@@ -1359,12 +1396,13 @@ func (c *checker) checkFunc(body *ast.BlockStmt, ftyp *Func) {
 // of types for all expression nodes in statements, and a scanner.ErrorList if
 // there are errors.
 //
-func Check(pkgid string, fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err error) {
+func Check(pkgid string, t TypeInfoConfig, fset *token.FileSet, pkg *ast.Package) (types map[ast.Expr]Type, err error) {
 	var c checker
 	c.pkgid = pkgid
 	c.fset = fset
 	c.types = make(map[ast.Expr]Type)
 	c.methods = make(map[*ast.Object]ObjList)
+	c.config = t
 
 	// Compute sorted list of file names so that
 	// package file iterations are reproducible (needed for testing).

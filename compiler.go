@@ -29,8 +29,7 @@ import (
 	"go/ast"
 	"go/token"
 	"log"
-	"os"
-	"runtime"
+	"strings"
 )
 
 type Module struct {
@@ -46,12 +45,11 @@ func (m Module) Dispose() {
 	}
 }
 
+// TODO get rid of this, change compiler to Compiler.
 type Compiler interface {
+	types.TypeInfoConfig
 	Compile(fset *token.FileSet, pkg *ast.Package, importpath string, exprtypes map[ast.Expr]types.Type) (*Module, error)
-	SetTraceEnabled(bool)
-	SetTargetArch(string)
-	SetTargetOs(string)
-	GetTargetTriple() string
+	Dispose()
 }
 
 type FunctionStack []*LLVMValue
@@ -71,10 +69,11 @@ func (s *FunctionStack) Top() *LLVMValue {
 }
 
 type compiler struct {
+	CompilerOptions
+
 	builder        llvm.Builder
 	module         *Module
-	targetArch     string
-	targetOs       string
+	machine        llvm.TargetMachine
 	target         llvm.TargetData
 	functions      FunctionStack
 	breakblocks    []llvm.BasicBlock
@@ -96,12 +95,9 @@ type compiler struct {
 
 	*FunctionCache
 	types  *TypeMap
-	logger *log.Logger
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
-	// TODO check for qualified identifiers (x.y), and short-circuit the
-	// lookup.
 	for scope := c.scope; scope != nil; scope = scope.Outer {
 		obj := scope.Lookup(name)
 		if obj != nil {
@@ -211,67 +207,48 @@ func createPackageMap(pkg *ast.Package, pkgid string) map[*ast.Object]string {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func NewCompiler() Compiler {
-	compiler := new(compiler)
-	compiler.SetTargetArch(runtime.GOARCH)
-	compiler.SetTargetOs(runtime.GOOS)
-	return compiler
+type CompilerOptions struct {
+	// TargetTriple is the LLVM triple for the target.
+	TargetTriple string
+
+	// Logger is a logger used for tracing compilation.
+	Logger *log.Logger
 }
 
-func (c *compiler) SetTraceEnabled(enabled bool) {
-	if enabled {
-		c.logger = log.New(os.Stderr, "", 0)
-	} else {
-		c.logger = nil
+func NewCompiler(opts CompilerOptions) (Compiler, error) {
+	compiler := &compiler{CompilerOptions: opts}
+
+	// Triples are several fields separated by '-' characters.
+	// The first field is the architecture. The architecture's
+	// canonical form may include a '-' character, which would
+	// have been translated to '_' for inclusion in a triple.
+	triple := compiler.TargetTriple
+	arch := triple[:strings.IndexRune(triple, '-')]
+	arch = strings.Replace(arch, "_", "-", -1)
+	var machine llvm.TargetMachine
+	for target := llvm.FirstTarget(); target.C != nil; target = target.NextTarget() {
+		if target.Name() == arch {
+			machine = target.CreateTargetMachine(triple, "", "",
+				llvm.CodeGenLevelDefault,
+				llvm.RelocDefault,
+				llvm.CodeModelDefault)
+			compiler.machine = machine
+			break
+		}
 	}
-}
 
-// SetTargetArch sets the target architecture, which must be either one of the
-// architecture names recognised by the gc compiler, or an LLVM architecture
-// name.
-func (c *compiler) SetTargetArch(arch string) {
-	switch arch {
-	case "386":
-		c.targetArch = "x86"
-	case "amd64", "x86_64":
-		c.targetArch = "x86-64"
-	default:
-		c.targetArch = arch
+	if machine.C == nil {
+		return nil, fmt.Errorf("Invalid target triple: %s", triple)
 	}
+	compiler.target = machine.TargetData()
+	return compiler, nil
 }
 
-// SetTargetOs sets the target OS, which must be either one of the OS names
-// recognised by the gc compiler, or an LLVM OS name.
-func (c *compiler) SetTargetOs(os string) {
-	if os == "windows" {
-		c.targetOs = "win32"
-	} else {
-		c.targetOs = os
+func (compiler *compiler) Dispose() {
+	if compiler.machine.C != nil {
+		compiler.machine.Dispose()
+		compiler.machine.C = nil
 	}
-}
-
-// Convert the architecture name to the string used in LLVM triples.
-// See: llvm::Triple::getArchTypeName.
-//
-// TODO move this into the LLVM C API.
-func getTripleArchName(llvmArch string) string {
-	switch llvmArch {
-	case "x86":
-		return "i386"
-	case "x86-64":
-		return "x86_64"
-	case "ppc32":
-		return "powerpc"
-	case "ppc64":
-		return "powerpc64"
-	}
-	return llvmArch
-}
-
-func (compiler *compiler) GetTargetTriple() string {
-	arch := getTripleArchName(compiler.targetArch)
-	os := compiler.targetOs
-	return fmt.Sprintf("%s-unknown-%s", arch, os)
 }
 
 func (compiler *compiler) Compile(fset *token.FileSet,
@@ -288,31 +265,12 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
-	// Create a TargetMachine from the OS & Arch.
-	triple := compiler.GetTargetTriple()
-	var machine llvm.TargetMachine
-	for target := llvm.FirstTarget(); target.C != nil && machine.C == nil; target = target.NextTarget() {
-		if target.Name() == compiler.targetArch {
-			machine = target.CreateTargetMachine(triple, "", "",
-				llvm.CodeGenLevelDefault,
-				llvm.RelocDefault,
-				llvm.CodeModelDefault)
-			defer machine.Dispose()
-		}
-	}
-
-	if machine.C == nil {
-		err = fmt.Errorf("Invalid target triple: %s", triple)
-		return
-	}
-
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
 	// Dispose manually, which will render the finalizer a no-op.
 	modulename := pkg.Name
-	compiler.target = machine.TargetData()
 	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
-	compiler.module.SetTarget(triple)
+	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.target.String())
 	defer func() {
 		if e := recover(); e != nil {

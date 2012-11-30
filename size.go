@@ -27,10 +27,10 @@ import (
 	"github.com/axw/llgo/types"
 )
 
-func (c *compiler) alignofType(t types.Type) int {
+func (c *compiler) Alignof(t types.Type) int {
 	switch t := t.(type) {
 	case *types.Name:
-		return c.alignofType(t.Underlying)
+		return c.Alignof(t.Underlying)
 	case *types.Basic:
 		switch t.Kind {
 		case types.BoolKind:
@@ -54,11 +54,11 @@ func (c *compiler) alignofType(t types.Type) int {
 		return c.target.PointerSize()
 	case *types.Struct:
 		if len(t.Fields) > 0 {
-			return c.alignofType(t.Fields[0].Type.(types.Type))
+			return c.Alignof(t.Fields[0].Type.(types.Type))
 		}
 		return 0
 	case *types.Array:
-		return c.alignofType(t.Elt)
+		return c.Alignof(t.Elt)
 	case *types.Interface:
 		return c.target.PointerSize()
 	default:
@@ -67,10 +67,10 @@ func (c *compiler) alignofType(t types.Type) int {
 	panic("unreachable")
 }
 
-func (c *compiler) sizeofType(t types.Type) int {
+func (c *compiler) Sizeof(t types.Type) int {
 	switch t := t.(type) {
 	case *types.Name:
-		return c.sizeofType(t.Underlying)
+		return c.Sizeof(t.Underlying)
 	case *types.Basic:
 		switch t.Kind {
 		case types.BoolKind:
@@ -98,8 +98,8 @@ func (c *compiler) sizeofType(t types.Type) int {
 		size := 0
 		for _, f := range t.Fields {
 			fieldtype := f.Type.(types.Type)
-			fieldalign := c.alignofType(fieldtype)
-			fieldsize := c.sizeofType(fieldtype)
+			fieldalign := c.Alignof(fieldtype)
+			fieldsize := c.Sizeof(fieldtype)
 			if size%fieldalign != 0 {
 				size += fieldalign - (size % fieldalign)
 			}
@@ -107,15 +107,15 @@ func (c *compiler) sizeofType(t types.Type) int {
 		}
 		return size
 	case *types.Array:
-		eltsize := c.sizeofType(t.Elt)
-		eltalign := c.alignofType(t.Elt)
+		eltsize := c.Sizeof(t.Elt)
+		eltalign := c.Alignof(t.Elt)
 		eltpad := 0
 		if eltsize%eltalign != 0 {
 			eltpad = eltalign - (eltsize % eltalign)
 		}
 		return (eltsize + eltpad) * int(t.Len)
 	case *types.Slice:
-		return c.target.PointerSize() + 2*c.sizeofType(types.Uint)
+		return c.target.PointerSize() + 2*c.Sizeof(types.Uint)
 	case *types.Interface:
 		// XXX This needs to change if/when interfaces are
 		// changed to dynamically lookup methods, like in gc.

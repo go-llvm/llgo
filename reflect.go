@@ -64,12 +64,12 @@ func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.
 // parseReflect parses the standard "reflect" package, builds and type-checks
 // its AST. This is used to generate runtime type structures, using the
 // existing types.Type -> llvm.Type mapping code.
-func parseReflect() (*ast.Package, error) {
-	parseReflectOnce.Do(doParseReflect)
+func (c *compiler) parseReflect() (*ast.Package, error) {
+	parseReflectOnce.Do(func() { c.doParseReflect() })
 	return parseReflectResult, parseReflectError
 }
 
-func doParseReflect() {
+func (c *compiler) doParseReflect() {
 	buildpkg, err := build.Import("reflect", "", 0)
 	if err != nil {
 		parseReflectResult, parseReflectError = nil, err
@@ -93,7 +93,7 @@ func doParseReflect() {
 		return
 	}
 
-	_, err = types.Check("reflect", fset, pkg)
+	_, err = types.Check("reflect", c, fset, pkg)
 	if err != nil {
 		parseReflectResult, parseReflectError = nil, err
 		return

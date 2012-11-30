@@ -16,6 +16,7 @@ var (
 	Universe *ast.Scope
 	Unsafe   *ast.Object // package unsafe
 	Nil      *ast.Object
+	Iota     *ast.Object
 )
 
 func define(kind ast.ObjKind, name string) *ast.Object {
@@ -68,6 +69,28 @@ var (
 	Error *Name
 )
 
+// Builtin/unsafe functions
+var (
+	BuiltinAppend,
+	BuiltinCap,
+	BuiltinClose,
+	BuiltinComplex,
+	BuiltinCopy,
+	BuiltinDelete,
+	BuiltinImag,
+	BuiltinLen,
+	BuiltinMake,
+	BuiltinNew,
+	BuiltinPanic,
+	BuiltinPrint,
+	BuiltinPrintln,
+	BuiltinReal,
+	BuiltinRecover,
+	UnsafeAlignof,
+	UnsafeOffsetof,
+	UnsafeSizeof *ast.Object
+)
+
 func init() {
 	scope = ast.NewScope(nil)
 	Universe = scope
@@ -107,25 +130,26 @@ func init() {
 	false_.Data = Const{false}
 	false_.Type = Bool.Underlying
 
-	defConst("iota").Type = Int.Underlying
+	Iota = defConst("iota")
+	Iota.Type = Int.Underlying
 
 	Nil = defConst("nil")
 
-	defFun("append")
-	defFun("cap")
-	defFun("close")
-	defFun("complex")
-	defFun("copy")
-	defFun("delete")
-	defFun("imag")
-	defFun("len")
-	defFun("make")
-	defFun("new")
-	defFun("panic")
-	defFun("print")
-	defFun("println")
-	defFun("real")
-	defFun("recover")
+	BuiltinAppend = defFun("append")
+	BuiltinCap = defFun("cap")
+	BuiltinClose = defFun("close")
+	BuiltinComplex = defFun("complex")
+	BuiltinCopy = defFun("copy")
+	BuiltinDelete = defFun("delete")
+	BuiltinImag = defFun("imag")
+	BuiltinLen = defFun("len")
+	BuiltinMake = defFun("make")
+	BuiltinNew = defFun("new")
+	BuiltinPanic = defFun("panic")
+	BuiltinPrint = defFun("print")
+	BuiltinPrintln = defFun("println")
+	BuiltinReal = defFun("real")
+	BuiltinRecover = defFun("recover")
 
 	scope = ast.NewScope(nil)
 	Unsafe = ast.NewObj(ast.Pkg, "unsafe")
@@ -135,15 +159,17 @@ func init() {
 	UnsafePointer.Package = "unsafe"
 
 	uintptrResult := ast.NewObj(ast.Var, "_")
-	uintptrResult.Type = Int
-	alignof := defFun("Alignof").Type.(*Func)
-	alignof.Results = append(alignof.Results, uintptrResult)
+	uintptrResult.Type = Uintptr
 
-	offsetof := defFun("Offsetof").Type.(*Func)
-	offsetof.Results = alignof.Results
+	UnsafeAlignof = defFun("Alignof")
+	alignofType := UnsafeAlignof.Type.(*Func)
+	alignofType.Results = append(alignofType.Results, uintptrResult)
 
-	sizeof := defFun("Sizeof").Type.(*Func)
-	sizeof.Results = alignof.Results
+	UnsafeOffsetof = defFun("Offsetof")
+	UnsafeOffsetof.Type.(*Func).Results = alignofType.Results
+
+	UnsafeSizeof = defFun("Sizeof")
+	UnsafeSizeof.Type.(*Func).Results = alignofType.Results
 }
 
 // vim: set ft=go :

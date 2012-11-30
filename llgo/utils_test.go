@@ -18,6 +18,8 @@ import (
 	"unsafe"
 )
 
+var testCompiler llgo.Compiler
+
 func testdata(files ...string) []string {
 	for i, f := range files {
 		files[i] = "testdata/" + f
@@ -28,6 +30,12 @@ func testdata(files ...string) []string {
 func init() {
 	llvm.LinkInJIT()
 	llvm.InitializeNativeTarget()
+
+	var err error
+	testCompiler, err = initCompiler()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func readPipe(p int, c chan<- string) {
@@ -75,7 +83,7 @@ func getRuntimeModule() (llvm.Module, error) {
 	}
 
 	var runtimeModule *llgo.Module
-	runtimeModule, err = compileFiles(gofiles, "runtime")
+	runtimeModule, err = compileFiles(testCompiler, gofiles, "runtime")
 	if err != nil {
 		return llvm.Module{}, err
 	}
@@ -224,7 +232,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 
 	// Now compile to and interpret the LLVM bitcode, comparing the output to
 	// the output of "go run" above.
-	m, err := compileFiles(files, "main")
+	m, err := compileFiles(testCompiler, files, "main")
 	if err != nil {
 		return err
 	}

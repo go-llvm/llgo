@@ -86,7 +86,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, pkgpath string, exprTypes map[ast.Expr]type
 
 	// Load "reflect.go", and generate LLVM types for the runtime type
 	// structures.
-	pkg, err := parseReflect()
+	pkg, err := c.compiler.parseReflect()
 	if err != nil {
 		panic(err) // FIXME return err
 	}
