@@ -495,7 +495,16 @@ func (tm *TypeMap) basicRuntimeType(b *types.Basic) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
-	panic("unimplemented")
+	commonType := tm.makeCommonType(a, reflect.Array)
+	elemRuntimeType := tm.ToRuntime(a.Elt)
+	sliceRuntimeType := tm.ToRuntime(&types.Slice{Elt: a.Elt})
+	uintptrlen := llvm.ConstInt(tm.target.IntPtrType(), uint64(a.Len), false)
+	arrayType := llvm.ConstNull(tm.runtimeArrayType)
+	arrayType = llvm.ConstInsertValue(arrayType, commonType, []uint32{0})
+	arrayType = llvm.ConstInsertValue(arrayType, elemRuntimeType, []uint32{1})
+	arrayType = llvm.ConstInsertValue(arrayType, sliceRuntimeType, []uint32{2})
+	arrayType = llvm.ConstInsertValue(arrayType, uintptrlen, []uint32{3})
+	return tm.makeRuntimeTypeGlobal(arrayType)
 }
 
 func (tm *TypeMap) sliceRuntimeType(s *types.Slice) (global, ptr llvm.Value) {

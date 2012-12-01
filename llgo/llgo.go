@@ -67,6 +67,7 @@ var version = flag.Bool(
 
 var os_ = flag.String("os", runtime.GOOS, "Set the target OS")
 var arch = flag.String("arch", runtime.GOARCH, "Set the target architecture")
+var triple = flag.String("triple", "", "Set the target triple")
 var printTriple = flag.Bool("print-triple", false, "Print out target triple and exit")
 var compileOnly = flag.Bool("c", false, "Compile only, don't link")
 var outputFile = flag.String("o", "-", "Output filename")
@@ -219,7 +220,26 @@ func getTripleArchName(llvmArch string) string {
 	return llvmArch
 }
 
+var tripleArchOsError = errors.New("-triple must not be specified as well as -os/-arch")
+
 func computeTriple() string {
+	if *triple != "" {
+		// Ensure os/arch aren't specified if triple/ is specified.
+		//
+		// This is an ugly way of telling whether or not -os or -arch were
+		// specified. We can't just check the value, as it will have a default.
+		archFlag := flag.Lookup("arch")
+		osFlag := flag.Lookup("os")
+		flag.Visit(func(f *flag.Flag) {
+			switch f {
+			case archFlag, osFlag:
+				fmt.Fprintln(os.Stderr, tripleArchOsError)
+				os.Exit(1)
+			}
+		})
+		return *triple
+	}
+
 	// -arch is either an architecture name recognised by
 	// the gc compiler, or an LLVM architecture name.
 	targetArch := *arch

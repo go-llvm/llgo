@@ -79,6 +79,9 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 
 func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
 	malloc := c.NamedFunction("runtime.malloc", "func f(uintptr) unsafe.Pointer")
+	if size.Type().IntTypeWidth() > c.target.IntPtrType().IntTypeWidth() {
+		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
+	}
 	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")
 }
 
@@ -86,4 +89,3 @@ func (c *compiler) createTypeMalloc(t llvm.Type) llvm.Value {
 	ptr := c.createMalloc(llvm.SizeOf(t))
 	return c.builder.CreateIntToPtr(ptr, llvm.PointerType(t, 0), "")
 }
-
