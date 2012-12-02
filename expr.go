@@ -119,9 +119,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	case *ast.Ident:
 		switch x.String() {
 		case "copy":
-			// TODO
-			zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
-			return c.NewLLVMValue(zero, types.Int)
+			return c.VisitCopy(expr)
 		case "print":
 			return c.VisitPrint(expr, false)
 		case "println":

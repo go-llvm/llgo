@@ -95,7 +95,6 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 }
 
 func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
-	// TODO handle ellpisis arg
 	s := c.VisitExpr(expr.Args[0])
 	elem := c.VisitExpr(expr.Args[1])
 
@@ -132,6 +131,28 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	args := []llvm.Value{runtimeTyp, a, b}
 	result := c.builder.CreateCall(sliceappend, args, "")
 	return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), s.Type())
+}
+
+func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
+	dest := c.VisitExpr(expr.Args[0])
+	source := c.VisitExpr(expr.Args[1])
+
+	// If it's a string, convert it to a []byte first.
+	source = source.Convert(dest.Type())
+
+	slicecopy := c.NamedFunction("runtime.slicecopy", "func f(t uintptr, dst, src slice) int")
+	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
+
+	// Coerce first argument into an []int8.
+	dest_ := c.coerceSlice(dest.LLVMValue(), i8slice)
+	source_ := c.coerceSlice(source.LLVMValue(), i8slice)
+
+	// Call runtime function.
+	runtimeTyp := c.types.ToRuntime(dest.Type())
+	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+	args := []llvm.Value{runtimeTyp, dest_, source_}
+	result := c.builder.CreateCall(slicecopy, args, "")
+	return c.NewLLVMValue(result, types.Int)
 }
 
 func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {

@@ -47,6 +47,22 @@ func sliceappend(t unsafe.Pointer, a, b slice) slice {
 	return a
 }
 
+// slicecopy takes a slice type and two slices, copying the second
+// into the first, and returning the number of elements copied.
+// The number of elements copied will be the minimum of the len of
+// either slice.
+func slicecopy(t unsafe.Pointer, a, b slice) uint {
+	typ := (*type_)(t)
+	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+	n := a.len
+	if b.len < n {
+		n = b.len
+	}
+	copylen := int(slicetyp.elem.size * uintptr(b.len))
+	memmove(unsafe.Pointer(a.array), unsafe.Pointer(b.array), copylen)
+	return n
+}
+
 func slicegrow(t *sliceType, a slice, newcap uint) slice {
 	mem := malloc(uintptr(t.elem.size * uintptr(newcap)))
 	if a.len > 0 {

@@ -1,8 +1,19 @@
 package main
 
-func main() {
+func testBytesConversion() {
 	s := "abc"
 	b := []byte(s)
-	println(s == string(b))
+	println("testBytesConversion:", s == string(b))
 }
 
+func testBytesCopy() {
+	s := "abc"
+	b := make([]byte, len(s))
+	copy(b, s)
+	println("testBytesCopy:", string(b) == s)
+}
+
+func main() {
+	testBytesConversion()
+	testBytesCopy()
+}
