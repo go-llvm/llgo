@@ -75,35 +75,35 @@ func parseLinkageAttribute(value string) linkageAttribute {
 	for _, field := range strings.Fields(value) {
 		switch strings.ToLower(field) {
 		case "private":
-			result |= llvm.PrivateLinkage
+			result |= linkageAttribute(llvm.PrivateLinkage)
 		case "linker_private":
-			result |= llvm.LinkerPrivateLinkage
+			result |= linkageAttribute(llvm.LinkerPrivateLinkage)
 		case "linker_private_weak":
-			result |= llvm.LinkerPrivateWeakLinkage
+			result |= linkageAttribute(llvm.LinkerPrivateWeakLinkage)
 		case "internal":
-			result |= llvm.InternalLinkage
+			result |= linkageAttribute(llvm.InternalLinkage)
 		case "available_externally":
-			result |= llvm.AvailableExternallyLinkage
+			result |= linkageAttribute(llvm.AvailableExternallyLinkage)
 		case "linkonce":
-			result |= llvm.LinkOnceAnyLinkage
+			result |= linkageAttribute(llvm.LinkOnceAnyLinkage)
 		case "common":
-			result |= llvm.CommonLinkage
+			result |= linkageAttribute(llvm.CommonLinkage)
 		case "weak":
-			result |= llvm.WeakAnyLinkage
+			result |= linkageAttribute(llvm.WeakAnyLinkage)
 		case "appending":
-			result |= llvm.AppendingLinkage
+			result |= linkageAttribute(llvm.AppendingLinkage)
 		case "extern_weak":
-			result |= llvm.ExternalWeakLinkage
+			result |= linkageAttribute(llvm.ExternalWeakLinkage)
 		case "linkonce_odr":
-			result |= llvm.LinkOnceODRLinkage
+			result |= linkageAttribute(llvm.LinkOnceODRLinkage)
 		case "weak_odr":
-			result |= llvm.WeakODRLinkage
+			result |= linkageAttribute(llvm.WeakODRLinkage)
 		case "external":
-			result |= llvm.ExternalLinkage
+			result |= linkageAttribute(llvm.ExternalLinkage)
 		case "dllimport":
-			result |= llvm.DLLImportLinkage
+			result |= linkageAttribute(llvm.DLLImportLinkage)
 		case "dllexport":
-			result |= llvm.DLLExportLinkage
+			result |= linkageAttribute(llvm.DLLExportLinkage)
 		}
 	}
 	return result
