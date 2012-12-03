@@ -24,7 +24,7 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
+	"./types"
 )
 
 // mapLookup searches a map for a specified key, returning a pointer to the
