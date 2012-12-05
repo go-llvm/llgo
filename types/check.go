@@ -983,7 +983,9 @@ func isType(x ast.Expr) bool {
 
 // checkStmt type checks a statement.
 func (c *checker) checkStmt(s ast.Stmt) {
-	// fmt.Printf("Check statement: %T @ %s\n", s, c.fset.Position(s.Pos()))
+	if debug {
+		fmt.Printf("Check statement: %T @ %s\n", s, c.fset.Position(s.Pos()))
+	}
 
 	switch s := s.(type) {
 	case *ast.AssignStmt:
@@ -1002,6 +1004,11 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				}
 			}
 			c.checkExpr(s.Rhs[0], idents)
+			for _, ident := range idents {
+				if ident != nil {
+					maybeConvertUntyped(ident.Obj)
+				}
+			}
 		} else {
 			idents := make([]*ast.Ident, 1)
 			for i, e := range s.Rhs {
