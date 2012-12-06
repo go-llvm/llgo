@@ -12,11 +12,6 @@ type Var struct {
 	Value VarValue
 }
 
-func makeUndefinedVar() Var {
-	// Zero value.
-	return Var{}
-}
-
 type VarType int32
 
 const (
@@ -36,9 +31,21 @@ func MakeVarInt32(value int32) Var {
 	return v
 }
 
+func MakeVarString(s string) Var {
+	var cstr unsafe.Pointer
+	n := uint32(len(s))
+	if n > 0 {
+		bytes := []byte(s)
+		cstr = unsafe.Pointer(&bytes[0])
+	}
+	var v Var
+	browserVarInterface.varFromUtf8(&v, cstr, n)
+	return v
+}
+
 type ppbVar1_1 struct {
 	addRef      func(Var)
 	release     func(Var)
-	varFromUtf8 func(v *Var, data cstring, len uint32)
-	varToUtf8   func(v Var, len *uint32) cstring
+	varFromUtf8 func(v *Var, data unsafe.Pointer, len uint32)
+	varToUtf8   func(v Var, len *uint32) unsafe.Pointer
 }

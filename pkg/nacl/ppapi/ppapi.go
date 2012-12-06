@@ -34,15 +34,24 @@ func (s cstring) String() string {
 	return string(bytes)
 }
 
-type Module int32
+type module int32
 
-// FIXME set calling convention of function to C
+// FIXME set calling convention of function to C.
+//
+// Actually, don't bother, as we'll have to move a
+// lot of this into C/LLVM IR later anyway, when
+// function types change.
 type ppbGetInterface func(cstring) unsafe.Pointer
 
 // #llgo name: PPP_InitializeModule
-func initializeModule(m Module, getBrowserInterface ppbGetInterface) int32 {
+func initializeModule(_ module, getBrowserInterface ppbGetInterface) int32 {
+	// TODO load these (maybe only the less crucial ones) on demand.
 	browserMessagingInterface = (*ppbMessaging1_0)(getBrowserInterface(makecstring("PPB_Messaging;1.0")))
 	browserVarInterface = (*ppbVar1_1)(getBrowserInterface(makecstring("PPB_Var;1.1")))
+	browserGraphics2DInterface = (*ppbGraphics2D1_0)(getBrowserInterface(makecstring("PPB_Graphics2D;1.0")))
+	browserViewInterface = (*ppbView1_0)(getBrowserInterface(makecstring("PPB_View;1.0")))
+	browserInstanceInterface = (*ppbInstance1_0)(getBrowserInterface(makecstring("PPB_Instance;1.0")))
+	browserImageDataInterface = (*ppbImageData1_0)(getBrowserInterface(makecstring("PPB_ImageData;1.0")))
 	return PP_OK
 }
 
@@ -55,57 +64,16 @@ func shutdownModule() {
 func getInterface(name cstring) unsafe.Pointer {
 	switch name.String() {
 	case "PPP_Instance;1.1":
-		return unsafe.Pointer(&testInstance)
+		return unsafe.Pointer(&exampleInstance)
 	}
 	return nil
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
+// TODO store the ppbGetInterface from initializeModule,
+// and load these interfaces on demand using sync.Once
 var browserMessagingInterface *ppbMessaging1_0
 var browserVarInterface *ppbVar1_1
-
-func strToVar(s string) Var {
-	if browserVarInterface != nil {
-		var cstr cstring
-		n := uint32(len(s))
-		if n > 0 {
-			bytes := []byte(s)
-			cstr = cstring(unsafe.Pointer(&bytes[0]))
-		}
-		var v Var
-		(*browserVarInterface).varFromUtf8(&v, cstr, n)
-		return v
-	}
-	return makeUndefinedVar()
-}
-
-func testDidCreate(i Instance, argc uint32, argn, argv *cstring) ppbool {
-	message := "alert:Hello from llgo!"
-	if browserMessagingInterface != nil {
-		v := strToVar(message)
-		browserMessagingInterface.postMessage(i, v)
-	}
-	return ppboolFromBool(true)
-}
-
-func testDidDestroy(i Instance) {
-}
-
-func testDidChangeView(i Instance, view Resource) {
-}
-
-func testDidChangeFocus(i Instance, hasFocus ppbool) {
-}
-
-func testHandleDocumentLoad(i Instance, urlLoader Resource) ppbool {
-	return ppboolFromBool(false)
-}
-
-var testInstance = pppInstance1_1{
-	testDidCreate,
-	testDidDestroy,
-	testDidChangeView,
-	testDidChangeFocus,
-	testHandleDocumentLoad,
-}
+var browserGraphics2DInterface *ppbGraphics2D1_0
+var browserViewInterface *ppbView1_0
+var browserInstanceInterface *ppbInstance1_0
+var browserImageDataInterface *ppbImageData1_0
