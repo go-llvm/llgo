@@ -14,6 +14,7 @@ import (
 	"strings"
 )
 
+const gollvmpkgpath = "github.com/axw/gollvm/llvm"
 const llgopkgpath = "github.com/axw/llgo/llgo"
 
 var (
@@ -24,12 +25,16 @@ var (
 func buildLlgo() error {
 	log.Println("Building llgo")
 
-	cgoCflags := llvmcflags
+	pkg, err := build.Import(gollvmpkgpath, "", build.FindOnly)
+	if err != nil {
+		return err
+	}
+
+	cgoCflags := fmt.Sprintf("%s -I %s/../include", llvmcflags, pkg.Dir)
 	cgoLdflags := fmt.Sprintf("%s -Wl,-L%s -lLLVM-%s",
 		llvmldflags, llvmlibdir, llvmversion)
 
 	var output []byte
-	var err error
 	ldflags := "-r " + llvmlibdir
 	args := []string{"get", "-ldflags", ldflags}
 	if strings.HasSuffix(llvmversion, "svn") {
@@ -48,7 +53,7 @@ func buildLlgo() error {
 		return err
 	}
 
-	pkg, err := build.Import(llgopkgpath, "", build.FindOnly)
+	pkg, err = build.Import(llgopkgpath, "", build.FindOnly)
 	if err != nil {
 		return err
 	}
