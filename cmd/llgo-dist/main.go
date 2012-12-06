@@ -100,6 +100,7 @@ func main() {
 		genSyscall,
 		genMath,
 		buildRuntime,
+		buildLinker,
 	}
 	for _, action := range actions {
 		err := action()
