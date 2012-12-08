@@ -782,6 +782,7 @@ func (c *checker) evalConst(x ast.Expr) Const {
 		if x.Obj.Kind != ast.Con {
 			panic("x.Obj.Kind != ast.Con")
 		}
+		c.checkObj(x.Obj, false)
 		switch data := x.Obj.Data.(type) {
 		case int:
 			spec := x.Obj.Decl.(*ast.ValueSpec)
@@ -799,6 +800,7 @@ func (c *checker) evalConst(x ast.Expr) Const {
 		ident := x.X.(*ast.Ident)
 		pkgscope := ident.Obj.Data.(*ast.Scope)
 		obj := pkgscope.Lookup(x.Sel.Name)
+		c.checkObj(obj, false)
 		return obj.Data.(Const)
 	case *ast.BinaryExpr:
 		lhs, rhs := c.evalConst(x.X).Match(c.evalConst(x.Y))
