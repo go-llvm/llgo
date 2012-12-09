@@ -20,6 +20,8 @@ var (
 	llvmlibdir  string
 	llvmldflags string
 	llvmbindir  string
+
+	triple string
 )
 
 func errorf(format string, args ...interface{}) {
@@ -29,6 +31,7 @@ func errorf(format string, args ...interface{}) {
 
 func init() {
 	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config", "Path to the llvm-config executable")
+	flag.StringVar(&triple, "triple", "", "The target triple")
 }
 
 func llvmconfigValue(option string) (string, error) {

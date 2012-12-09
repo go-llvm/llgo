@@ -58,7 +58,18 @@ func buildLlgo() error {
 		return err
 	}
 	llgobin = path.Join(pkg.BinDir, "llgo")
-	log.Printf("Built %s", llgobin)
 
+	// If the user did not specify -triple on the command
+	// line, ask llgo for it now.
+	if triple == "" {
+		output, err = exec.Command(llgobin, "-print-triple").CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", string(output))
+			return err
+		}
+		triple = strings.TrimSpace(string(output))
+	}
+
+	log.Printf("Built %s", llgobin)
 	return nil
 }

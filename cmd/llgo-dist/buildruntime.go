@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
@@ -57,7 +56,7 @@ func buildPackage(name, pkgpath, outfile string) error {
 		return err
 	}
 
-	args := []string{"-c", "-importpath", name, "-o", outfile}
+	args := []string{"-c", "-triple", triple, "-importpath", name, "-o", outfile}
 	args = append(args, pkg.GoFiles...)
 	cmd := exec.Command(llgobin, args...)
 	cmd.Stdout = os.Stdout
@@ -87,14 +86,6 @@ func buildPackage(name, pkgpath, outfile string) error {
 func buildRuntime() error {
 	log.Println("Building runtime")
 
-	var output []byte
-	var err error
-	output, err = exec.Command(llgobin, "-print-triple").CombinedOutput()
-	if err != nil {
-		return err
-	}
-	triple := strings.TrimSpace(string(output))
-
 	// Create the package directory.
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
@@ -103,7 +94,7 @@ func buildRuntime() error {
 		gopath = filepath.SplitList(gopath)[0]
 	}
 	outdir := path.Join(gopath, "pkg", "llgo", triple)
-	err = os.MkdirAll(outdir, os.FileMode(0755))
+	err := os.MkdirAll(outdir, os.FileMode(0755))
 	if err != nil {
 		return err
 	}
