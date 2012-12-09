@@ -69,7 +69,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 		if c.target.TypeStoreSize(lv.Type()) <= uint64(ptrsize) {
 			bits := c.target.TypeSizeInBits(lv.Type())
 			if bits > 0 {
-				lv = builder.CreateBitCast(lv, llvm.IntType(int(bits)), "")
+				lv = c.coerce(lv, llvm.IntType(int(bits)))
 				ptr = builder.CreateIntToPtr(lv, element_types[1], "")
 			} else {
 				ptr = llvm.ConstNull(element_types[1])
@@ -290,10 +290,18 @@ func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
 		ptrv := c.builder.CreateBitCast(ptr, llvm.PointerType(v.Type(), 0), "")
 		c.builder.CreateStore(v, ptrv)
 		return c.builder.CreateLoad(ptr, "")
-	default:
-		return c.builder.CreateBitCast(v, t, "")
 	}
-	panic("unreachable")
+
+	vt := v.Type()
+	switch vt.TypeKind() {
+	case llvm.ArrayTypeKind, llvm.StructTypeKind:
+		ptr := c.builder.CreateAlloca(vt, "")
+		c.builder.CreateStore(v, ptr)
+		ptrt := c.builder.CreateBitCast(ptr, llvm.PointerType(t, 0), "")
+		return c.builder.CreateLoad(ptrt, "")
+	}
+
+	return c.builder.CreateBitCast(v, t, "")
 }
 
 // loadI2V loads an interface value to a type, without checking
