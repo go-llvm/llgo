@@ -821,21 +821,24 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 			if i+1 < len(condBlocks) {
 				nextCondBlock = condBlocks[i+1]
 			}
-			// TODO handle multiple types
-			// TODO use runtime type equality function
-			if len(caseClause.List) > 1 {
-				panic("unimplemented")
+			caseCond := func(j int) llvm.Value {
+				if isNilIdent(caseClause.List[j]) {
+					iface := iface.LLVMValue()
+					ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
+					return c.builder.CreateIsNull(ifacetyp, "")
+				}
+				typ := c.types.expr[caseClause.List[j]]
+				return iface.interfaceTypeEquals(typ).LLVMValue()
 			}
-			var cond llvm.Value
-			if isNilIdent(caseClause.List[0]) {
-				iface := iface.LLVMValue()
-				ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
-				cond = c.builder.CreateIsNull(ifacetyp, "")
-			} else {
-				typ := c.types.expr[caseClause.List[0]]
-				cond = iface.interfaceTypeEquals(typ).LLVMValue()
+			cond := c.NewLLVMValue(caseCond(0), types.Bool)
+			for j := 1; j < len(caseClause.List); j++ {
+				f := func() Value {
+					v := caseCond(j)
+					return c.NewLLVMValue(v, types.Bool)
+				}
+				cond = c.compileLogicalOp(token.LOR, cond, f).(*LLVMValue)
 			}
-			c.builder.CreateCondBr(cond, stmtBlock, nextCondBlock)
+			c.builder.CreateCondBr(cond.LLVMValue(), stmtBlock, nextCondBlock)
 			i++
 		}
 	}

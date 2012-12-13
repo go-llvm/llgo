@@ -31,8 +31,19 @@ func printany(i interface{}) {
 	}
 }
 
+func multi(i interface{}) {
+	switch i.(type) {
+	case uint8, int8:
+		println("uint8 or int8")
+	default:
+		println("something else")
+	}
+}
+
 func main() {
 	test(int64(123))
 	test("abc")
+	multi(uint8(123))
+	multi(int8(123))
 }
 
