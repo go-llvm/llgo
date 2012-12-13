@@ -369,52 +369,52 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	panic("unreachable")
 }
 
-func (v *LLVMValue) Convert(dst_typ types.Type) Value {
+func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	b := v.compiler.builder
 
 	// If it's a stack allocated value, we'll want to compare the
 	// value type, not the pointer type.
-	src_typ := v.typ
+	srctyp := v.typ
 
 	// Get the underlying type, if any.
-	orig_dst_typ := dst_typ
-	dst_typ = types.Underlying(dst_typ)
-	src_typ = types.Underlying(src_typ)
+	origdsttyp := dsttyp
+	dsttyp = types.Underlying(dsttyp)
+	srctyp = types.Underlying(srctyp)
 
 	// Identical (underlying) types? Just swap in the destination type.
-	if types.Identical(src_typ, dst_typ) {
+	if types.Identical(srctyp, dsttyp) {
 		// TODO avoid load here by reusing pointer value, if exists.
-		return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+		return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
 	}
 
 	// Both pointer types with identical underlying types? Same as above.
-	if src_typ, ok := src_typ.(*types.Pointer); ok {
-		if dst_typ, ok := dst_typ.(*types.Pointer); ok {
-			src_typ := types.Underlying(src_typ.Base)
-			dst_typ := types.Underlying(dst_typ.Base)
-			if types.Identical(src_typ, dst_typ) {
-				return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+	if srctyp, ok := srctyp.(*types.Pointer); ok {
+		if dsttyp, ok := dsttyp.(*types.Pointer); ok {
+			srctyp := types.Underlying(srctyp.Base)
+			dsttyp := types.Underlying(dsttyp.Base)
+			if types.Identical(srctyp, dsttyp) {
+				return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
 			}
 		}
 	}
 
 	// Convert from an interface type.
-	if _, isinterface := src_typ.(*types.Interface); isinterface {
-		if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
+	if _, isinterface := srctyp.(*types.Interface); isinterface {
+		if interface_, isinterface := dsttyp.(*types.Interface); isinterface {
 			return v.mustConvertI2I(interface_)
 		} else {
-			return v.mustConvertI2V(orig_dst_typ)
+			return v.mustConvertI2V(origdsttyp)
 		}
 	}
 
 	// Converting to an interface type.
-	if interface_, isinterface := dst_typ.(*types.Interface); isinterface {
+	if interface_, isinterface := dsttyp.(*types.Interface); isinterface {
 		return v.convertV2I(interface_)
 	}
 
 	// string -> []byte
 	byteslice := &types.Slice{Elt: types.Byte}
-	if src_typ == types.String && types.Identical(dst_typ, byteslice) {
+	if srctyp == types.String && types.Identical(dsttyp, byteslice) {
 		c := v.compiler
 		value := v.LLVMValue()
 		strdata := c.builder.CreateExtractValue(value, 0, "")
@@ -427,7 +427,7 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	}
 
 	// []byte -> string
-	if types.Identical(src_typ, byteslice) && dst_typ == types.String {
+	if types.Identical(srctyp, byteslice) && dsttyp == types.String {
 		c := v.compiler
 		value := v.LLVMValue()
 		data := c.builder.CreateExtractValue(value, 0, "")
@@ -438,28 +438,36 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 		return c.NewLLVMValue(struct_, types.String)
 	}
 
+	// []byte to []uint8
+	uint8slice := &types.Slice{Elt: types.Uint8}
+	if types.Identical(srctyp, byteslice) && types.Identical(dsttyp, uint8slice) {
+		llvmdsttyp := v.compiler.types.ToLLVM(origdsttyp)
+		sliceval :=v.compiler.coerceSlice(v.LLVMValue(), llvmdsttyp)
+		return v.compiler.NewLLVMValue(sliceval, origdsttyp)
+	}
+
 	// Rune to string conversion.
-	if dst_typ == types.String && isIntType(src_typ) {
+	if dsttyp == types.String && isIntType(srctyp) {
 		return v.runeToString()
 	}
 
 	// TODO other special conversions?
-	llvm_type := v.compiler.types.ToLLVM(dst_typ)
+	llvm_type := v.compiler.types.ToLLVM(dsttyp)
 
 	// Unsafe pointer conversions.
-	if dst_typ == types.UnsafePointer { // X -> unsafe.Pointer
-		if _, isptr := src_typ.(*types.Pointer); isptr {
+	if dsttyp == types.UnsafePointer { // X -> unsafe.Pointer
+		if _, isptr := srctyp.(*types.Pointer); isptr {
 			value := b.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, orig_dst_typ)
-		} else if src_typ == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+			return v.compiler.NewLLVMValue(value, origdsttyp)
+		} else if srctyp == types.Uintptr {
+			return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
 		}
-	} else if src_typ == types.UnsafePointer { // unsafe.Pointer -> X
-		if _, isptr := dst_typ.(*types.Pointer); isptr {
+	} else if srctyp == types.UnsafePointer { // unsafe.Pointer -> X
+		if _, isptr := dsttyp.(*types.Pointer); isptr {
 			value := b.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, orig_dst_typ)
-		} else if dst_typ == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), orig_dst_typ)
+			return v.compiler.NewLLVMValue(value, origdsttyp)
+		} else if dsttyp == types.Uintptr {
+			return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
 		}
 	}
 
@@ -481,40 +489,40 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 			case delta > 0:
 				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		case llvm.FloatTypeKind, llvm.DoubleTypeKind:
 			if signed(v.Type()) {
 				lv = b.CreateSIToFP(lv, llvm_type, "")
 			} else {
 				lv = b.CreateUIToFP(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		}
 	case llvm.DoubleTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.FloatTypeKind:
 			lv = b.CreateFPTrunc(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		case llvm.IntegerTypeKind:
-			if signed(dst_typ) {
+			if signed(dsttyp) {
 				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
 				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		}
 	case llvm.FloatTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.DoubleTypeKind:
 			lv = b.CreateFPExt(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		case llvm.IntegerTypeKind:
-			if signed(dst_typ) {
+			if signed(dsttyp) {
 				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
 				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		}
 	}
 
@@ -523,10 +531,10 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 	// source type here; given that the types are not identical
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
-	if src_typ == types.Complex64 || src_typ == types.Complex128 {
+	if srctyp == types.Complex64 || srctyp == types.Complex128 {
 		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
-		if src_typ == types.Complex64 {
+		if srctyp == types.Complex64 {
 			fpcast = llvm.Builder.CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
@@ -538,14 +546,14 @@ func (v *LLVMValue) Convert(dst_typ types.Type) Value {
 			imagv := b.CreateExtractValue(lv, 1, "")
 			realv = fpcast(b, realv, fptype, "")
 			imagv = fpcast(b, imagv, fptype, "")
-			lv = llvm.Undef(v.compiler.types.ToLLVM(dst_typ))
+			lv = llvm.Undef(v.compiler.types.ToLLVM(dsttyp))
 			lv = b.CreateInsertValue(lv, realv, 0, "")
 			lv = b.CreateInsertValue(lv, imagv, 1, "")
-			return v.compiler.NewLLVMValue(lv, orig_dst_typ)
+			return v.compiler.NewLLVMValue(lv, origdsttyp)
 		}
 	}
 
-	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", orig_dst_typ))
+	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", origdsttyp))
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
