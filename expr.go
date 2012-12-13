@@ -445,8 +445,19 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	recvValue := lhs.(*LLVMValue)
 	if len(result.Indices) > 0 {
 		if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); !ok {
-			recvValue = recvValue.pointer
-			//recvValue = c.NewLLVMValue(recvValue.LLVMValue(), recvValue.Type())
+			if recvValue.pointer != nil {
+				recvValue = recvValue.pointer
+			} else {
+				// XXX Temporary hack: if we've got a temporary
+				// (i.e. no pointer), then load the value onto
+				// the stack. Later, we can just extract the
+				// values.
+				v := recvValue.value
+				stackptr := c.builder.CreateAlloca(v.Type(), "")
+				c.builder.CreateStore(v, stackptr)
+				ptrtyp := &types.Pointer{Base: recvValue.Type()}
+				recvValue = c.NewLLVMValue(stackptr, ptrtyp)
+			}
 		}
 		for _, v := range result.Indices {
 			ptr := recvValue.LLVMValue()
