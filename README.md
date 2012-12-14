@@ -16,7 +16,7 @@ couple of environment variables first:
     export CGO_LDFLAGS="`llvm-config --ldflags` -Wl,-L`llvm-config --libdir` -lLLVM-`llvm-config --version`"
     go get github.com/axw/llgo/llgo
 
-You must have LLVM 3.1+ in your path. At the time of writing, LLVM 3.1 has not
+You must have LLVM 3.2+ in your path. At the time of writing, LLVM 3.2 has not
 yet been released, so you must build it from the
 [LLVM SVN repository](http://llvm.org/docs/GettingStarted.html#checkout).
 
