@@ -295,9 +295,13 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 
 		// The variable should be allocated on the stack if it's
 		// declared inside a function.
+		//
+		// FIXME currently allocating all variables on the heap.
+		// Change this to allocate on the stack, and perform
+		// escape analysis to determine whether to promote.
 		var llvmInit llvm.Value
 		typ := name.Obj.Type.(types.Type)
-		ptr := c.builder.CreateAlloca(c.types.ToLLVM(typ), name.Name)
+		ptr := c.createTypeMalloc(c.types.ToLLVM(typ))
 		if values == nil || values[i] == nil {
 			// If no initialiser was specified, set it to the
 			// zero value.
