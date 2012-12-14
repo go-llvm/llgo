@@ -104,8 +104,28 @@ func strnext(s _string, i int) (n int, value rune) {
 
 // strrune converts a rune to a string.
 func strrune(n int64) _string {
-	// TODO
-	return _string{}
+	var b [4]uint8
+	if n >= 0x10000 {
+		// TODO panic if range > 0x1fffff?
+		b[0] = 0xf0 | uint8((n>>18)&0x3f)
+		b[1] = 0x80 | uint8((n>>12)&0x3f)
+		b[2] = 0x80 | uint8((n>>6)&0x3f)
+		b[3] = 0x80 | uint8(n&0x3f)
+		return _string{&b[0], 4}
+	}
+	if n >= 0x800 {
+		b[0] = 0xe0 | uint8((n>>12)&0x3f)
+		b[1] = 0x80 | uint8((n>>6)&0x3f)
+		b[2] = 0x80 | uint8(n&0x3f)
+		return _string{&b[0], 3}
+	}
+	if n >= 0x80 {
+		b[0] = 0xc0 | uint8((n>>6)&0x3f)
+		b[1] = 0x80 | uint8(n&0x3f)
+		return _string{&b[0], 2}
+	}
+	b[0] = uint8(n)
+	return _string{&b[0], 1}
 }
 
 // vim: set ft=go:

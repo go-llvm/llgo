@@ -1,9 +1,19 @@
 package main
 
-func main() {
-	var r rune = 65
-	s := string(rune(65))
+func test(r rune) {
+	s := string(r)
 	println(s)
-	println(string(r))
+	for i := 0; i < len(s); i++ {
+		println(s[i])
+	}
+	for i, r := range s {
+		println(i, r)
+	}
 }
 
+func main() {
+	test('.')
+	test('©')
+	test('€')
+	test('𐐀')
+}
