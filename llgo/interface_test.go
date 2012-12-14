@@ -23,6 +23,7 @@ func _TestInterfaceToInterfaceConversion(t *testing.T) {
 func TestStaticBasicV2I(t *testing.T)   { checkOutputEqual(t, "interfaces/basic.go") }
 func TestInterfaceMethods(t *testing.T) { checkOutputEqual(t, "interfaces/methods.go") }
 func TestInterfaceAssert(t *testing.T)  { checkOutputEqual(t, "interfaces/assert.go") }
+func TestError(t *testing.T) { checkOutputEqual(t, "interfaces/error.go") }
 
 //func TestInterfaceImport(t *testing.T) { checkOutputEqual(t, "interfaces/import.go") }
 

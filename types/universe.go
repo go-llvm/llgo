@@ -123,9 +123,13 @@ func init() {
 	// type error interface {Error() string}
 	obj := define(ast.Typ, "error")
 	errorMethod := ast.NewObj(ast.Fun, "Error")
-	errorMethod.Type = &Func{Results: ObjList([]*ast.Object{String.Obj})}
-	Error = &Name{Underlying: &Interface{
-		Methods: ObjList([]*ast.Object{errorMethod})}, Obj: obj}
+	errorMethodResult := define(ast.Var, "")
+	errorMethodResult.Type = String
+	errorMethod.Type = &Func{Results: []*ast.Object{errorMethodResult}}
+	Error = &Name{
+		Underlying: &Interface{Methods: []*ast.Object{errorMethod}},
+		Obj:        obj,
+	}
 	obj.Type = Error
 
 	true_ := defConst("true")

@@ -821,20 +821,25 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 			if i+1 < len(condBlocks) {
 				nextCondBlock = condBlocks[i+1]
 			}
-			caseCond := func(j int) llvm.Value {
+			caseCond := func(j int) Value {
 				if isNilIdent(caseClause.List[j]) {
 					iface := iface.LLVMValue()
 					ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
-					return c.builder.CreateIsNull(ifacetyp, "")
+					isnil := c.builder.CreateIsNull(ifacetyp, "")
+					return c.NewLLVMValue(isnil, types.Bool)
 				}
 				typ := c.types.expr[caseClause.List[j]]
-				return iface.interfaceTypeEquals(typ).LLVMValue()
+				switch typ := types.Underlying(typ).(type) {
+				case *types.Interface:
+					_, ok := iface.convertI2I(typ)
+					return ok
+				}
+				return iface.interfaceTypeEquals(typ)
 			}
-			cond := c.NewLLVMValue(caseCond(0), types.Bool)
+			cond := caseCond(0)
 			for j := 1; j < len(caseClause.List); j++ {
 				f := func() Value {
-					v := caseCond(j)
-					return c.NewLLVMValue(v, types.Bool)
+					return caseCond(j)
 				}
 				cond = c.compileLogicalOp(token.LOR, cond, f).(*LLVMValue)
 			}
@@ -860,7 +865,14 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
 			if len(caseClause.List) == 1 && !isNilIdent(caseClause.List[0]) {
-				assignIdent.Obj.Data = iface.loadI2V(typ)
+				switch typ := types.Underlying(typ).(type) {
+				case *types.Interface:
+					// FIXME Use value from convertI2I in the case
+					// clause condition test.
+					assignIdent.Obj.Data, _ = iface.convertI2I(typ)
+				default:
+					assignIdent.Obj.Data = iface.loadI2V(typ)
+				}
 			} else {
 				assignIdent.Obj.Data = iface
 			}

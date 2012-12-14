@@ -204,7 +204,7 @@ func (i *Interface) String() string {
 		methodtyp := method.Type.(*Func)
 		recv := methodtyp.Recv
 		methodtyp.Recv = nil
-		str += fmt.Sprint(methodtyp)
+		str += fmt.Sprint(method.Name, " ", methodtyp)
 		methodtyp.Recv = recv
 	}
 	return str + "}"
