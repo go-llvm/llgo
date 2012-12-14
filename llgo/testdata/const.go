@@ -27,6 +27,12 @@ func f1() float32 {
 	return 0
 }
 
+func constArrayLen() {
+	a := [...]int{1, 2, 3}
+	const x = len(a)
+	println(x)
+}
+
 func main() {
 	println(a)
 	println(B)
@@ -51,4 +57,6 @@ func main() {
 		y_
 	)
 	println(y_)
+
+	constArrayLen()
 }

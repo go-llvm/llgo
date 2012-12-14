@@ -816,10 +816,15 @@ func (c *checker) evalConst(x ast.Expr) Const {
 				return c.evalConst(x.Args[0])
 			}
 			if fun.Obj == BuiltinLen {
-				// TODO support arrays.
-				value := c.evalConst(x.Args[0])
-				s := value.Val.(string)
-				return Const{big.NewInt(int64(len(s)))}
+				t := c.checkExpr(x.Args[0], nil)
+				if t, ok := Underlying(t).(*Array); ok {
+					return Const{big.NewInt(int64(t.Len))}
+				} else {
+					// Otherwise, it's a string.
+					value := c.evalConst(x.Args[0])
+					s := value.Val.(string)
+					return Const{big.NewInt(int64(len(s)))}
+				}
 			}
 		case *ast.SelectorExpr:
 			c.checkExpr(fun, nil)
