@@ -438,14 +438,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		return c.NewLLVMValue(struct_, types.String)
 	}
 
-	// []byte to []uint8
-	uint8slice := &types.Slice{Elt: types.Uint8}
-	if types.Identical(srctyp, byteslice) && types.Identical(dsttyp, uint8slice) {
-		llvmdsttyp := v.compiler.types.ToLLVM(origdsttyp)
-		sliceval :=v.compiler.coerceSlice(v.LLVMValue(), llvmdsttyp)
-		return v.compiler.NewLLVMValue(sliceval, origdsttyp)
-	}
-
 	// Rune to string conversion.
 	if dsttyp == types.String && isIntType(srctyp) {
 		return v.runeToString()

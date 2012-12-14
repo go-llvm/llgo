@@ -109,11 +109,16 @@ func init() {
 	Float64 = defType("float64", Float64Kind)
 	Complex64 = defType("complex64", Complex64Kind)
 	Complex128 = defType("complex128", Complex128Kind)
-	Byte = defType("byte", Uint8Kind)
+
 	Bool = defType("bool", BoolKind)
 	Uintptr = defType("uintptr", UintptrKind)
-	Rune = defType("rune", Int32Kind)
 	String = defType("string", StringKind)
+
+	// Type aliases
+	Byte = Uint8
+	scope.Objects["byte"] = Byte.Obj
+	Rune = Int32
+	scope.Objects["rune"] = Int32.Obj
 
 	// type error interface {Error() string}
 	obj := define(ast.Typ, "error")
