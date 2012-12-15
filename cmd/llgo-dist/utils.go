@@ -24,7 +24,8 @@ func initGOVARS(triple string) error {
 	}
 	goosREs := []REs{
 		{"linux", "linux"},
-		{"darwin", "darwin"},
+		{"darwin.*", "darwin"},
+		{"macosx.*", "darwin"},
 	}
 	match := func(list []REs, s string) string {
 		for _, t := range list {
