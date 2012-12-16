@@ -58,6 +58,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	builder := v.compiler.builder
 	var ptr llvm.Value
 	lv := v.LLVMValue()
+	var overwide bool
 	if lv.Type().TypeKind() == llvm.PointerTypeKind {
 		ptr = builder.CreateBitCast(lv, element_types[1], "")
 	} else {
@@ -78,10 +79,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			ptr = c.createTypeMalloc(v.compiler.types.ToLLVM(srctyp))
 			builder.CreateStore(lv, ptr)
 			ptr = builder.CreateBitCast(ptr, element_types[1], "")
-			// TODO signal that shim functions are required. Probably later
-			// we'll have the CallExpr handler pick out the type, and check
-			// if the receiver is a pointer or a value type, and load as
-			// necessary.
+			overwide = true
 		}
 	}
 	runtimeType := v.compiler.types.ToRuntime(v.Type())
@@ -138,6 +136,10 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			}
 			method := v.compiler.Resolve(methodobj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
+			if overwide {
+				ifname := fmt.Sprintf("*%s.%s", v.Type(), methodobj.Name)
+				llvm_value = v.compiler.module.NamedFunction(ifname)
+			}
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
 			iface_struct = builder.CreateInsertValue(iface_struct, llvm_value, i+2, "")
 		}

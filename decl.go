@@ -39,38 +39,49 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		}
 	}
 
-	var fn_type *types.Func
-	fn_name := f.Name.String()
-	if f.Recv == nil && fn_name == "init" {
+	var ftyp *types.Func
+	fname := f.Name.String()
+	if f.Recv == nil && fname == "init" {
 		// Make "init" functions anonymous.
-		fn_name = ""
+		fname = ""
 		// "init" functions aren't recorded by the parser, so f.Name.Obj is
 		// not set.
-		fn_type = &types.Func{ /* no params or result */}
+		ftyp = &types.Func{ /* no params or result */}
 	} else {
-		fn_type = f.Name.Obj.Type.(*types.Func)
-		if c.module.Name != "main" || fn_name != "main" {
-			if fn_type.Recv != nil {
-				recv := types.Deref(fn_type.Recv.Type.(types.Type))
-				fn_name = fmt.Sprintf("%s.%s", recv, fn_name)
+		ftyp = f.Name.Obj.Type.(*types.Func)
+		if f.Recv != nil || (c.module.Name != "main" && fname != "main") {
+			if ftyp.Recv != nil {
+				recv := ftyp.Recv.Type.(types.Type)
+				fname = fmt.Sprintf("%s.%s", recv, fname)
 			} else {
 				pkgname := c.pkgmap[f.Name.Obj]
-				fn_name = pkgname + "." + fn_name
+				fname = pkgname + "." + fname
 			}
 		}
 	}
 
-	llvm_fn_type := c.types.ToLLVM(fn_type).ElementType()
-
 	// gcimporter may produce multiple AST objects for the same function.
-	fn := c.module.Module.NamedFunction(fn_name)
+	fn := c.module.Module.NamedFunction(fname)
 	if fn.IsNil() {
-		fn = llvm.AddFunction(c.module.Module, fn_name, llvm_fn_type)
+		llvmftyp := c.types.ToLLVM(ftyp).ElementType()
+		fn = llvm.AddFunction(c.module.Module, fname, llvmftyp)
+		if ftyp.Recv != nil {
+			// Create an interface function if the receiver is
+			// wider than a word.
+			recvtyp := ftyp.Recv.Type.(types.Type)
+			if c.Sizeof(recvtyp) > c.target.PointerSize() {
+				returntyp := llvmftyp.ReturnType()
+				paramtypes := llvmftyp.ParamTypes()
+				paramtypes[0] = llvm.PointerType(paramtypes[0], 0)
+				ifntyp := llvm.FunctionType(returntyp, paramtypes, false)
+				llvm.AddFunction(c.module.Module, "*"+fname, ifntyp)
+			}
+		}
 	}
-	result := c.NewLLVMValue(fn, fn_type)
+	result := c.NewLLVMValue(fn, ftyp)
 	if f.Name.Obj != nil {
 		f.Name.Obj.Data = result
-		f.Name.Obj.Type = fn_type
+		f.Name.Obj.Type = ftyp
 	}
 	return result
 }
@@ -141,6 +152,24 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 	}
 }
 
+func (c *compiler) buildInterfaceFunction(fn llvm.Value) llvm.Value {
+	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	ifname := "*" + fn.Name()
+	ifn := c.module.Module.NamedFunction(ifname)
+	fntyp := fn.Type().ElementType()
+	entry := llvm.AddBasicBlock(ifn, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
+	recv := c.builder.CreateLoad(ifn.Param(0), "recv")
+	args := []llvm.Value{recv}
+	result := c.builder.CreateCall(fn, args, "")
+	if fntyp.ReturnType().TypeKind() == llvm.VoidTypeKind {
+		c.builder.CreateRetVoid()
+	} else {
+		c.builder.CreateRet(result)
+	}
+	return ifn
+}
+
 func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	var fn *LLVMValue
 	if f.Name.Obj != nil {
@@ -156,15 +185,22 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		return fn
 	}
 
-	fn_type := fn.Type().(*types.Func)
-	paramObjects := fn_type.Params
+	ftyp := fn.Type().(*types.Func)
+	paramObjects := ftyp.Params
 	if f.Recv != nil {
-		paramObjects = append([]*ast.Object{fn_type.Recv}, paramObjects...)
+		paramObjects = append([]*ast.Object{ftyp.Recv}, paramObjects...)
 	}
 	c.buildFunction(fn, paramObjects, f.Body)
 
-	// Is it an 'init' function? Then record it.
-	if f.Recv == nil && f.Name.Name == "init" {
+	if f.Recv != nil {
+		// If the receiver is wider than a word, we need
+		// to create another function for use in interfaces.
+		recvtyp := ftyp.Recv.Type.(types.Type)
+		if c.Sizeof(recvtyp) > c.target.PointerSize() {
+			c.buildInterfaceFunction(fn.value)
+		}
+	} else if f.Name.Name == "init" {
+		// Is it an 'init' function? Then record it.
 		c.initfuncs = append(c.initfuncs, fn)
 	}
 	return fn

@@ -4,26 +4,15 @@ import (
 	"testing"
 )
 
-/*
-func _TestStaticStructInterfaceConversion(t *testing.T) {
-	err := runAndCheckMain(testdata("interface.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestStaticStructInterfaceConversion(t *testing.T) {
+	checkOutputEqual(t, "interfaces/static_conversion.go")
 }
-
-func _TestInterfaceToInterfaceConversion(t *testing.T) {
-	err := runAndCheckMain(testdata("interface_i2i.go"), checkStringsEqual)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-*/
-
+func TestInterfaceToInterfaceConversion(t *testing.T) { checkOutputEqual(t, "interfaces/i2i_conversion.go") }
 func TestStaticBasicV2I(t *testing.T)   { checkOutputEqual(t, "interfaces/basic.go") }
 func TestInterfaceMethods(t *testing.T) { checkOutputEqual(t, "interfaces/methods.go") }
 func TestInterfaceAssert(t *testing.T)  { checkOutputEqual(t, "interfaces/assert.go") }
-func TestError(t *testing.T) { checkOutputEqual(t, "interfaces/error.go") }
+func TestError(t *testing.T)            { checkOutputEqual(t, "interfaces/error.go") }
+func TestInterfaceWordSize(t *testing.T) { checkOutputEqual(t, "interfaces/wordsize.go") }
 
 //func TestInterfaceImport(t *testing.T) { checkOutputEqual(t, "interfaces/import.go") }
 

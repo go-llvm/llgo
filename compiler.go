@@ -94,7 +94,8 @@ type compiler struct {
 	lastlabel *ast.Ident
 
 	*FunctionCache
-	types *TypeMap
+	llvmtypes *LLVMTypeMap
+	types     *TypeMap
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -283,6 +284,7 @@ func NewCompiler(opts CompilerOptions) (Compiler, error) {
 		return nil, fmt.Errorf("Invalid target triple: %s", triple)
 	}
 	compiler.target = machine.TargetData()
+	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 	return compiler, nil
 }
 
@@ -329,9 +331,8 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
 	var resolver Resolver = compiler
-	llvmtypemap := NewLLVMTypeMap(compiler.module.Module, compiler.target)
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(llvmtypemap, importpath, exprTypes, compiler.FunctionCache, resolver)
+	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, importpath, exprTypes, compiler.FunctionCache, resolver)
 
 	// Compile each file in the package.
 	for _, file := range pkg.Files {

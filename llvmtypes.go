@@ -31,13 +31,13 @@ import (
 )
 
 type LLVMTypeMap struct {
-	module llvm.Module
 	target llvm.TargetData
 	types  map[string]llvm.Type // compile-time LLVM type
 }
 
 type TypeMap struct {
 	*LLVMTypeMap
+	module    llvm.Module
 	pkgpath   string
 	types     map[string]llvm.Value // runtime/reflect type representation
 	expr      map[ast.Expr]types.Type
@@ -68,15 +68,17 @@ type TypeMap struct {
 	copyAlgFunctionType llvm.Type
 }
 
-func NewLLVMTypeMap(module llvm.Module, target llvm.TargetData) *LLVMTypeMap {
-	tm := &LLVMTypeMap{module: module, target: target}
-	tm.types = make(map[string]llvm.Type)
-	return tm
+func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
+	return &LLVMTypeMap{
+		target: target,
+		types:  make(map[string]llvm.Type),
+	}
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, pkgpath string, exprTypes map[ast.Expr]types.Type, c *FunctionCache, r Resolver) *TypeMap {
+func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTypes map[ast.Expr]types.Type, c *FunctionCache, r Resolver) *TypeMap {
 	tm := &TypeMap{
 		LLVMTypeMap: llvmtm,
+		module:      module,
 		pkgpath:     pkgpath,
 		types:       make(map[string]llvm.Value),
 		expr:        exprTypes,
@@ -682,13 +684,25 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 		// typ (function type, with receiver)
 		typ := tm.ToRuntime(ftyp)
 		method = llvm.ConstInsertValue(method, typ, []uint32{3})
-		// ifn (single-word receiver function pointer for interface calls)
-		ifn := tm.resolver.Resolve(m).LLVMValue() // TODO generate trampoline as necessary.
-		ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
-		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
+
 		// tfn (standard method/function pointer for plain method calls)
 		tfn := tm.resolver.Resolve(m).LLVMValue()
 		tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+
+		// ifn (single-word receiver function pointer for interface calls)
+		ifn := tfn
+		recvtyp := tm.ToLLVM(ftyp.Recv.Type.(types.Type))
+		if int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize() {
+			// If the receiver type is wider than a word, we
+			// need to use an intermediate function which takes
+			// a pointer-receiver, loads it, and then calls the
+			// standard receiver function.
+			fname := fmt.Sprintf("*%s.%s", ftyp.Recv.Type, m.Name)
+			ifn = tm.module.NamedFunction(fname)
+			ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+		}
+
+		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
 		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
 		methods[index] = method
 	}
