@@ -299,17 +299,23 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		// FIXME currently allocating all variables on the heap.
 		// Change this to allocate on the stack, and perform
 		// escape analysis to determine whether to promote.
-		var llvmInit llvm.Value
 		typ := name.Obj.Type.(types.Type)
-		ptr := c.createTypeMalloc(c.types.ToLLVM(typ))
+		llvmtyp := c.types.ToLLVM(typ)
+		ptr := c.createTypeMalloc(llvmtyp)
 		if values == nil || values[i] == nil {
-			// If no initialiser was specified, set it to the
-			// zero value.
-			llvmInit = llvm.ConstNull(c.types.ToLLVM(typ))
+			// If no initialiser was specified, bzero it.
+			bzero := c.NamedFunction("runtime.bzero", "func f(unsafe.Pointer, uintptr)")
+			ptr := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
+			args := []llvm.Value{ptr, llvm.SizeOf(llvmtyp)}
+			c.builder.CreateCall(bzero, args, "")
 		} else {
-			llvmInit = values[i].Convert(typ).LLVMValue()
+			// FIXME we need to revisit how aggregate types
+			// are initialised/copied/etc. A CreateStore will
+			// try to do everything in registers, which is
+			// going to hurt when the aggregate is large.
+			llvmInit := values[i].Convert(typ).LLVMValue()
+			c.builder.CreateStore(llvmInit, ptr)
 		}
-		c.builder.CreateStore(llvmInit, ptr)
 		stackvar := c.NewLLVMValue(ptr, &types.Pointer{Base: typ}).makePointee()
 		stackvar.stack = c.functions[len(c.functions)-1]
 		name.Obj.Data = stackvar

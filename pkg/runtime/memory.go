@@ -36,6 +36,11 @@ func memcpy(dst, src unsafe.Pointer, size int)
 func memmove(dst, src unsafe.Pointer, size int)
 func memset(dst unsafe.Pointer, fill byte, size int)
 
+func bzero(dst unsafe.Pointer, size uintptr) {
+	// FIXME, change memset et al. to take uintptr
+	memset(dst, 0, int(size))
+}
+
 // #llgo name: mmap
 func mmap(addr unsafe.Pointer, len uintptr, prot int32, flags int32, fd int32, off uintptr) unsafe.Pointer
 
