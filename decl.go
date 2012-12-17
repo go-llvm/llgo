@@ -49,14 +49,12 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		ftyp = &types.Func{ /* no params or result */}
 	} else {
 		ftyp = f.Name.Obj.Type.(*types.Func)
-		if f.Recv != nil || (c.module.Name != "main" && fname != "main") {
-			if ftyp.Recv != nil {
-				recv := ftyp.Recv.Type.(types.Type)
-				fname = fmt.Sprintf("%s.%s", recv, fname)
-			} else {
-				pkgname := c.pkgmap[f.Name.Obj]
-				fname = pkgname + "." + fname
-			}
+		if ftyp.Recv != nil {
+			recv := ftyp.Recv.Type.(types.Type)
+			fname = fmt.Sprintf("%s.%s", recv, fname)
+		} else if c.module.Name != "main" || fname != "main" {
+			pkgname := c.pkgmap[f.Name.Obj]
+			fname = pkgname + "." + fname
 		}
 	}
 
