@@ -30,12 +30,6 @@ func testdata(files ...string) []string {
 func init() {
 	llvm.LinkInJIT()
 	llvm.InitializeNativeTarget()
-
-	var err error
-	testCompiler, err = initCompiler()
-	if err != nil {
-		panic(err)
-	}
 }
 
 func readPipe(p int, c chan<- string) {
@@ -222,6 +216,12 @@ func checkStringsEqualUnordered(out, expectedOut []string) error {
 }
 
 func runAndCheckMain(check func(a, b []string) error, files []string) error {
+	var err error
+	testCompiler, err = initCompiler()
+	if err != nil {
+		return fmt.Errorf("Failed to initialise compiler: %s", err)
+	}
+
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
