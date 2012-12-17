@@ -159,8 +159,8 @@ func (c *compiler) buildInterfaceFunction(fn llvm.Value) llvm.Value {
 	fntyp := fn.Type().ElementType()
 	entry := llvm.AddBasicBlock(ifn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
-	recv := c.builder.CreateLoad(ifn.Param(0), "recv")
-	args := []llvm.Value{recv}
+	args := ifn.Params()
+	args[0] = c.builder.CreateLoad(args[0], "recv")
 	result := c.builder.CreateCall(fn, args, "")
 	if fntyp.ReturnType().TypeKind() == llvm.VoidTypeKind {
 		c.builder.CreateRetVoid()
