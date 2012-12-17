@@ -55,8 +55,8 @@ func parseAttribute(line string) Attribute {
 		return parseLinkageAttribute(value)
 	case "name":
 		return nameAttribute(strings.TrimSpace(value))
-	case "intrinsic":
-		return parseIntrinsicAttribute(strings.TrimSpace(value))
+	case "attr":
+		return parseLLVMAttribute(strings.TrimSpace(value))
 	default:
 		// FIXME decide what to do here. return error? log warning?
 		panic("unknown attribute key: " + key)
@@ -123,23 +123,23 @@ func (a nameAttribute) Apply(v Value) {
 	}
 }
 
-func parseIntrinsicAttribute(value string) intrinsicAttribute {
-	var result intrinsicAttribute
+func parseLLVMAttribute(value string) llvmAttribute {
+	var result llvmAttribute
 	value = strings.Replace(value, ",", " ", -1)
 	for _, field := range strings.Fields(value) {
 		switch strings.ToLower(field) {
 		case "noreturn":
-			result |= intrinsicAttribute(llvm.NoReturnAttribute)
+			result |= llvmAttribute(llvm.NoReturnAttribute)
 		case "nounwind":
-			result |= intrinsicAttribute(llvm.NoUnwindAttribute)
+			result |= llvmAttribute(llvm.NoUnwindAttribute)
 		}
 	}
 	return result
 }
 
-type intrinsicAttribute llvm.Attribute
+type llvmAttribute llvm.Attribute
 
-func (a intrinsicAttribute) Apply(v Value) {
+func (a llvmAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Func); isfunc {
 		v.LLVMValue().AddFunctionAttr(llvm.Attribute(a))
 	} else {
