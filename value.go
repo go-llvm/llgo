@@ -271,7 +271,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.SHR:
 		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
-		result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		if signed(lhs.Type()) {
+			result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else {
+			result = b.CreateLShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.NEQ:
 		if isfp {
