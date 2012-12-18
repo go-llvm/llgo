@@ -307,7 +307,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 
 	switch typ := types.Underlying(typ).(type) {
 	case *types.Array:
-		index := index.LLVMValue()
+		index := index.Convert(types.Int).LLVMValue()
 		var ptr llvm.Value
 		value := value.(*LLVMValue)
 		if value.pointer != nil {
@@ -323,7 +323,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		return result.makePointee()
 
 	case *types.Slice:
-		index := index.LLVMValue()
+		index := index.Convert(types.Int).LLVMValue()
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
 		result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
