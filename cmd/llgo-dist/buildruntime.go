@@ -32,12 +32,13 @@ func getPackage(pkgpath string) (*build.Package, error) {
 		}
 
 		// Look for .ll files, treat them the same as .s.
-		// TODO look for build tags in the .ll file, check filename
-		// for GOOS/GOARCH, etc.
+		// TODO look for build tags in the .ll file
 		var llfiles []string
 		llfiles, err = filepath.Glob(pkg.Dir + "/*.ll")
 		for _, file := range llfiles {
-			pkg.SFiles = append(pkg.SFiles, file)
+			if goodOSArchFile(filepath.Base(file)) {
+				pkg.SFiles = append(pkg.SFiles, file)
+			}
 		}
 	}
 
