@@ -3,7 +3,6 @@
 ; license that can be found in the LICENSE file.
 
 declare double @llvm.fabs.f64(double)
-declare double @llvm.floor.f64(double)
 declare double @llvm.sqrt.f64(double)
 
 declare double @math.ldexp(double, i32)
@@ -42,13 +41,11 @@ declare double @math.atan(double)
 declare double @math.exp(double)
 @math.Exp = alias double (double)* @math.exp
 
+declare double @math.floor(double)
+@math.Floor = alias double (double)* @math.floor
+
 define double @math.Abs(double) {
 	%2 = call double (double)* @llvm.fabs.f64(double %0)
-	ret double %2
-}
-
-define double @math.Floor(double) {
-	%2 = call double (double)* @llvm.floor.f64(double %0)
 	ret double %2
 }
 
