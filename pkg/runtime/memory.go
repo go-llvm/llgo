@@ -25,10 +25,10 @@ package runtime
 import "unsafe"
 
 // #llgo name: malloc
-func c_malloc(uint32) *int8
+func c_malloc(uintptr) *int8
 
 func malloc(size uintptr) unsafe.Pointer {
-	return unsafe.Pointer(c_malloc(uint32(size)))
+	return unsafe.Pointer(c_malloc(size))
 }
 
 func free(unsafe.Pointer)
