@@ -69,6 +69,10 @@ func buildLlgo() error {
 		}
 		triple = strings.TrimSpace(string(output))
 	}
+	if err = initGOVARS(triple); err != nil {
+		return err
+	}
+	log.Printf("GOARCH = %s, GOOS = %s", GOARCH, GOOS)
 
 	log.Printf("Built %s", llgobin)
 	return nil

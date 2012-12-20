@@ -9,7 +9,7 @@ func main() {
     ptr := &i[0]
     println(*ptr)
     ptr_i := unsafe.Pointer(ptr)
-    ptr_i = unsafe.Pointer(uintptr(ptr_i) + 4)
+    ptr_i = unsafe.Pointer(uintptr(ptr_i) + unsafe.Sizeof(i[0]))
     ptr = (*int)(ptr_i)
     println(*ptr)
 }
