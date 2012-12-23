@@ -58,7 +58,7 @@ func slicecopy(t unsafe.Pointer, a, b slice) uint {
 	if b.len < n {
 		n = b.len
 	}
-	copylen := int(slicetyp.elem.size * uintptr(b.len))
+	copylen := int(slicetyp.elem.size * uintptr(n))
 	memmove(unsafe.Pointer(a.array), unsafe.Pointer(b.array), copylen)
 	return n
 }
