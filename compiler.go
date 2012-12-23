@@ -298,6 +298,14 @@ func (compiler *compiler) Dispose() {
 func (compiler *compiler) Compile(fset *token.FileSet,
 	pkg *ast.Package, importpath string,
 	exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
+
+	// FIXME I'd prefer if we didn't modify global state. Perhaps
+	// we should always take a copy of types.Universe?
+	defer func() {
+		types.Universe.Lookup("true").Data = types.Const{true}
+		types.Universe.Lookup("false").Data = types.Const{false}
+	}()
+
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
 	compiler.pkg = pkg

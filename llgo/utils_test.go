@@ -221,6 +221,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to initialise compiler: %s", err)
 	}
+	defer testCompiler.Dispose()
 
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
