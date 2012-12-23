@@ -283,7 +283,14 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 
 	case *types.Struct:
 		values := valuelist
-		struct_value := c.createTypeMalloc(c.types.ToLLVM(typ))
+		llvmtyp := c.types.ToLLVM(typ)
+		ptr := c.createTypeMalloc(llvmtyp)
+
+		bzero := c.NamedFunction("runtime.bzero", "func f(unsafe.Pointer, uintptr)")
+		ptrintval := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
+		args := []llvm.Value{ptrintval, llvm.SizeOf(llvmtyp)}
+		c.builder.CreateCall(bzero, args, "")
+
 		if valuemap != nil {
 			for key, value := range valuemap {
 				fieldName := key.(string)
@@ -295,17 +302,14 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 			}
 		}
 		for i, value := range values {
-			elttype := typ.Fields[i].Type.(types.Type)
-			var llvm_value llvm.Value
-			if value == nil {
-				llvm_value = llvm.ConstNull(c.types.ToLLVM(elttype))
-			} else {
-				llvm_value = value.Convert(elttype).LLVMValue()
+			if value != nil {
+				elttype := typ.Fields[i].Type.(types.Type)
+				llvm_value := value.Convert(elttype).LLVMValue()
+				ptr := c.builder.CreateStructGEP(ptr, i, "")
+				c.builder.CreateStore(llvm_value, ptr)
 			}
-			ptr := c.builder.CreateStructGEP(struct_value, i, "")
-			c.builder.CreateStore(llvm_value, ptr)
 		}
-		m := c.NewLLVMValue(struct_value, &types.Pointer{Base: origtyp})
+		m := c.NewLLVMValue(ptr, &types.Pointer{Base: origtyp})
 		return m.makePointee()
 
 	case *types.Map:
