@@ -24,12 +24,6 @@ package runtime
 
 import "unsafe"
 
-type slice struct {
-	array *uint8
-	len   uint
-	cap   uint
-}
-
 // sliceappend takes a slice type and two slices, and returns the
 // result of appending the second slice to the first, growing the
 // slice as necessary.

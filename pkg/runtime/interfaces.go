@@ -56,10 +56,6 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 		return false
 	}
 	dyntyp := *dyntypptr
-	if dyntyp.kind == ptrKind {
-		ptrtyp := (*ptrType)(unsafe.Pointer(&dyntyp.commonType))
-		dyntyp = ptrtyp.elem
-	}
 	if dyntyp.uncommonType != nil {
 		typ := (*type_)(unsafe.Pointer(typ_))
 		targettyp := (*interfaceType)(unsafe.Pointer(&typ.commonType))

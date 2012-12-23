@@ -6,11 +6,6 @@ package runtime
 
 import "unsafe"
 
-type _string struct {
-	str *uint8
-	len int
-}
-
 func strcat(a, b _string) _string {
 	if a.len == 0 {
 		return b

@@ -65,9 +65,9 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		fn = llvm.AddFunction(c.module.Module, fname, llvmftyp)
 		if ftyp.Recv != nil {
 			// Create an interface function if the receiver is
-			// wider than a word.
+			// not a pointer type.
 			recvtyp := ftyp.Recv.Type.(types.Type)
-			if c.Sizeof(recvtyp) > c.target.PointerSize() {
+			if _, ptr := recvtyp.(*types.Pointer); !ptr {
 				returntyp := llvmftyp.ReturnType()
 				paramtypes := llvmftyp.ParamTypes()
 				paramtypes[0] = llvm.PointerType(paramtypes[0], 0)
@@ -150,7 +150,7 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 	}
 }
 
-func (c *compiler) buildInterfaceFunction(fn llvm.Value) llvm.Value {
+func (c *compiler) buildPtrRecvFunction(fn llvm.Value) llvm.Value {
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 	ifname := "*" + fn.Name()
 	ifn := c.module.Module.NamedFunction(ifname)
@@ -191,11 +191,11 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	c.buildFunction(fn, paramObjects, f.Body)
 
 	if f.Recv != nil {
-		// If the receiver is wider than a word, we need
-		// to create another function for use in interfaces.
+		// Create a shim function if the receiver is not
+		// a pointer type.
 		recvtyp := ftyp.Recv.Type.(types.Type)
-		if c.Sizeof(recvtyp) > c.target.PointerSize() {
-			c.buildInterfaceFunction(fn.value)
+		if _, ptr := recvtyp.(*types.Pointer); !ptr {
+			c.buildPtrRecvFunction(fn.value)
 		}
 	} else if f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.

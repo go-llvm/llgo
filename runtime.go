@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
@@ -43,21 +44,22 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		}
 
 		// Parse the runtime package, since we may need to refer to
-		// its types. TODO cache the package.
+		// its types. Can't be cached, because type-checking can't
+		// be done twice on the AST.
 		buildpkg, err := build.Import("github.com/axw/llgo/pkg/runtime", "", 0)
 		if err != nil {
 			panic(err)
 		}
-		runtimefiles := make([]string, len(buildpkg.GoFiles))
-		for i, f := range buildpkg.GoFiles {
-			runtimefiles[i] = path.Join(buildpkg.Dir, f)
-		}
+
+		// All types visible to the compiler are in "types.go".
+		runtimefiles := []string{path.Join(buildpkg.Dir, "types.go")}
 
 		files, err := parseFiles(fset, runtimefiles)
 		if err != nil {
 			panic(err)
 		}
 		files["<src>"] = file
+
 		pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
 		if err != nil {
 			panic(err)
@@ -75,6 +77,58 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 	}
 	c.functions[name+":"+signature] = f
 	return f
+}
+
+func parseFile(fset *token.FileSet, name string) (*ast.File, error) {
+	return parser.ParseFile(fset, name, nil, parser.DeclarationErrors)
+}
+
+func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File, err error) {
+	files = make(map[string]*ast.File)
+	for _, filename := range filenames {
+		var file *ast.File
+		file, err = parseFile(fset, filename)
+		if err != nil {
+			return
+		} else if file != nil {
+			if files[filename] != nil {
+				err = fmt.Errorf("%q: duplicate file", filename)
+				return
+			}
+			files[filename] = file
+		}
+	}
+	return
+}
+
+// parseReflect parses the reflect package and type-checks its AST.
+// This is used to generate runtime type structures.
+func (c *compiler) parseReflect() (*ast.Package, error) {
+	buildpkg, err := build.Import("reflect", "", 0)
+	if err != nil {
+		return nil, err
+	}
+
+	filenames := make([]string, len(buildpkg.GoFiles))
+	for i, f := range buildpkg.GoFiles {
+		filenames[i] = path.Join(buildpkg.Dir, f)
+	}
+	fset := token.NewFileSet()
+	files, err := parseFiles(fset, filenames)
+	if err != nil {
+		return nil, err
+	}
+
+	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = types.Check(buildpkg.Name, c, fset, pkg)
+	if err != nil {
+		return nil, err
+	}
+	return pkg, nil
 }
 
 func (c *compiler) createMalloc(size llvm.Value) llvm.Value {

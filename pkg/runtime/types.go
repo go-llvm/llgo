@@ -32,7 +32,6 @@ type type_ struct {
 	commonType
 }
 
-// These types are based on those from runtime/type.go
 type commonType struct {
 	size       uintptr
 	hash       uint32
@@ -44,7 +43,7 @@ type commonType struct {
 	gc         unsafe.Pointer
 	string     *string
 	*uncommonType
-	_ uintptr // *runtimeType
+	ptrToThis *type_
 }
 
 type uncommonType struct {
@@ -56,8 +55,8 @@ type uncommonType struct {
 type method struct {
 	name    *string
 	pkgPath *string
-	mtyp    *interface{}
-	typ     *interface{}
+	mtyp    *type_
+	typ     *type_
 	ifn     unsafe.Pointer
 	tfn     unsafe.Pointer
 }
@@ -89,10 +88,37 @@ type ptrType struct {
 	elem *type_
 }
 
+type arrayType struct {
+	commonType
+	elem  *type_
+	slice *type_
+	len   uintptr
+}
+
 type chanType struct {
 	commonType
 	elem *type_
 	dir  uintptr
+}
+
+type funcType struct {
+	commonType
+	dotdotdot bool
+	in        []*type_
+	out       []*type_
+}
+
+type structField struct {
+	name    *string
+	pkgPath *string
+	typ     *type_
+	tag     *string
+	offset  uintptr
+}
+
+type structType struct {
+	commonType
+	fields []structField
 }
 
 const (
@@ -156,4 +182,18 @@ func eqtyp(t1, t2 *type_) bool {
 		}
 	}
 	return false
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Types used in runtime function signatures.
+
+type _string struct {
+	str *uint8
+	len int
+}
+
+type slice struct {
+	array *uint8
+	len   uint
+	cap   uint
 }

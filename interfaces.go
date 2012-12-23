@@ -136,8 +136,22 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			}
 			method := v.compiler.Resolve(methodobj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
-			if overwide {
-				ifname := fmt.Sprintf("*%s.%s", v.Type(), methodobj.Name)
+
+			// If we have a receiver wider than a word, or a pointer
+			// receiver value and non-pointer receiver method, then
+			// we must use the "wrapper" pointer method.
+			fntyp := methodobj.Type.(*types.Func)
+			recvtyp := fntyp.Recv.Type.(types.Type)
+			needload := overwide
+			if !needload {
+				// TODO handle embedded types here.
+				//needload = types.Identical(v.Type(), recvtyp)
+				if p, ok := v.Type().(*types.Pointer); ok {
+					needload = types.Identical(p.Base, recvtyp)
+				}
+			}
+			if needload {
+				ifname := fmt.Sprintf("*%s.%s", recvtyp, methodobj.Name)
 				llvm_value = v.compiler.module.NamedFunction(ifname)
 			}
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
