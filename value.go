@@ -228,6 +228,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	// TODO determine the NaN rules.
 	isfp := types.Identical(types.Underlying(lhs.typ), types.Float32) ||
 		types.Identical(types.Underlying(lhs.typ), types.Float64)
+	issigned := isfp || signed(lhs.typ)
 
 	switch op {
 	case token.MUL:
@@ -238,16 +239,22 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.QUO:
-		if isfp {
+		switch {
+		case isfp:
 			result = b.CreateFDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateSDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
 	case token.REM:
-		if isfp {
+		switch {
+		case isfp:
 			result = b.CreateFRem(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateSRem(lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateURem(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, lhs.typ)
@@ -292,30 +299,42 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.LSS:
-		if isfp {
+		switch {
+		case isfp:
 			result = b.CreateFCmp(llvm.FloatOLT, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateICmp(llvm.IntSLT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
-	case token.LEQ: // TODO signed/unsigned
-		if isfp {
+	case token.LEQ:
+		switch {
+		case isfp:
 			result = b.CreateFCmp(llvm.FloatOLE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateICmp(llvm.IntSLE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GTR:
-		if isfp {
+		switch {
+		case isfp:
 			result = b.CreateFCmp(llvm.FloatOGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateICmp(llvm.IntSGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
 	case token.GEQ:
-		if isfp {
+		switch {
+		case isfp:
 			result = b.CreateFCmp(llvm.FloatOGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
+		case issigned:
+			result = b.CreateICmp(llvm.IntSGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		default:
 			result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewLLVMValue(result, types.Bool)
