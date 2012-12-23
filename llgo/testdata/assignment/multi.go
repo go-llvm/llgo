@@ -20,6 +20,11 @@ func main() {
 	b, a = abc()
 	println(a, b)
 
+	// swap
+	println(a, b)
+	a, b = b, a
+	println(a, b)
+
 	var s S
 	s.a, s.b = a, b
 	println(s.a, s.b)

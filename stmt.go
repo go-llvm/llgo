@@ -230,8 +230,10 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			values[i] = c.VisitExpr(expr)
 		}
 	}
+
+	// Must evaluate lhs before evaluating rhs.
+	lhsptrs := make([]llvm.Value, len(stmt.Lhs))
 	for i, expr := range stmt.Lhs {
-		value := values[i]
 		switch x := expr.(type) {
 		case *ast.Ident:
 			if x.Name == "_" {
@@ -239,13 +241,14 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			}
 			obj := x.Obj
 			if stmt.Tok == token.DEFINE {
-				value_type := value.LLVMValue().Type()
-				ptr := c.builder.CreateAlloca(value_type, x.Name)
-				c.builder.CreateStore(value.LLVMValue(), ptr)
-				llvm_value := c.NewLLVMValue(ptr, &types.Pointer{Base: value.Type()})
-				stackvar := llvm_value.makePointee()
+				typ := obj.Type.(types.Type)
+				llvmtyp := c.types.ToLLVM(typ)
+				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
+				ptrtyp := &types.Pointer{Base: typ}
+				stackvar := c.NewLLVMValue(ptr, ptrtyp).makePointee()
 				stackvar.stack = c.functions[len(c.functions)-1]
 				obj.Data = stackvar
+				lhsptrs[i] = ptr
 				continue
 			}
 			if obj.Data == nil {
@@ -263,18 +266,31 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 					m := c.VisitExpr(x.X).(*LLVMValue)
 					index := c.VisitExpr(x.Index)
 					elem, _ := c.mapLookup(m, index, true)
-					ptr := elem.pointer
-					value = value.Convert(types.Deref(ptr.Type()))
-					c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
+					lhsptrs[i] = elem.pointer.LLVMValue()
+					values[i] = values[i].Convert(elem.Type())
 					continue
 				}
 			}
 		}
 
 		// default (since we can't fallthrough in non-map index exprs)
-		ptr := c.VisitExpr(expr).(*LLVMValue).pointer
-		value = value.Convert(types.Deref(ptr.Type()))
-		c.builder.CreateStore(value.LLVMValue(), ptr.LLVMValue())
+		lhs := c.VisitExpr(expr).(*LLVMValue)
+		lhsptrs[i] = lhs.pointer.LLVMValue()
+		values[i] = values[i].Convert(lhs.Type())
+	}
+
+	// Must evaluate all of rhs values before assigning.
+	llvmvalues := make([]llvm.Value, len(values))
+	for i, v := range values {
+		if !lhsptrs[i].IsNil() {
+			llvmvalues[i] = v.LLVMValue()
+		}
+	}
+	for i, v := range llvmvalues {
+		ptr := lhsptrs[i]
+		if !ptr.IsNil() {
+			c.builder.CreateStore(v, ptr)
+		}
 	}
 }
 
