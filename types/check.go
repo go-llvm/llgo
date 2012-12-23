@@ -169,7 +169,7 @@ func untypedPriority(t Type) int {
 
 // convertUntyped takes an object, and, if it is untyped, gives it
 // a named builtin type: bool, rune, int, float64, complex128 or string.
-func maybeConvertUntyped(obj *ast.Object) {
+func maybeConvertUntyped(obj *ast.Object) bool {
 	switch obj.Type {
 	case Bool.Underlying:
 		obj.Type = Bool
@@ -183,7 +183,10 @@ func maybeConvertUntyped(obj *ast.Object) {
 		obj.Type = Complex128
 	case String.Underlying:
 		obj.Type = String
+	default:
+		return false
 	}
+	return true
 }
 
 // checkExpr type checks an expression and returns its type.
@@ -577,8 +580,10 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 
 		name := x.Sel.Name
 		var t Type
+		var methodexpr bool
 		if isType(x.X) {
 			t = c.makeType(x.X, true)
+			methodexpr = true
 		} else {
 			t = c.checkExpr(x.X, nil)
 		}
@@ -643,7 +648,20 @@ func (c *checker) checkExpr(x ast.Expr, assignees []*ast.Ident) (typ Type) {
 			return &Bad{Msg: msg}
 		} else {
 			c.checkObj(x.Sel.Obj, false)
-			return x.Sel.Obj.Type.(Type)
+			typ := x.Sel.Obj.Type.(Type)
+			if methodexpr {
+				ftyp := typ.(*Func)
+				methodParams := make(ObjList, len(ftyp.Params)+1)
+				methodParams[0] = ftyp.Recv
+				copy(methodParams[1:], ftyp.Params)
+				typ = &Func{
+					Recv:       nil,
+					Params:     methodParams,
+					Results:    ftyp.Results,
+					IsVariadic: ftyp.IsVariadic,
+				}
+			}
+			return typ
 		}
 
 	case *ast.IndexExpr:
@@ -999,7 +1017,7 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		// TODO Each left-hand side operand must be addressable,
 		// a map index expression, or the blank identifier. Operands
 		// may be parenthesized.
-		if len(s.Rhs) == 1 {
+		if len(s.Rhs) < len(s.Lhs) {
 			idents := make([]*ast.Ident, len(s.Lhs))
 			for i, e := range s.Lhs {
 				if ident, ok := e.(*ast.Ident); ok {
@@ -1022,11 +1040,19 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				lhs := s.Lhs[i]
 				if ident, ok := lhs.(*ast.Ident); ok && ident.Obj != nil {
 					idents[0] = ident
-					c.checkExpr(e, idents)
-					maybeConvertUntyped(ident.Obj)
+					rhstyp := c.checkExpr(e, idents)
+					if !maybeConvertUntyped(ident.Obj) {
+						lhstyp := ident.Obj.Type.(Type)
+						if _, untyped := rhstyp.(*Basic); untyped {
+							c.types[e] = lhstyp
+						}
+					}
 				} else {
-					c.checkExpr(lhs, nil)
-					c.checkExpr(e, nil)
+					lhstyp := c.checkExpr(lhs, nil)
+					rhstyp := c.checkExpr(e, nil)
+					if _, untyped := rhstyp.(*Basic); untyped {
+						c.types[e] = lhstyp
+					}
 				}
 			}
 		}

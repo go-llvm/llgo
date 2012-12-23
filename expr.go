@@ -361,17 +361,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	if _, ok := lhs.(TypeValue); ok {
 		methodobj := expr.Sel.Obj
 		value := c.Resolve(methodobj).(*LLVMValue)
-		ftyp := value.typ.(*types.Func)
-		methodParams := make(types.ObjList, len(ftyp.Params)+1)
-		methodParams[0] = ftyp.Recv
-		copy(methodParams[1:], ftyp.Params)
-		ftyp = &types.Func{
-			Recv:       nil,
-			Params:     methodParams,
-			Results:    ftyp.Results,
-			IsVariadic: ftyp.IsVariadic,
-		}
-		return c.NewLLVMValue(value.value, ftyp)
+		return c.NewLLVMValue(value.value, c.types.expr[expr])
 	}
 
 	// TODO(?) record path to field/method during typechecking, so we don't

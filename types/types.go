@@ -117,9 +117,6 @@ func (s *Struct) String() string {
 		if i > 0 {
 			str += "; "
 		}
-		if field.Name != "" {
-			str += field.Name + " "
-		}
 		str += fmt.Sprint(field.Type)
 		if s.Tags != nil && s.Tags[i] != "" {
 			str += fmt.Sprintf(" %q", s.Tags[i])
@@ -151,19 +148,12 @@ type Func struct {
 func (f *Func) String() string {
 	str := "func "
 	if f.Recv != nil {
-		str += "("
-		if f.Recv.Name != "" {
-			str += f.Recv.Name + " "
-		}
-		str += fmt.Sprint(f.Recv.Type) + ")"
+		str += fmt.Sprintf("(%s)", f.Recv.Type)
 	}
 	str += "("
 	for i, param := range f.Params {
 		if i > 0 {
 			str += ", "
-		}
-		if param.Name != "" {
-			str += param.Name + " "
 		}
 		if f.IsVariadic && i == len(f.Params)-1 {
 			str += "..."
@@ -177,9 +167,6 @@ func (f *Func) String() string {
 	for i, result := range f.Results {
 		if i > 0 {
 			str += ", "
-		}
-		if result.Name != "" {
-			str += result.Name + " "
 		}
 		str += fmt.Sprint(result.Type)
 	}
