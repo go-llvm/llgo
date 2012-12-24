@@ -126,7 +126,7 @@ func addRuntime(m *llgo.Module) (err error) {
 	return
 }
 
-func runFunction(m *llgo.Module, name string) (output []string, err error) {
+func runMainFunction(m *llgo.Module) (output []string, err error) {
 	addExterns(m)
 	err = addRuntime(m)
 	if err != nil {
@@ -145,9 +145,9 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 	}
 	defer engine.Dispose()
 
-	fn := engine.FindFunction(name)
+	fn := engine.FindFunction("main")
 	if fn.IsNil() {
-		err = fmt.Errorf("Couldn't find function '%s'", name)
+		err = fmt.Errorf("Couldn't find function 'main'")
 		return
 	}
 
@@ -173,7 +173,13 @@ func runFunction(m *llgo.Module, name string) (output []string, err error) {
 	c := make(chan string)
 	go readPipe(pipe_fds[0], c)
 
-	exec_args := []llvm.GenericValue{}
+	// FIXME implement and use RunFunctionAsMain
+	argv0 := []byte("llgo-test\000")
+	argv0ptr := &argv0
+	exec_args := []llvm.GenericValue{
+		llvm.NewGenericValueFromInt(llvm.Int32Type(), 1, true),
+		llvm.NewGenericValueFromPointer(unsafe.Pointer(&argv0ptr)),
+	}
 	engine.RunStaticConstructors()
 	engine.RunFunction(fn, exec_args)
 	defer engine.RunStaticDestructors()
@@ -237,7 +243,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	if err != nil {
 		return err
 	}
-	output, err := runFunction(m, "main")
+	output, err := runMainFunction(m)
 	if err == nil {
 		err = check(output, expected)
 	}
