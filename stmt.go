@@ -522,8 +522,23 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 		stmtBlocks = append(stmtBlocks, llvm.InsertBasicBlock(endBlock, ""))
 	}
 
+	// Move the "default" block to the end, if there is one.
+	caseclauses := make([]*ast.CaseClause, 0, len(stmt.Body.List))
+	var defaultclause *ast.CaseClause
+	for _, stmt := range stmt.Body.List {
+		clause := stmt.(*ast.CaseClause)
+		if clause.List == nil {
+			defaultclause = clause
+		} else {
+			caseclauses = append(caseclauses, clause)
+		}
+	}
+	if defaultclause != nil {
+		caseclauses = append(caseclauses, defaultclause)
+	}
+
 	c.builder.CreateBr(caseBlocks[0])
-	for i, stmt := range stmt.Body.List {
+	for i, clause := range caseclauses {
 		c.builder.SetInsertPointAtEnd(caseBlocks[i])
 		stmtBlock := stmtBlocks[i]
 		nextBlock := endBlock
@@ -531,7 +546,6 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 			nextBlock = caseBlocks[i+1]
 		}
 
-		clause := stmt.(*ast.CaseClause)
 		if clause.List != nil {
 			value := c.VisitExpr(clause.List[0])
 			result := value.BinaryOp(token.EQL, tag)

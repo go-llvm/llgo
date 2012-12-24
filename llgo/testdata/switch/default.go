@@ -5,4 +5,11 @@ func main() {
 	default:
 		println("default")
 	}
+
+	switch {
+	default:
+		println("default")
+	case true:
+		println("true")
+	}
 }
