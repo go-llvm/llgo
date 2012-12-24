@@ -156,6 +156,8 @@ const (
 func eqtyp(t1, t2 *type_) bool {
 	if t1 == t2 {
 		return true
+	} else if t1 == nil || t2 == nil {
+		return false
 	}
 	if t1.kind == t2.kind {
 		// TODO check rules for type equality.

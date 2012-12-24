@@ -12,6 +12,16 @@ type I interface {
 
 func main() {
 	var x interface{}
+
+	// x is nil. Let's make sure an assertion on it
+	// won't cause a panic.
+	if x, ok := x.(int32); ok {
+		println("i2v:", x)
+	}
+	if x == nil {
+		println("x is nil")
+	}
+
 	x = int32(123456)
 
 	// Let's try an interface-to-value assertion.
