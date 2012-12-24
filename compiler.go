@@ -29,6 +29,7 @@ import (
 	"go/ast"
 	"go/token"
 	"log"
+	"strconv"
 	"strings"
 )
 
@@ -364,12 +365,23 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		compiler.exportBuiltinRuntimeTypes()
 	}
 
+	// Wrap "main.main" in a call to runtime.main.
+	if pkg.Name == "main" {
+		compiler.createMainFunction()
+	}
+
 	// Create global constructors. The initfuncs/varinitfuncs
-	// slices are in the order of visitation, and that is how
-	// their priorities are assigned.
+	// slices are in the order of visitation; we generate the
+	// list of constructors in the reverse order.
 	//
-	// The llgo linker (llgo-link) is responsible for reordering
-	// global constructors according to package dependency order.
+	// The llgo linker will link modules in the order of
+	// package dependency, i.e. if A requires B, then llgo-link
+	// will link the modules in the order A, B. The "runtime"
+	// package is always last.
+	//
+	// At program initialisation, the runtime initialisation
+	// function (runtime.main) will invoke the constructors
+	// in reverse order.
 	var initfuncs [][]Value
 	if compiler.varinitfuncs != nil {
 		initfuncs = append(initfuncs, compiler.varinitfuncs)
@@ -378,28 +390,43 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		initfuncs = append(initfuncs, compiler.initfuncs)
 	}
 	if initfuncs != nil {
-		elttypes := []llvm.Type{llvm.Int32Type(), llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)}
-		ctortype := llvm.StructType(elttypes, false)
+		ctortype := llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)
 		var ctors []llvm.Value
-		var priority uint64 = 1
+		var index int = 0
 		for _, initfuncs := range initfuncs {
 			for _, fn := range initfuncs {
-				priorityval := llvm.ConstInt(llvm.Int32Type(), uint64(priority), false)
-				struct_values := []llvm.Value{priorityval, fn.LLVMValue()}
-				ctors = append(ctors, llvm.ConstStruct(struct_values, false))
-				priority++
+				fnval := fn.LLVMValue()
+				fnval.SetName("__llgo.ctor." + compiler.importpath + strconv.Itoa(index))
+				ctors = append(ctors, fnval)
+				index++
 			}
 		}
-		global_ctors_init := llvm.ConstArray(ctortype, ctors)
-		global_ctors_var := llvm.AddGlobal(compiler.module.Module, global_ctors_init.Type(), "llvm.global_ctors")
-		global_ctors_var.SetInitializer(global_ctors_init)
-		global_ctors_var.SetLinkage(llvm.AppendingLinkage)
+		for i, n := 0, len(ctors); i < n/2; i++ {
+			ctors[i], ctors[n-i-1] = ctors[n-i-1], ctors[i]
+		}
+		ctorsInit := llvm.ConstArray(ctortype, ctors)
+		ctorsVar := llvm.AddGlobal(compiler.module.Module, ctorsInit.Type(), "runtime.ctors")
+		ctorsVar.SetInitializer(ctorsInit)
+		ctorsVar.SetLinkage(llvm.AppendingLinkage)
 	}
 
 	// Create debug metadata.
 	//compiler.createMetadata()
 
 	return compiler.module, nil
+}
+
+func (c *compiler) createMainFunction() {
+	// runtime.main is called by main, with argc, argv,
+	// and a pointer to main.main.
+	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, func()) int32")
+	mainMain := c.NamedFunction("main.main", "func f()")
+	main := c.NamedFunction("main", "func f(int32, **byte) int32")
+	entry := llvm.AddBasicBlock(main, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
+	args := []llvm.Value{main.Param(0), main.Param(1), mainMain}
+	result := c.builder.CreateCall(runtimeMain, args, "")
+	c.builder.CreateRet(result)
 }
 
 // vim: set ft=go :

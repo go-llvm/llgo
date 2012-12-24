@@ -6,6 +6,9 @@ package runtime
 
 import "unsafe"
 
+// #llgo name: strlen
+func c_strlen(*uint8) uintptr
+
 func strcat(a, b _string) _string {
 	if a.len == 0 {
 		return b

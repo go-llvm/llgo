@@ -52,7 +52,7 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 		if ftyp.Recv != nil {
 			recv := ftyp.Recv.Type.(types.Type)
 			fname = fmt.Sprintf("%s.%s", recv, fname)
-		} else if c.module.Name != "main" || fname != "main" {
+		} else {
 			pkgname := c.pkgmap[f.Name.Obj]
 			fname = pkgname + "." + fname
 		}
