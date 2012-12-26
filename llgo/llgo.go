@@ -177,6 +177,7 @@ func writeObjectFile(m *llgo.Module) error {
 
 func displayVersion() {
 	fmt.Println("llgo version", llgo.LLGOVersion)
+	fmt.Println("build against Go version", runtime.Version())
 	fmt.Println()
 
 	fmt.Println("  Available targets:")
