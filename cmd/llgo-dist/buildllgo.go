@@ -37,10 +37,13 @@ func buildLlgo() error {
 	var output []byte
 	ldflags := "-r " + llvmlibdir
 	args := []string{"get", "-ldflags", ldflags}
+
+	llvmtag := "llvm" + llvmversion
 	if strings.HasSuffix(llvmversion, "svn") {
-		args = append(args, "-tags")
-		args = append(args, "llvmsvn")
+		llvmtag = "llvmsvn"
 	}
+	args = append(args, []string{"-tags", llvmtag}...)
+
 	args = append(args, llgopkgpath)
 	cmd := exec.Command("go", args...)
 	cmd.Env = os.Environ()
