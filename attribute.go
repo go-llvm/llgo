@@ -13,7 +13,7 @@ import (
 
 const AttributeCommentPrefix = "#llgo "
 
-// Atribute represents an attribute associated with a
+// Attribute represents an attribute associated with a
 // global variable or function.
 type Attribute interface {
 	Apply(Value)
