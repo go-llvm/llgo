@@ -17,15 +17,18 @@ var (
 // initGOVARS initilizes GOARCH and GOOS from the given triple.
 func initGOVARS(triple string) error {
 	type REs struct{ re, out string }
+	// reference: http://llvm.org/docs/doxygen/html/Triple_8cpp_source.html
 	goarchREs := []REs{
-		{"x86_64", "amd64"},
-		{"i?86", "386"},
-		{"arm.*", "arm"},
+		{"amd64|x86_64", "amd64"},
+		{"i[3-9]86", "386"},
+		{"xscale|((arm|thumb)(v.*)?)", "arm"},
 	}
 	goosREs := []REs{
-		{"linux", "linux"},
-		{"darwin.*", "darwin"},
-		{"macosx.*", "darwin"},
+		{"linux.*", "linux"},
+		{"(darwin|macosx|ios).*", "darwin"},
+		{"k?freebsd.*", "freebsd"},
+		{"netbsd.*", "netbsd"},
+		{"openbsd.*", "openbsd"},
 	}
 	match := func(list []REs, s string) string {
 		for _, t := range list {
@@ -39,10 +42,13 @@ func initGOVARS(triple string) error {
 	s := strings.Split(triple, "-")
 	switch l := len(s); l {
 	default:
-		return errors.New("triple should be made up of 2 or 3 parts.")
-	case 2, 3:
+		return errors.New("triple should be made up of 2, 3, or 4 parts.")
+	case 2, 3: // ARCHITECTURE-(VENDOR-)OPERATING_SYSTEM
 		GOARCH = s[0]
 		GOOS = s[l-1]
+	case 4: // ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
+		GOARCH = s[0]
+		GOOS = s[2]
 	}
 	GOARCH = match(goarchREs, GOARCH)
 	GOOS = match(goosREs, GOOS)
