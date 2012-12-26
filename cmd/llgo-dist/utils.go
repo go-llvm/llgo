@@ -39,10 +39,13 @@ func initGOVARS(triple string) error {
 	s := strings.Split(triple, "-")
 	switch l := len(s); l {
 	default:
-		return errors.New("triple should be made up of 2 or 3 parts.")
-	case 2, 3:
+		return errors.New("triple should be made up of 2, 3, or 4 parts.")
+	case 2, 3: // ARCHITECTURE-(VENDOR-)OPERATING_SYSTEM
 		GOARCH = s[0]
 		GOOS = s[l-1]
+	case 4: // ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
+		GOARCH = s[0]
+		GOOS = s[2]
 	}
 	GOARCH = match(goarchREs, GOARCH)
 	GOOS = match(goosREs, GOOS)
