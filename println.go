@@ -128,7 +128,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				}
 
 			case *types.Interface:
-				format += "(%p,%p)"
+				format += "(0x%lx,0x%lx)"
 				ival := c.builder.CreateExtractValue(llvm_value, 0, "")
 				itype := c.builder.CreateExtractValue(llvm_value, 1, "")
 				args = append(args, ival)
