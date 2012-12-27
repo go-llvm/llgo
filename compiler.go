@@ -88,7 +88,7 @@ type compiler struct {
 	scope          *ast.Scope
 	pkgmap         map[*ast.Object]string
 
-	// forlabel, if non-nil, is a LabeledStmt immediately
+	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
 	// Upon processing the statement, the label data will be updated,
 	// and forlabel set to nil.
@@ -97,6 +97,12 @@ type compiler struct {
 	*FunctionCache
 	llvmtypes *LLVMTypeMap
 	types     *TypeMap
+
+	// pnacl is set to true if the target triple was originally
+	// specified as "pnacl". This is necessary, as the TargetTriple
+	// field will have been updated to the true triple used to
+	// compile PNaCl modules.
+	pnacl bool
 }
 
 func (c *compiler) LookupObj(name string) *ast.Object {
@@ -261,6 +267,10 @@ func parseArch(arch string) string {
 
 func NewCompiler(opts CompilerOptions) (Compiler, error) {
 	compiler := &compiler{CompilerOptions: opts}
+	if strings.ToLower(compiler.TargetTriple) == "pnacl" {
+		compiler.TargetTriple = PNaClTriple
+		compiler.pnacl = true
+	}
 
 	// Triples are several fields separated by '-' characters.
 	// The first field is the architecture. The architecture's
@@ -367,7 +377,10 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 
 	// Wrap "main.main" in a call to runtime.main.
 	if pkg.Name == "main" {
-		compiler.createMainFunction()
+		err = compiler.createMainFunction()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Create global constructors. The initfuncs/varinitfuncs
@@ -416,17 +429,33 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	return compiler.module, nil
 }
 
-func (c *compiler) createMainFunction() {
+func (c *compiler) createMainFunction() error {
+	// In a PNaCl program (plugin), there should not be a "main.main";
+	// instead, we expect a "main.CreateModule" function.
+	// See pkg/nacl/ppapi/ppapi.go for more details.
+	mainMain := c.module.NamedFunction("main.main")
+	if c.pnacl {
+		// PNaCl's libppapi_stub.a implements "main", which simply
+		// calls through to PpapiPluginMain. We define our own "main"
+		// so that we can capture argc/argv.
+		if !mainMain.IsNil() {
+			return fmt.Errorf("Found main.main")
+		}
+		mainMain = c.NamedFunction("PpapiPluginMain", "func f() int32")
+	} else {
+		mainMain = c.module.NamedFunction("main.main")
+	}
+
 	// runtime.main is called by main, with argc, argv,
 	// and a pointer to main.main.
-	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, func()) int32")
-	mainMain := c.NamedFunction("main.main", "func f()")
-	main := c.NamedFunction("main", "func f(int32, **byte) int32")
+	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, **byte, func()) int32")
+	main := c.NamedFunction("main", "func f(int32, **byte, **byte) int32")
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
-	args := []llvm.Value{main.Param(0), main.Param(1), mainMain}
+	args := []llvm.Value{main.Param(0), main.Param(1), main.Param(2), mainMain}
 	result := c.builder.CreateCall(runtimeMain, args, "")
 	c.builder.CreateRet(result)
+	return nil
 }
 
 // vim: set ft=go :

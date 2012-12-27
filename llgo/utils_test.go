@@ -175,10 +175,12 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 
 	// FIXME implement and use RunFunctionAsMain
 	argv0 := []byte("llgo-test\000")
+	var envs [1]*byte
 	argv0ptr := &argv0
 	exec_args := []llvm.GenericValue{
 		llvm.NewGenericValueFromInt(llvm.Int32Type(), 1, true),
 		llvm.NewGenericValueFromPointer(unsafe.Pointer(&argv0ptr)),
+		llvm.NewGenericValueFromPointer(unsafe.Pointer(&envs)),
 	}
 	engine.RunStaticConstructors()
 	engine.RunFunction(fn, exec_args)

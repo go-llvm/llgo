@@ -8,9 +8,9 @@ package runtime
 var ctors [1]func() // nil, used to find end of list
 
 // A Go program will enter this function before doing anything else.
-func main(argc int32, argv **byte, mainmain func()) int32 {
+func main(argc int32, argv **byte, envp **byte, mainmain func()) int32 {
 	// Initialise the runtime before calling any constructors.
-	setosargs(argc, argv)
+	setosargs(argc, argv, envp)
 
 	// Constructors are in reverse order (see llgo/compiler.go for
 	// an explanation). Since runtime module must always come last,
