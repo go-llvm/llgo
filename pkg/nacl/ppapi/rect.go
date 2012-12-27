@@ -11,4 +11,3 @@ type Rect struct {
 	// Size represents the width and height of the rectangle.
 	Size
 }
-

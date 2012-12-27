@@ -2,45 +2,59 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-package ppapi
+package main
 
-import "unsafe"
+import (
+	"github.com/axw/llgo/pkg/nacl/ppapi"
+)
 
-var exampleInstance = pppInstance1_1{
-	exampleDidCreate,
-	exampleDidDestroy,
-	exampleDidChangeView,
-	exampleDidChangeFocus,
-	exampleHandleDocumentLoad,
+var module *ppapi.Module
+
+func CreateModule() (*ppapi.Module, error) {
+	var err error
+	module, err = ppapi.NewModule(creator{})
+	return module, err
 }
 
-func exampleDidChangeFocus(i Instance, hasFocus ppbool) {
+type creator struct {}
+func (_ creator) CreateInstance(ppapi.PP_Instance) (ppapi.Instance, error) {
+	return &Example{}, nil
 }
 
-func exampleHandleDocumentLoad(i Instance, urlLoader Resource) ppbool {
-	return ppboolFromBool(false)
+type Example struct {
 }
 
-func exampleDidDestroy(i Instance) {
+func (x *Example) DidCreate(args map[string]string) error {
+	module.PostMessage("alert:Hello from llgo!")
+	return nil
 }
 
-func exampleDidCreate(i Instance, argc uint32, argn, argv *cstring) ppbool {
+func (x *Example) DidChangeView(v ppapi.View) {
+}
+
+func (x *Example) DidChangeFocus(hasFocus bool) {
+}
+
+/*
+func exampleDidCreate(i PP_Instance, argc uint32, argn, argv *cstring) ppbool {
 	// Uncomment the following to exercise the "PostMessage" API.
 	// This is a simple way of sending messages to the browser.
 	//
 	// Take a look at "common.js" in the NaCl SDK examples to see
 	// how to handle messages on the browser side.
-	/*
+	//
 		message := "alert:Hello from llgo!"
 		if browserMessagingInterface != nil {
 			v := strToVar(message)
 			browserMessagingInterface.postMessage(i, v)
 		}
-	*/
+	//
 	return ppboolFromBool(true)
 }
+*/
 
-func exampleDidChangeView(inst Instance, view View) {
+/*
+func exampleDidChangeView(inst PP_Instance, view View) {
 	rect := view.Rect()
 	size := rect.Size
 	gfx := browserGraphics2DInterface.create(inst, &size, ppboolFromBool(true))
@@ -107,3 +121,4 @@ func draw(data unsafe.Pointer, result int32) {
 	usleep(50000)
 	browserGraphics2DInterface.flush(state.graphics, callback)
 }
+*/

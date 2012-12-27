@@ -5,7 +5,6 @@
 package ppapi
 
 type Size struct {
-	width int32
+	width  int32
 	height int32
 }
-

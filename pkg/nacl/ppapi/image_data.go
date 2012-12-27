@@ -21,10 +21,10 @@ type ppImageDataDesc struct {
 
 type ppbImageData1_0 struct {
 	getNativeImageDataFormat   func() ppImageDataFormat
-	isImageDataFormatSupported func(ppImageDataFormat) ppbool
-	create                     func(i Instance, f ppImageDataFormat, s *Size, initToZero ppbool) Resource
-	isImageData                func(Resource) ppbool
-	describe                   func(Resource, *ppImageDataDesc) ppbool
+	isImageDataFormatSupported func(ppImageDataFormat) ppBool
+	create                     func(i PP_Instance, f ppImageDataFormat, s *Size, initToZero ppBool) Resource
+	isImageData                func(Resource) ppBool
+	describe                   func(Resource, *ppImageDataDesc) ppBool
 	map_                       func(Resource) unsafe.Pointer
 	unmap                      func(Resource)
 }

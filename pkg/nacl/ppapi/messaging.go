@@ -5,5 +5,5 @@
 package ppapi
 
 type ppbMessaging1_0 struct {
-	postMessage func(i Instance, msg Var)
+	postMessage func(i PP_Instance, msg Var)
 }

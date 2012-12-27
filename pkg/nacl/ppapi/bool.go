@@ -6,18 +6,21 @@ package ppapi
 
 // ppbool represents a boolean value, compatible with the PP_Bool type from the
 // PPAPI C API.
-type ppbool int32
+type ppBool int32
 
-func ppboolFromBool(b bool) ppbool {
+func ppboolFromBool(b bool) ppBool {
 	if b {
-		return ppbool(1)
+		return ppBool(1)
 	}
-	return ppbool(0)
+	return ppBool(0)
 }
 
-func (b ppbool) toBool() bool {
+func (b ppBool) toBool() bool {
 	if b == 0 {
 		return false
 	}
 	return true
 }
+
+var ppFalse = ppboolFromBool(false)
+var ppTrue = ppboolFromBool(true)

@@ -4,7 +4,9 @@
 
 package ppapi
 
-import "unsafe"
+import (
+	"unsafe"
+)
 
 type Var struct {
 	Type  VarType
@@ -39,7 +41,8 @@ func MakeVarString(s string) Var {
 		cstr = unsafe.Pointer(&bytes[0])
 	}
 	var v Var
-	browserVarInterface.varFromUtf8(&v, cstr, n)
+	varIface := module.BrowserInterface("PPB_Var;1.1").(*ppbVar1_1)
+	varIface.varFromUtf8(&v, cstr, n)
 	return v
 }
 

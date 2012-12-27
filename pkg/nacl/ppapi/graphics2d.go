@@ -5,9 +5,9 @@
 package ppapi
 
 type ppbGraphics2D1_0 struct {
-	create          func(i Instance, s *Size, alwaysOpaque ppbool) Resource
-	isGraphics2D    func(Resource) ppbool
-	describe        func(r Resource, s *Size, alwaysOpaque *ppbool) ppbool
+	create          func(i PP_Instance, s *Size, alwaysOpaque ppBool) Resource
+	isGraphics2D    func(Resource) ppBool
+	describe        func(r Resource, s *Size, alwaysOpaque *ppBool) ppBool
 	paintImageData  func(gfx, img Resource, topleft *Point, src *Rect)
 	scroll          func(gfx Resource, clip *Rect, amount *Point)
 	replaceContents func(gfx, img Resource)

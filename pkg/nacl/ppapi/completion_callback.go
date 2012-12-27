@@ -10,7 +10,7 @@ type ppCompletionCallbackFlag int32
 
 const (
 	ppCOMPLETIONCALLBACK_FLAG_NONE     ppCompletionCallbackFlag = 0
-	ppCOMPLETIONCALLBACK_FLAG_OPTIONAL ppCompletionCallbackFlag = 1<<iota
+	ppCOMPLETIONCALLBACK_FLAG_OPTIONAL ppCompletionCallbackFlag = 1 << iota
 )
 
 type ppCompletionCallback struct {

@@ -13,4 +13,3 @@ type FloatPoint struct {
 	x float32
 	y float32
 }
-
