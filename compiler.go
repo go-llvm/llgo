@@ -441,7 +441,17 @@ func (c *compiler) createMainFunction() error {
 		if !mainMain.IsNil() {
 			return fmt.Errorf("Found main.main")
 		}
-		mainMain = c.NamedFunction("PpapiPluginMain", "func f() int32")
+		pluginMain := c.NamedFunction("PpapiPluginMain", "func f() int32")
+
+		// Synthesise a main which has no return value. We could cast
+		// PpapiPluginMain, but this is potentially unsafe as its
+		// calling convention is unspecified.
+		ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
+		mainMain = llvm.AddFunction(c.module.Module, "main.main", ftyp)
+		entry := llvm.AddBasicBlock(mainMain, "entry")
+		c.builder.SetInsertPointAtEnd(entry)
+		c.builder.CreateCall(pluginMain, nil, "")
+		c.builder.CreateRetVoid()
 	} else {
 		mainMain = c.module.NamedFunction("main.main")
 	}
