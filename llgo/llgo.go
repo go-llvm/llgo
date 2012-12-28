@@ -59,7 +59,7 @@ var trace = flag.Bool(
 
 var importpath = flag.String(
 	"importpath", "",
-	"Package import path of the source being compiled")
+	"Package import path of the source being compiled (empty means the same as package name)")
 
 var version = flag.Bool(
 	"version", false,
@@ -140,6 +140,11 @@ func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[strin
 	if err != nil {
 		report(err)
 		return nil, err
+	}
+
+	// an empty importpath means the same as the package name
+	if importpath == "" {
+		importpath = pkg.Name
 	}
 
 	exprTypes, err := types.Check(importpath, compiler, fset, pkg)
