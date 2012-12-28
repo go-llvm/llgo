@@ -336,13 +336,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec, isconst bool) {
 		typ := name.Obj.Type.(types.Type)
 		llvmtyp := c.types.ToLLVM(typ)
 		ptr := c.createTypeMalloc(llvmtyp)
-		if values == nil || values[i] == nil {
-			// If no initialiser was specified, bzero it.
-			bzero := c.NamedFunction("runtime.bzero", "func f(unsafe.Pointer, uintptr)")
-			ptr := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-			args := []llvm.Value{ptr, llvm.SizeOf(llvmtyp)}
-			c.builder.CreateCall(bzero, args, "")
-		} else {
+		if values != nil && values[i] != nil {
 			// FIXME we need to revisit how aggregate types
 			// are initialised/copied/etc. A CreateStore will
 			// try to do everything in registers, which is

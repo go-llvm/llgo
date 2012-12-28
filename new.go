@@ -23,7 +23,6 @@ SOFTWARE.
 package llgo
 
 import (
-	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo/types"
 	"go/ast"
 )
@@ -36,7 +35,6 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 	typ := ptrtyp.Base
 	llvmtyp := c.types.ToLLVM(typ)
 	mem := c.createTypeMalloc(llvmtyp)
-	c.builder.CreateStore(llvm.ConstNull(llvmtyp), mem)
 	return c.NewLLVMValue(mem, ptrtyp)
 }
 

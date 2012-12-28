@@ -286,11 +286,6 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		llvmtyp := c.types.ToLLVM(typ)
 		ptr := c.createTypeMalloc(llvmtyp)
 
-		bzero := c.NamedFunction("runtime.bzero", "func f(unsafe.Pointer, uintptr)")
-		ptrintval := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-		args := []llvm.Value{ptrintval, llvm.SizeOf(llvmtyp)}
-		c.builder.CreateCall(bzero, args, "")
-
 		if valuemap != nil {
 			for key, value := range valuemap {
 				fieldName := key.(string)

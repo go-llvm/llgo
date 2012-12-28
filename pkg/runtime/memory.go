@@ -28,7 +28,11 @@ import "unsafe"
 func c_malloc(uintptr) *int8
 
 func malloc(size uintptr) unsafe.Pointer {
-	return unsafe.Pointer(c_malloc(size))
+	mem := unsafe.Pointer(c_malloc(size))
+	if mem != 0 {
+		bzero(mem, size)
+	}
+	return mem
 }
 
 func free(unsafe.Pointer)
