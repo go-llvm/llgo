@@ -126,4 +126,31 @@ func strrune(n int64) _string {
 	return _string{&b[0], 1}
 }
 
+// strtorunes converts string to []rune
+func strtorunes(str _string) slice {
+	cap := uint(str.len)
+	mem := malloc(uintptr(cap * 4))
+	runes := uintptr(mem)
+	var len uint
+	for i := 0; i < str.len; len++ {
+		n, r := strnext(str, i)
+		*(*rune)(unsafe.Pointer(runes)) = r
+		runes += unsafe.Sizeof(r)
+		i += n
+	}
+	return slice{array: (*uint8)(mem), len: len, cap: cap}
+}
+
+// runestostr converts []rune to string
+func runestostr(s slice) _string {
+	var str _string
+	array := uintptr(unsafe.Pointer(s.array))
+	for i := uint(0); i < s.len; i++ {
+		r := *(*rune)(unsafe.Pointer(array))
+		str = strcat(str, strrune(r))
+		array += unsafe.Sizeof(r)
+	}
+	return str
+}
+
 // vim: set ft=go:

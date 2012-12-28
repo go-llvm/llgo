@@ -461,7 +461,18 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		return c.NewLLVMValue(struct_, types.String)
 	}
 
-	// Rune to string conversion.
+	// string -> []rune
+	runeslice := &types.Slice{Elt: types.Rune}
+	if srctyp == types.String && types.Identical(dsttyp, runeslice) {
+		return v.stringToRuneSlice()
+	}
+
+	// []rune -> string
+	if types.Identical(srctyp, runeslice) && dsttyp == types.String {
+		return v.runeSliceToString()
+	}
+
+	// rune -> string
 	if dsttyp == types.String && isIntType(srctyp) {
 		return v.runeToString()
 	}

@@ -97,4 +97,25 @@ func (v *LLVMValue) runeToString() *LLVMValue {
 	return c.NewLLVMValue(result, types.String)
 }
 
+func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
+	c := v.compiler
+	strtorunes := c.NamedFunction("runtime.strtorunes", "func f(_string) slice")
+	_string := strtorunes.Type().ElementType().ParamTypes()[0]
+	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
+	result := c.builder.CreateCall(strtorunes, args, "")
+	runeslice := &types.Slice{Elt: types.Rune}
+	result = c.coerceSlice(result, c.types.ToLLVM(runeslice))
+	return c.NewLLVMValue(result, runeslice)
+}
+
+func (v *LLVMValue) runeSliceToString() *LLVMValue {
+	c := v.compiler
+	runestostr := c.NamedFunction("runtime.runestostr", "func f(slice) _string")
+	i8slice := runestostr.Type().ElementType().ParamTypes()[0]
+	args := []llvm.Value{c.coerceSlice(v.LLVMValue(), i8slice)}
+	result := c.builder.CreateCall(runestostr, args, "")
+	result = c.coerceString(result, c.types.ToLLVM(types.String))
+	return c.NewLLVMValue(result, types.String)
+}
+
 // vim: set ft=go:
