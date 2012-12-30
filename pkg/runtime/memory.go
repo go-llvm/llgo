@@ -29,20 +29,19 @@ func c_malloc(uintptr) *int8
 
 func malloc(size uintptr) unsafe.Pointer {
 	mem := unsafe.Pointer(c_malloc(size))
-	if mem != 0 {
+	if mem != nil {
 		bzero(mem, size)
 	}
 	return mem
 }
 
 func free(unsafe.Pointer)
-func memcpy(dst, src unsafe.Pointer, size int)
-func memmove(dst, src unsafe.Pointer, size int)
-func memset(dst unsafe.Pointer, fill byte, size int)
+func memcpy(dst, src unsafe.Pointer, size uintptr)
+func memmove(dst, src unsafe.Pointer, size uintptr)
+func memset(dst unsafe.Pointer, fill byte, size uintptr)
 
 func bzero(dst unsafe.Pointer, size uintptr) {
-	// FIXME, change memset et al. to take uintptr
-	memset(dst, 0, int(size))
+	memset(dst, 0, size)
 }
 
 // #llgo name: mmap
@@ -78,7 +77,7 @@ func memalign(align_ uintptr, size uintptr) unsafe.Pointer {
 	const prot = PROT_READ | PROT_WRITE | PROT_EXEC
 	const flags = MAP_ANON | MAP_PRIVATE
 	p := mmap(nil, size, prot, flags, -1, 0)
-	if p == -1 {
+	if p == unsafe.Pointer(uintptr(-1)) {
 		panic("mmap failed")
 	}
 	return unsafe.Pointer(align(uintptr(p), align_))

@@ -64,24 +64,24 @@ func maplen(m *map_) int {
 func reflect_mapassign(t *type_, m_, key, val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
 	if ok {
-		ptr := maplookup(t, m, key, true)
+		ptr := maplookup(unsafe.Pointer(t), m, key, true)
 		// TODO use copy alg
 		memmove(ptr, val, t.size)
 	} else {
-		mapdelete(t, m, key)
+		mapdelete(unsafe.Pointer(t), m, key)
 	}
 }
 
 // #llgo name: reflect.mapaccess
 func reflect_mapaccess(t *type_, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
-	ptr := maplookup(t, m, key, false)
+	ptr := maplookup(unsafe.Pointer(t), m, key, false)
 	return ptr, ptr != nil
 }
 
 func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {
 	if m == nil {
-		return 0
+		return nil
 	}
 
 	typ := (*type_)(t)
@@ -111,7 +111,7 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	if insert {
 		newentry := (*mapentry)(malloc(entrysize))
 		newentry.next = nil
-		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry) + keyoffset))
+		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + keyoffset)
 		elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + elemoffset)
 		memcpy(keyptr, key, keysize)
 		if last != nil {
@@ -123,12 +123,12 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 		return elemptr
 	}
 
-	return 0
+	return nil
 }
 
 func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	if m == nil {
-		return 0
+		return
 	}
 
 	typ := (*type_)(t)
@@ -150,7 +150,7 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 			} else {
 				last.next = ptr.next
 			}
-			free(ptr)
+			free(unsafe.Pointer(ptr))
 			m.length--
 			return
 		}

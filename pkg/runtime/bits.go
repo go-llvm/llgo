@@ -4,5 +4,5 @@
 
 package runtime
 
-// ctlz8 counts the number of leading zeros in an int8.
-func ctlz8(int8) int8
+// ctlz8 counts the number of leading zeros in a uint8.
+func ctlz8(uint8) uint8
