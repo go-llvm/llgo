@@ -25,9 +25,9 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"log"
 	"strconv"
 	"strings"
@@ -46,10 +46,17 @@ func (m Module) Dispose() {
 	}
 }
 
+type ArchInfo struct {
+	IntSize int64
+	PtrSize int64
+}
+
 // TODO get rid of this, change compiler to Compiler.
 type Compiler interface {
-	types.TypeInfoConfig
-	Compile(fset *token.FileSet, pkg *ast.Package, importpath string, exprtypes map[ast.Expr]types.Type) (*Module, error)
+	// ArchInfo returns the size of int/uint, and
+	// the size of pointers, both in number of bytes.
+	ArchInfo() ArchInfo
+	Compile(fset *token.FileSet, pkg *ast.Package, importpath string, exprtypes ExprTypeMap) (*Module, error)
 	Dispose()
 }
 
@@ -84,8 +91,6 @@ type compiler struct {
 	pkg            *ast.Package
 	importpath     string
 	fileset        *token.FileSet
-	filescope      *ast.Scope
-	scope          *ast.Scope
 	pkgmap         map[*ast.Object]string
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
@@ -105,14 +110,15 @@ type compiler struct {
 	pnacl bool
 }
 
-func (c *compiler) LookupObj(name string) *ast.Object {
-	for scope := c.scope; scope != nil; scope = scope.Outer {
-		obj := scope.Lookup(name)
-		if obj != nil {
-			return obj
-		}
-	}
-	return nil
+func (c *compiler) ArchInfo() ArchInfo {
+	var ptrsize, intsize int64
+	ptrsize = int64(c.target.PointerSize())
+	//if ptrsize >= 8 {
+	//	intsize = 8
+	//} else {
+	intsize = 4
+	//}
+	return ArchInfo{IntSize: intsize, PtrSize: ptrsize}
 }
 
 func (c *compiler) Resolve(obj *ast.Object) Value {
@@ -129,22 +135,12 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 
 	switch obj.Kind {
 	case ast.Con:
-		if obj.Decl != nil {
-			valspec := obj.Decl.(*ast.ValueSpec)
-			c.VisitValueSpec(valspec, true)
-			value = (obj.Data).(Value)
-		} else if obj == types.Nil {
-			return NilValue{c}
-		} else {
-			typ := obj.Type.(types.Type)
-			value = ConstValue{(obj.Data.(types.Const)), c, typ}
-			obj.Data = value
-		}
+		return c.NewConstValue(obj.Data, obj.Type.(types.Type))
 
 	case ast.Fun:
 		var funcdecl *ast.FuncDecl
-		if obj.Decl != nil {
-			funcdecl = obj.Decl.(*ast.FuncDecl)
+		if decl, ok := obj.Decl.(*ast.FuncDecl); ok {
+			funcdecl = decl
 		} else {
 			funcdecl = &ast.FuncDecl{
 				Name: &ast.Ident{Name: obj.Name, Obj: obj},
@@ -156,7 +152,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 	case ast.Var:
 		switch x := (obj.Decl).(type) {
 		case *ast.ValueSpec:
-			c.VisitValueSpec(x, false)
+			c.VisitValueSpec(x)
 		case *ast.Field:
 			// No-op. Fields will be yielded for function
 			// arg/recv/ret. We update the .Data field of the
@@ -177,7 +173,7 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 			if g.IsNil() {
 				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
 			}
-			obj.Data = c.NewLLVMValue(g, &types.Pointer{Base: t}).makePointee()
+			obj.Data = c.NewValue(g, &types.Pointer{Base: t}).makePointee()
 		}
 
 		value = (obj.Data).(Value)
@@ -186,22 +182,17 @@ func (c *compiler) Resolve(obj *ast.Object) Value {
 	return value
 }
 
-func (c *compiler) Lookup(name string) (Value, *ast.Object) {
-	obj := c.LookupObj(name)
-	if obj != nil {
-		return c.Resolve(obj), obj
-	}
-	return nil, nil
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 // createPackageMap maps package-level objects to the import path of the
 // package they're defined in.
 func createPackageMap(pkg *ast.Package, pkgid string) map[*ast.Object]string {
+	// FIXME only store named type objects and functions.
 	pkgmap := make(map[*ast.Object]string)
-	for _, obj := range pkg.Scope.Objects {
-		pkgmap[obj] = pkgid
+	for _, file := range pkg.Files {
+		for _, obj := range file.Scope.Objects {
+			pkgmap[obj] = pkgid
+		}
 	}
 	for pkgid, pkgobj := range pkg.Imports {
 		scope := pkgobj.Data.(*ast.Scope)
@@ -295,7 +286,6 @@ func NewCompiler(opts CompilerOptions) (Compiler, error) {
 		return nil, fmt.Errorf("Invalid target triple: %s", triple)
 	}
 	compiler.target = machine.TargetData()
-	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 	return compiler, nil
 }
 
@@ -308,13 +298,13 @@ func (compiler *compiler) Dispose() {
 
 func (compiler *compiler) Compile(fset *token.FileSet,
 	pkg *ast.Package, importpath string,
-	exprTypes map[ast.Expr]types.Type) (m *Module, err error) {
+	exprTypes ExprTypeMap) (m *Module, err error) {
 
 	// FIXME I'd prefer if we didn't modify global state. Perhaps
 	// we should always take a copy of types.Universe?
 	defer func() {
-		types.Universe.Lookup("true").Data = types.Const{true}
-		types.Universe.Lookup("false").Data = types.Const{false}
+		types.Universe.Lookup("true").Data = true
+		types.Universe.Lookup("false").Data = false
 	}()
 
 	// FIXME create a compilation state, rather than storing in 'compiler'.
@@ -346,6 +336,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	// Create a mapping from objects back to packages, so we can create the
 	// appropriate symbol names.
 	compiler.pkgmap = createPackageMap(pkg, importpath)
+	compiler.llvmtypes = NewLLVMTypeMap(compiler.target, NewTypeStringer(compiler.pkgmap))
 
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
@@ -356,8 +347,6 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	// Compile each file in the package.
 	for _, file := range pkg.Files {
 		file.Scope.Outer = pkg.Scope
-		compiler.filescope = file.Scope
-		compiler.scope = file.Scope
 		compiler.fixConstDecls(file)
 		for _, decl := range file.Decls {
 			compiler.VisitDecl(decl)

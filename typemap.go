@@ -1,38 +1,32 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 Andrew Wilkins.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package llgo
 
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/types"
 	"reflect"
+	"sort"
 )
 
+type ExprTypeInfo struct {
+	types.Type
+
+	// Constant value if non-nil.
+	Value interface{}
+}
+
+type ExprTypeMap map[ast.Expr]ExprTypeInfo
+
 type LLVMTypeMap struct {
-	target llvm.TargetData
-	types  map[string]llvm.Type // compile-time LLVM type
+	*TypeStringer
+	target  llvm.TargetData
+	inttype llvm.Type
+	types   map[string]llvm.Type // compile-time LLVM type
 }
 
 type runtimeTypeInfo struct {
@@ -45,16 +39,11 @@ type TypeMap struct {
 	module    llvm.Module
 	pkgpath   string
 	types     map[string]runtimeTypeInfo
-	expr      map[ast.Expr]types.Type
+	expr      ExprTypeMap
 	functions *FunctionCache
 	resolver  Resolver
 
-	// The runtime type of commonType.
-	commonType               *types.Name
-	commonTypePtrRuntimeType llvm.Value
-
 	runtimeType,
-	runtimeCommonType,
 	runtimeUncommonType,
 	runtimeArrayType,
 	runtimeChanType,
@@ -73,14 +62,23 @@ type TypeMap struct {
 	copyAlgFunctionType llvm.Type
 }
 
-func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
+func NewLLVMTypeMap(target llvm.TargetData, ts *TypeStringer) *LLVMTypeMap {
+	// spec says int is either 32-bit or 64-bit.
+	var inttype llvm.Type
+	//if c.target.PointerSize() >= 8 {
+	//	inttyp = llvm.Int64Type()
+	//} else {
+	inttype = llvm.Int32Type()
+	//}
 	return &LLVMTypeMap{
-		target: target,
-		types:  make(map[string]llvm.Type),
+		TypeStringer: ts,
+		target:       target,
+		types:        make(map[string]llvm.Type),
+		inttype:      inttype,
 	}
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTypes map[ast.Expr]types.Type, c *FunctionCache, r Resolver) *TypeMap {
+func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTypes ExprTypeMap, c *FunctionCache, r Resolver) *TypeMap {
 	tm := &TypeMap{
 		LLVMTypeMap: llvmtm,
 		module:      module,
@@ -104,8 +102,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 		}
 		return tm.ToLLVM(obj.Type.(types.Type))
 	}
-	tm.runtimeType = reflectLLVMType("runtimeType")
-	tm.runtimeCommonType = reflectLLVMType("commonType")
+	tm.runtimeType = reflectLLVMType("rtype")
 	tm.runtimeUncommonType = reflectLLVMType("uncommonType")
 	tm.runtimeArrayType = reflectLLVMType("arrayType")
 	tm.runtimeChanType = reflectLLVMType("chanType")
@@ -117,7 +114,6 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 	tm.runtimePtrType = reflectLLVMType("ptrType")
 	tm.runtimeSliceType = reflectLLVMType("sliceType")
 	tm.runtimeStructType = reflectLLVMType("structType")
-	tm.commonType = pkg.Scope.Lookup("commonType").Type.(*types.Name)
 
 	// Types for algorithms. See 'runtime/runtime.h'.
 	uintptrType := tm.target.IntPtrType()
@@ -138,13 +134,13 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 }
 
 func (tm *LLVMTypeMap) ToLLVM(t types.Type) llvm.Type {
-	t = types.Underlying(t)
-	tstr := t.String()
+	t = underlyingType(t)
+	tstr := tm.TypeString(t)
 	lt, ok := tm.types[tstr]
 	if !ok {
 		lt = tm.makeLLVMType(tstr, t)
 		if lt.IsNil() {
-			panic(fmt.Sprint("Failed to create LLVM type for: ", t))
+			panic(fmt.Sprint("Failed to create LLVM type for: ", tstr))
 		}
 	}
 	return lt
@@ -156,12 +152,12 @@ func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 }
 
 func (tm *TypeMap) toRuntime(t types.Type) (global, value llvm.Value) {
-	tstr := t.String()
+	tstr := tm.TypeString(t)
 	info, ok := tm.types[tstr]
 	if !ok {
 		info.global, info.dyntyp = tm.makeRuntimeType(t)
 		if info.dyntyp.IsNil() {
-			panic(fmt.Sprint("Failed to create runtime type for: ", t))
+			panic(fmt.Sprint("Failed to create runtime type for: ", tstr))
 		}
 		tm.types[tstr] = info
 	}
@@ -170,8 +166,6 @@ func (tm *TypeMap) toRuntime(t types.Type) (global, value llvm.Value) {
 
 func (tm *LLVMTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 	switch t := t.(type) {
-	case *types.Bad:
-		return tm.badLLVMType(t)
 	case *types.Basic:
 		lt := tm.basicLLVMType(t)
 		tm.types[tstr] = lt
@@ -188,7 +182,7 @@ func (tm *LLVMTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 		lt := tm.pointerLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
-	case *types.Func:
+	case *types.Signature:
 		lt := tm.funcLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
@@ -202,50 +196,45 @@ func (tm *LLVMTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 		lt := tm.chanLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
-	case *types.Name:
+	case *types.NamedType:
 		lt := tm.nameLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
 	}
-	panic("unreachable")
-}
-
-func (tm *LLVMTypeMap) badLLVMType(b *types.Bad) llvm.Type {
-	return llvm.Type{nil}
+	panic(fmt.Errorf("unhandled: %T", t))
 }
 
 func (tm *LLVMTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 	switch b.Kind {
-	case types.BoolKind:
+	case types.Bool:
 		return llvm.Int1Type()
-	case types.Int8Kind, types.Uint8Kind:
+	case types.Int8, types.Uint8:
 		return llvm.Int8Type()
-	case types.Int16Kind, types.Uint16Kind:
+	case types.Int16, types.Uint16:
 		return llvm.Int16Type()
-	case types.Int32Kind, types.Uint32Kind, types.UintKind, types.IntKind:
+	case types.Int32, types.Uint32:
 		return llvm.Int32Type()
-	case types.Int64Kind, types.Uint64Kind:
+	case types.Uint, types.Int:
+		return tm.inttype
+	case types.Int64, types.Uint64:
 		return llvm.Int64Type()
-	case types.Float32Kind:
+	case types.Float32:
 		return llvm.FloatType()
-	case types.Float64Kind:
+	case types.Float64:
 		return llvm.DoubleType()
-	case types.UnsafePointerKind, types.UintptrKind:
+	case types.UnsafePointer, types.Uintptr:
 		return tm.target.IntPtrType()
-	case types.Complex64Kind:
+	case types.Complex64:
 		f32 := llvm.FloatType()
 		elements := []llvm.Type{f32, f32}
 		return llvm.StructType(elements, false)
-	case types.Complex128Kind:
+	case types.Complex128:
 		f64 := llvm.DoubleType()
 		elements := []llvm.Type{f64, f64}
 		return llvm.StructType(elements, false)
-	//case UntypedInt:
-	//case UntypedFloat:
-	//case UntypedComplex:
-	case types.StringKind:
+	case types.String:
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-		elements := []llvm.Type{i8ptr, llvm.Int32Type()}
+		elements := []llvm.Type{i8ptr, tm.inttype}
 		return llvm.StructType(elements, false)
 	}
 	panic(fmt.Sprint("unhandled kind: ", b.Kind))
@@ -262,8 +251,8 @@ func (tm *LLVMTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
 		tm.types[tstr] = typ
 		elements := []llvm.Type{
 			llvm.PointerType(tm.ToLLVM(s.Elt), 0),
-			tm.ToLLVM(types.Uint),
-			tm.ToLLVM(types.Uint),
+			tm.inttype,
+			tm.inttype,
 		}
 		typ.StructSetBody(elements, false)
 	}
@@ -289,7 +278,7 @@ func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	return llvm.PointerType(tm.ToLLVM(p.Base), 0)
 }
 
-func (tm *LLVMTypeMap) funcLLVMType(f *types.Func) llvm.Type {
+func (tm *LLVMTypeMap) funcLLVMType(f *types.Signature) llvm.Type {
 	param_types := make([]llvm.Type, 0)
 
 	// Add receiver parameter.
@@ -327,15 +316,15 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 		typ = llvm.GlobalContext().StructCreateNamed("")
 		tm.types[tstr] = typ
 		valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
-		typptr_type := valptr_type // runtimeCommonType may not be defined yet
+		typptr_type := valptr_type // runtimeType may not be defined yet
 		elements := make([]llvm.Type, 2+len(i.Methods))
 		elements[0] = typptr_type // type
 		elements[1] = valptr_type // value
 		for n, m := range i.Methods {
 			// Add an opaque pointer parameter to the function for the
 			// struct pointer.
-			fntype := m.Type.(*types.Func)
-			receiver_type := &types.Pointer{Base: types.Int8}
+			fntype := m.Type
+			receiver_type := &types.Pointer{Base: types.Typ[types.Int8]}
 			fntype.Recv = ast.NewObj(ast.Var, "")
 			fntype.Recv.Type = receiver_type
 			elements[n+2] = tm.ToLLVM(fntype)
@@ -358,16 +347,18 @@ func (tm *LLVMTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
 	return tm.target.IntPtrType()
 }
 
-func (tm *LLVMTypeMap) nameLLVMType(n *types.Name) llvm.Type {
+func (tm *LLVMTypeMap) nameLLVMType(n *types.NamedType) llvm.Type {
 	return tm.ToLLVM(n.Underlying)
+}
+
+func (tm *LLVMTypeMap) Sizeof(t types.Type) uint64 {
+	return tm.target.TypeAllocSize(tm.ToLLVM(t))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
 	switch t := t.(type) {
-	case *types.Bad:
-		return tm.badRuntimeType(t)
 	case *types.Basic:
 		return tm.basicRuntimeType(t)
 	case *types.Array:
@@ -378,7 +369,7 @@ func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
 		return tm.structRuntimeType(t)
 	case *types.Pointer:
 		return tm.pointerRuntimeType(t)
-	case *types.Func:
+	case *types.Signature:
 		return tm.funcRuntimeType(t)
 	case *types.Interface:
 		return tm.interfaceRuntimeType(t)
@@ -386,7 +377,7 @@ func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
 		return tm.mapRuntimeType(t)
 	case *types.Chan:
 		return tm.chanRuntimeType(t)
-	case *types.Name:
+	case *types.NamedType:
 		return tm.nameRuntimeType(t)
 	}
 	panic("unreachable")
@@ -404,58 +395,18 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 }
 
 func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) {
-	// Each runtime type is preceded by an interface{}.
-	initType := llvm.StructType([]llvm.Type{tm.runtimeType, v.Type()}, false)
-	global = llvm.AddGlobal(tm.module, initType, "")
+	global = llvm.AddGlobal(tm.module, v.Type(), "")
+	global.SetInitializer(v)
 	ptr = llvm.ConstBitCast(global, llvm.PointerType(tm.runtimeType, 0))
-
-	// interface{} containing v's *commonType representation.
-	runtimeTypeValue := llvm.Undef(tm.runtimeType)
-	zero := llvm.ConstNull(llvm.Int32Type())
-	one := llvm.ConstInt(llvm.Int32Type(), 1, false)
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	if tm.commonTypePtrRuntimeType.IsNil() {
-		// Create a dummy pointer value, which we'll update straight after
-		// defining the runtime type info for commonType.
-		tm.commonTypePtrRuntimeType = llvm.Undef(i8ptr)
-		commonTypePtr := &types.Pointer{Base: tm.commonType}
-		commonTypeGlobal, commonTypeRuntimeType := tm.makeRuntimeType(tm.commonType)
-		tm.types[tm.commonType.String()] = runtimeTypeInfo{commonTypeGlobal, commonTypeRuntimeType}
-		commonTypePtrGlobal, commonTypePtrRuntimeType := tm.makeRuntimeType(commonTypePtr)
-		tm.types[commonTypePtr.String()] = runtimeTypeInfo{commonTypePtrGlobal, commonTypePtrRuntimeType}
-		tm.commonTypePtrRuntimeType = llvm.ConstBitCast(commonTypePtrRuntimeType, i8ptr)
-		if tm.pkgpath == tm.commonType.Package {
-			// Update the interace{} header of the commonType/*commonType
-			// runtime types we just created.
-			for _, g := range [...]llvm.Value{commonTypeGlobal, commonTypePtrGlobal} {
-				init := g.Initializer()
-				typptr := tm.commonTypePtrRuntimeType
-				runtimeTypeValue := llvm.ConstExtractValue(init, []uint32{0})
-				runtimeTypeValue = llvm.ConstInsertValue(runtimeTypeValue, typptr, []uint32{0})
-				init = llvm.ConstInsertValue(init, runtimeTypeValue, []uint32{0})
-				g.SetInitializer(init)
-			}
-		}
-	}
-	commonTypePtr := llvm.ConstGEP(global, []llvm.Value{zero, one})
-	commonTypePtr = llvm.ConstBitCast(commonTypePtr, i8ptr)
-	runtimeTypeValue = llvm.ConstInsertValue(runtimeTypeValue, tm.commonTypePtrRuntimeType, []uint32{0})
-	runtimeTypeValue = llvm.ConstInsertValue(runtimeTypeValue, commonTypePtr, []uint32{1})
-
-	init := llvm.Undef(initType)
-	init = llvm.ConstInsertValue(init, runtimeTypeValue, []uint32{0})
-	init = llvm.ConstInsertValue(init, v, []uint32{1})
-	global.SetInitializer(init)
-
 	return global, ptr
 }
 
-func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
+func (tm *TypeMap) makeRtype(t types.Type, k reflect.Kind) llvm.Value {
 	// Not sure if there's an easier way to do this, but if you just
 	// use ConstStruct, you end up getting a different llvm.Type.
 	lt := tm.ToLLVM(t)
-	typ := llvm.ConstNull(tm.runtimeCommonType)
-	elementTypes := tm.runtimeCommonType.StructElementTypes()
+	typ := llvm.ConstNull(tm.runtimeType)
+	elementTypes := tm.runtimeType.StructElementTypes()
 
 	// Size.
 	size := llvm.SizeOf(lt)
@@ -484,29 +435,47 @@ func (tm *TypeMap) makeCommonType(t types.Type, k reflect.Kind) llvm.Value {
 	typ = llvm.ConstInsertValue(typ, algptr, []uint32{6})
 
 	// String representation.
-	stringrep := tm.globalStringPtr(t.String())
+	stringrep := tm.globalStringPtr(tm.TypeString(t))
 	typ = llvm.ConstInsertValue(typ, stringrep, []uint32{8})
 
 	// TODO gc
 	return typ
 }
 
-func (tm *TypeMap) badRuntimeType(b *types.Bad) (global, ptr llvm.Value) {
-	panic("bad type")
+var basicReflectKinds = [...]reflect.Kind{
+	types.Invalid:       reflect.Invalid,
+	types.Bool:          reflect.Bool,
+	types.Int:           reflect.Int,
+	types.Int8:          reflect.Int8,
+	types.Int16:         reflect.Int16,
+	types.Int32:         reflect.Int32,
+	types.Int64:         reflect.Int64,
+	types.Uint:          reflect.Uint,
+	types.Uint8:         reflect.Uint8,
+	types.Uint16:        reflect.Uint16,
+	types.Uint32:        reflect.Uint32,
+	types.Uint64:        reflect.Uint64,
+	types.Uintptr:       reflect.Uintptr,
+	types.Float32:       reflect.Float32,
+	types.Float64:       reflect.Float64,
+	types.Complex64:     reflect.Complex64,
+	types.Complex128:    reflect.Complex128,
+	types.String:        reflect.String,
+	types.UnsafePointer: reflect.UnsafePointer,
 }
 
 func (tm *TypeMap) basicRuntimeType(b *types.Basic) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(b, reflect.Kind(b.Kind))
-	return tm.makeRuntimeTypeGlobal(commonType)
+	rtype := tm.makeRtype(b, basicReflectKinds[b.Kind])
+	return tm.makeRuntimeTypeGlobal(rtype)
 }
 
 func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(a, reflect.Array)
+	rtype := tm.makeRtype(a, reflect.Array)
 	elemRuntimeType := tm.ToRuntime(a.Elt)
 	sliceRuntimeType := tm.ToRuntime(&types.Slice{Elt: a.Elt})
 	uintptrlen := llvm.ConstInt(tm.target.IntPtrType(), uint64(a.Len), false)
 	arrayType := llvm.ConstNull(tm.runtimeArrayType)
-	arrayType = llvm.ConstInsertValue(arrayType, commonType, []uint32{0})
+	arrayType = llvm.ConstInsertValue(arrayType, rtype, []uint32{0})
 	arrayType = llvm.ConstInsertValue(arrayType, elemRuntimeType, []uint32{1})
 	arrayType = llvm.ConstInsertValue(arrayType, sliceRuntimeType, []uint32{2})
 	arrayType = llvm.ConstInsertValue(arrayType, uintptrlen, []uint32{3})
@@ -514,18 +483,18 @@ func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) sliceRuntimeType(s *types.Slice) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(s, reflect.Slice)
+	rtype := tm.makeRtype(s, reflect.Slice)
 	elemRuntimeType := tm.ToRuntime(s.Elt)
 	sliceType := llvm.ConstNull(tm.runtimeSliceType)
-	sliceType = llvm.ConstInsertValue(sliceType, commonType, []uint32{0})
+	sliceType = llvm.ConstInsertValue(sliceType, rtype, []uint32{0})
 	sliceType = llvm.ConstInsertValue(sliceType, elemRuntimeType, []uint32{1})
 	return tm.makeRuntimeTypeGlobal(sliceType)
 }
 
 func (tm *TypeMap) structRuntimeType(s *types.Struct) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(s, reflect.Struct)
+	rtype := tm.makeRtype(s, reflect.Struct)
 	structType := llvm.ConstNull(tm.runtimeStructType)
-	structType = llvm.ConstInsertValue(structType, commonType, []uint32{0})
+	structType = llvm.ConstInsertValue(structType, rtype, []uint32{0})
 	// TODO set fields
 	return tm.makeRuntimeTypeGlobal(structType)
 }
@@ -534,12 +503,13 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	// Is the base type a named type from another package? If so, we'll
 	// create a reference to the externally defined symbol.
 	var globalname string
-	if n, ok := p.Base.(*types.Name); ok {
-		pkgpath := n.Package
+	if n, ok := p.Base.(*types.NamedType); ok {
+		// FIXME horrible circular relationship
+		pkgpath := tm.functions.pkgmap[n.Obj]
 		if pkgpath == "" {
 			pkgpath = "runtime"
 		}
-		globalname = "__llgo.type.*" + n.String()
+		globalname = "__llgo.type.*" + n.Obj.Name
 		if pkgpath != tm.pkgpath {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
@@ -548,41 +518,39 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 		}
 	}
 
-	commonType := tm.makeCommonType(p, reflect.Ptr)
-	if n, ok := p.Base.(*types.Name); ok {
+	rtype := tm.makeRtype(p, reflect.Ptr)
+	if n, ok := p.Base.(*types.NamedType); ok {
 		uncommonTypeInit := tm.uncommonType(n, true)
 		uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 		uncommonType.SetInitializer(uncommonTypeInit)
-		commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{9})
+		rtype = llvm.ConstInsertValue(rtype, uncommonType, []uint32{9})
 	}
 
 	baseTypeGlobal, baseTypePtr := tm.toRuntime(p.Base)
 	ptrType := llvm.ConstNull(tm.runtimePtrType)
-	ptrType = llvm.ConstInsertValue(ptrType, commonType, []uint32{0})
+	ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
 	ptrType = llvm.ConstInsertValue(ptrType, baseTypePtr, []uint32{1})
 	global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
 	global.SetName(globalname)
 
-	// Set ptrToThis in the base type's commonType.
-	baseRuntimeType := baseTypeGlobal.Initializer()
-	baseType := llvm.ConstExtractValue(baseRuntimeType, []uint32{1})
-	if baseType.Type() == tm.runtimeCommonType {
+	// Set ptrToThis in the base type's rtype.
+	baseType := baseTypeGlobal.Initializer()
+	if baseType.Type() == tm.runtimeType {
 		baseType = llvm.ConstInsertValue(baseType, ptr, []uint32{10})
 	} else {
-		commonType := llvm.ConstExtractValue(baseType, []uint32{0})
-		commonType = llvm.ConstInsertValue(commonType, ptr, []uint32{10})
-		baseType = llvm.ConstInsertValue(baseType, commonType, []uint32{0})
+		rtype := llvm.ConstExtractValue(baseType, []uint32{0})
+		rtype = llvm.ConstInsertValue(rtype, ptr, []uint32{10})
+		baseType = llvm.ConstInsertValue(baseType, rtype, []uint32{0})
 	}
-	baseRuntimeType = llvm.ConstInsertValue(baseRuntimeType, baseType, []uint32{1})
-	baseTypeGlobal.SetInitializer(baseRuntimeType)
+	baseTypeGlobal.SetInitializer(baseType)
 
 	return global, ptr
 }
 
-func (tm *TypeMap) funcRuntimeType(f *types.Func) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(f, reflect.Func)
+func (tm *TypeMap) funcRuntimeType(f *types.Signature) (global, ptr llvm.Value) {
+	rtype := tm.makeRtype(f, reflect.Func)
 	funcType := llvm.ConstNull(tm.runtimeFuncType)
-	funcType = llvm.ConstInsertValue(funcType, commonType, []uint32{0})
+	funcType = llvm.ConstInsertValue(funcType, rtype, []uint32{0})
 	// dotdotdot
 	if f.IsVariadic {
 		variadic := llvm.ConstInt(llvm.Int1Type(), 1, false)
@@ -596,9 +564,9 @@ func (tm *TypeMap) funcRuntimeType(f *types.Func) (global, ptr llvm.Value) {
 }
 
 func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(i, reflect.Interface)
+	rtype := tm.makeRtype(i, reflect.Interface)
 	interfaceType := llvm.ConstNull(tm.runtimeInterfaceType)
-	interfaceType = llvm.ConstInsertValue(interfaceType, commonType, []uint32{0})
+	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
 
 	imethods := make([]llvm.Value, len(i.Methods))
 	for index, method := range i.Methods {
@@ -624,7 +592,7 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 		imethodsGlobalPtr = llvm.ConstNull(imethodPtrType)
 	}
 
-	len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(i.Methods)), false)
+	len_ := llvm.ConstInt(tm.inttype, uint64(len(i.Methods)), false)
 	imethodsSliceType := tm.runtimeInterfaceType.StructElementTypes()[1]
 	imethodsSlice := llvm.ConstNull(imethodsSliceType)
 	imethodsSlice = llvm.ConstInsertValue(imethodsSlice, imethodsGlobalPtr, []uint32{0})
@@ -635,18 +603,18 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 }
 
 func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(m, reflect.Map)
+	rtype := tm.makeRtype(m, reflect.Map)
 	mapType := llvm.ConstNull(tm.runtimeMapType)
-	mapType = llvm.ConstInsertValue(mapType, commonType, []uint32{0})
+	mapType = llvm.ConstInsertValue(mapType, rtype, []uint32{0})
 	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Key), []uint32{1})
 	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Elt), []uint32{2})
 	return tm.makeRuntimeTypeGlobal(mapType)
 }
 
 func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
-	commonType := tm.makeCommonType(c, reflect.Chan)
+	rtype := tm.makeRtype(c, reflect.Chan)
 	chanType := llvm.ConstNull(tm.runtimeChanType)
-	chanType = llvm.ConstInsertValue(chanType, commonType, []uint32{0})
+	chanType = llvm.ConstInsertValue(chanType, rtype, []uint32{0})
 	chanType = llvm.ConstInsertValue(chanType, tm.ToRuntime(c.Elt), []uint32{1})
 
 	// go/ast and reflect disagree on values for direction.
@@ -662,70 +630,99 @@ func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
 	return tm.makeRuntimeTypeGlobal(chanType)
 }
 
-func (tm *TypeMap) uncommonType(n *types.Name, ptr bool) llvm.Value {
+func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 	uncommonTypeInit := llvm.ConstNull(tm.runtimeUncommonType)
 	namePtr := tm.globalStringPtr(n.Obj.Name)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, namePtr, []uint32{0})
+
+	// FIXME clean this up
 	var pkgpathPtr llvm.Value
-	if n.Package != "" {
-		pkgpathPtr = tm.globalStringPtr(n.Package)
+	pkgpath := tm.functions.pkgmap[n.Obj]
+	if pkgpath != "" {
+		pkgpathPtr = tm.globalStringPtr(pkgpath)
 		uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 	}
 
 	// Store methods.
-	methods := make([]llvm.Value, 0, len(n.Methods))
-	for _, m := range n.Methods {
-		ftyp := m.Type.(*types.Func)
-		ptrrecv := !types.Identical(ftyp.Recv.Type.(types.Type), n)
-		if !ptr && ptrrecv {
-			// For a type T, we only store methods where the
-			// receiver is T and not *T. For *T we store both.
-			continue
+	// TODO Speed up by sorting objects, rather than names.
+	var methods []llvm.Value
+	if namedTypeScope, ok := n.Obj.Data.(*ast.Scope); ok {
+		methodNames := make([]string, 0, len(namedTypeScope.Objects))
+		for name := range namedTypeScope.Objects {
+			methodNames = append(methodNames, name)
 		}
+		sort.Strings(methodNames)
+		methods = make([]llvm.Value, 0, len(namedTypeScope.Objects))
+		for _, methodName := range methodNames {
+			m := namedTypeScope.Lookup(methodName)
+			ftyp := m.Type.(*types.Signature)
+			ptrrecv := !isIdentical(ftyp.Recv.Type.(types.Type), n)
+			if !ptr && ptrrecv {
+				// For a type T, we only store methods where the
+				// receiver is T and not *T. For *T we store both.
+				continue
+			}
 
-		method := llvm.ConstNull(tm.runtimeMethod)
-		name := tm.globalStringPtr(m.Name)
-		name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
-		// name
-		method = llvm.ConstInsertValue(method, name, []uint32{0})
-		// pkgPath
-		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
-		// mtyp (method type, no receiver)
-		{
-			recv := ftyp.Recv
-			ftyp.Recv = nil
-			mtyp := tm.ToRuntime(ftyp)
-			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
-			ftyp.Recv = recv
+			method := llvm.ConstNull(tm.runtimeMethod)
+			name := tm.globalStringPtr(m.Name)
+			name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
+			// name
+			method = llvm.ConstInsertValue(method, name, []uint32{0})
+			// pkgPath
+			method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
+			// mtyp (method type, no receiver)
+			{
+				recv := ftyp.Recv
+				ftyp.Recv = nil
+				mtyp := tm.ToRuntime(ftyp)
+				method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
+				ftyp.Recv = recv
+			}
+			// typ (function type, with receiver)
+			typ := tm.ToRuntime(ftyp)
+			method = llvm.ConstInsertValue(method, typ, []uint32{3})
+
+			// tfn (standard method/function pointer for plain method calls)
+			tfn := tm.resolver.Resolve(m).LLVMValue()
+			tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+
+			// ifn (single-word receiver function pointer for interface calls)
+			ifn := tfn
+			needload := ptr && !ptrrecv
+			if !needload {
+				recvtyp := tm.ToLLVM(ftyp.Recv.Type.(types.Type))
+				needload = int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize()
+			}
+			if needload {
+				// If the receiver type is wider than a word, we
+				// need to use an intermediate function which takes
+				// a pointer-receiver, loads it, and then calls the
+				// standard receiver function.
+
+				// TODO consolidate this with the one in
+				// VisitFuncProtoDecl. Or change the way
+				// this is done altogether...
+				fname := m.Name
+				recvtyp := ftyp.Recv.Type.(types.Type)
+				var recvname string
+				switch recvtyp := recvtyp.(type) {
+				case *types.Pointer:
+					named := recvtyp.Base.(*types.NamedType)
+					recvname = "*" + named.Obj.Name
+				case *types.NamedType:
+					recvname = recvtyp.Obj.Name
+				}
+				fname = fmt.Sprintf("%s.%s", recvname, fname)
+				fname = "*" + pkgpath + "." + fname
+
+				ifn = tm.module.NamedFunction(fname)
+				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+			}
+
+			method = llvm.ConstInsertValue(method, ifn, []uint32{4})
+			method = llvm.ConstInsertValue(method, tfn, []uint32{5})
+			methods = append(methods, method)
 		}
-		// typ (function type, with receiver)
-		typ := tm.ToRuntime(ftyp)
-		method = llvm.ConstInsertValue(method, typ, []uint32{3})
-
-		// tfn (standard method/function pointer for plain method calls)
-		tfn := tm.resolver.Resolve(m).LLVMValue()
-		tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
-
-		// ifn (single-word receiver function pointer for interface calls)
-		ifn := tfn
-		needload := ptr && !ptrrecv
-		if !needload {
-			recvtyp := tm.ToLLVM(ftyp.Recv.Type.(types.Type))
-			needload = int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize()
-		}
-		if needload {
-			// If the receiver type is wider than a word, we
-			// need to use an intermediate function which takes
-			// a pointer-receiver, loads it, and then calls the
-			// standard receiver function.
-			fname := fmt.Sprintf("*%s.%s", ftyp.Recv.Type, m.Name)
-			ifn = tm.module.NamedFunction(fname)
-			ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
-		}
-
-		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
-		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods = append(methods, method)
 	}
 
 	var methodsGlobalPtr llvm.Value
@@ -738,7 +735,7 @@ func (tm *TypeMap) uncommonType(n *types.Name, ptr bool) llvm.Value {
 	} else {
 		methodsGlobalPtr = llvm.ConstNull(llvm.PointerType(tm.runtimeMethod, 0))
 	}
-	len_ := llvm.ConstInt(llvm.Int32Type(), uint64(len(methods)), false)
+	len_ := llvm.ConstInt(tm.inttype, uint64(len(methods)), false)
 	methodsSliceType := tm.runtimeUncommonType.StructElementTypes()[2]
 	methodsSlice := llvm.ConstNull(methodsSliceType)
 	methodsSlice = llvm.ConstInsertValue(methodsSlice, methodsGlobalPtr, []uint32{0})
@@ -748,13 +745,13 @@ func (tm *TypeMap) uncommonType(n *types.Name, ptr bool) llvm.Value {
 	return uncommonTypeInit
 }
 
-func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
-	pkgpath := n.Package
+func (tm *TypeMap) nameRuntimeType(n *types.NamedType) (global, ptr llvm.Value) {
+	pkgpath := tm.functions.pkgmap[n.Obj]
 	if pkgpath == "" {
 		// Set to "runtime", so the builtin types have a home.
 		pkgpath = "runtime"
 	}
-	globalname := "__llgo.type." + n.String()
+	globalname := "__llgo.type." + n.Obj.Name
 	if pkgpath != tm.pkgpath {
 		// We're not compiling the package from whence the type came,
 		// so we'll just create a pointer to it here.
@@ -765,41 +762,39 @@ func (tm *TypeMap) nameRuntimeType(n *types.Name) (global, ptr llvm.Value) {
 	}
 
 	underlying := n.Underlying
-	if name, ok := underlying.(*types.Name); ok {
+	if name, ok := underlying.(*types.NamedType); ok {
 		underlying = name.Underlying
 	}
 
 	global, ptr = tm.makeRuntimeType(underlying)
-	globalInit := global.Initializer()
 
-	// Locate the common type.
-	underlyingRuntimeType := llvm.ConstExtractValue(globalInit, []uint32{1})
-	commonType := underlyingRuntimeType
-	if underlyingRuntimeType.Type() != tm.runtimeCommonType {
-		commonType = llvm.ConstExtractValue(commonType, []uint32{0})
+	// Locate the rtype.
+	underlyingRuntimeType := global.Initializer()
+	rtype := underlyingRuntimeType
+	if rtype.Type() != tm.runtimeType {
+		rtype = llvm.ConstExtractValue(rtype, []uint32{0})
 	}
 
 	// Insert the uncommon type.
 	uncommonTypeInit := tm.uncommonType(n, false)
 	uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 	uncommonType.SetInitializer(uncommonTypeInit)
-	commonType = llvm.ConstInsertValue(commonType, uncommonType, []uint32{9})
+	rtype = llvm.ConstInsertValue(rtype, uncommonType, []uint32{9})
 
-	// Replace the commonType's string representation with the one from
+	// Replace the rtype's string representation with the one from
 	// uncommonType. XXX should we have the package name prepended? Probably.
 	namePtr := llvm.ConstExtractValue(uncommonTypeInit, []uint32{0})
-	commonType = llvm.ConstInsertValue(commonType, namePtr, []uint32{8})
+	rtype = llvm.ConstInsertValue(rtype, namePtr, []uint32{8})
 
 	// Update the global's initialiser. Note that we take a copy
 	// of the underlying type; we're not updating a shared type.
-	if underlyingRuntimeType.Type() != tm.runtimeCommonType {
-		underlyingRuntimeType = llvm.ConstInsertValue(underlyingRuntimeType, commonType, []uint32{0})
+	if underlyingRuntimeType.Type() != tm.runtimeType {
+		underlyingRuntimeType = llvm.ConstInsertValue(underlyingRuntimeType, rtype, []uint32{0})
 	} else {
-		underlyingRuntimeType = commonType
+		underlyingRuntimeType = rtype
 	}
-	globalInit = llvm.ConstInsertValue(globalInit, underlyingRuntimeType, []uint32{1})
 	global.SetName(globalname)
-	global.SetInitializer(globalInit)
+	global.SetInitializer(underlyingRuntimeType)
 	return global, ptr
 }
 
@@ -809,11 +804,10 @@ func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	strglobal := llvm.AddGlobal(tm.module, strval.Type(), "")
 	strglobal.SetInitializer(strval)
 	strglobal = llvm.ConstBitCast(strglobal, llvm.PointerType(llvm.Int8Type(), 0))
-	strlen := llvm.ConstInt(llvm.Int32Type(), uint64(len(value)), false)
+	strlen := llvm.ConstInt(tm.inttype, uint64(len(value)), false)
 	str := llvm.ConstStruct([]llvm.Value{strglobal, strlen}, false)
 	g := llvm.AddGlobal(tm.module, str.Type(), "")
 	g.SetInitializer(str)
 	return g
 }
 
-// vim: set ft=go :

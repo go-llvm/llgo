@@ -7,11 +7,11 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path"
 	"strings"
 )
@@ -33,11 +33,14 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 
 	if strings.HasPrefix(name, c.module.Name+".") {
 		obj := c.pkg.Scope.Lookup(name[len(c.module.Name)+1:])
+		if obj == nil {
+			panic("Missing function: " + name)
+		}
 		value := c.Resolve(obj)
 		f = value.LLVMValue()
 	} else {
 		fset := token.NewFileSet()
-		code := `package runtime;import("unsafe");` + signature + `{panic()}`
+		code := `package runtime;import("unsafe");` + signature + `{panic("")}`
 		file, err := parser.ParseFile(fset, "", code, 0)
 		if err != nil {
 			panic(err)
@@ -60,18 +63,18 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		}
 		files["<src>"] = file
 
-		pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
-		if err != nil {
-			panic(err)
+		archinfo := c.ArchInfo()
+		ctx := &types.Context{
+			IntSize: archinfo.IntSize,
+			PtrSize: archinfo.PtrSize,
 		}
-
-		_, err = types.Check("", c.compiler, fset, pkg)
+		_, err = ctx.Check(fset, files)
 		if err != nil {
 			panic(err)
 		}
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
-		ftype := fdecl.Name.Obj.Type.(*types.Func)
+		ftype := fdecl.Name.Obj.Type.(*types.Signature)
 		llvmfptrtype := c.types.ToLLVM(ftype)
 		f = llvm.AddFunction(c.module.Module, name, llvmfptrtype.ElementType())
 	}
@@ -119,12 +122,12 @@ func (c *compiler) parseReflect() (*ast.Package, error) {
 		return nil, err
 	}
 
-	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
-	if err != nil {
-		return nil, err
+	archinfo := c.ArchInfo()
+	ctx := &types.Context{
+		IntSize: archinfo.IntSize,
+		PtrSize: archinfo.PtrSize,
 	}
-
-	_, err = types.Check(buildpkg.Name, c, fset, pkg)
+	pkg, err := ctx.Check(fset, files)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +136,10 @@ func (c *compiler) parseReflect() (*ast.Package, error) {
 
 func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
 	malloc := c.NamedFunction("runtime.malloc", "func f(uintptr) unsafe.Pointer")
-	if size.Type().IntTypeWidth() > c.target.IntPtrType().IntTypeWidth() {
+	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
+	case n < 0:
+		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
+	case n > 0:
 		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
 	}
 	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")

@@ -33,11 +33,11 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/parser"
 	"go/scanner"
 	"go/token"
+	"go/types"
 	"log"
 	"os"
 	"runtime"
@@ -135,19 +135,17 @@ func compileFiles(compiler llgo.Compiler, filenames []string, importpath string)
 }
 
 func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
-	// make a package (resolve all identifiers)
-	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
-	if err != nil {
-		report(err)
-		return nil, err
+	exprTypes := make(llgo.ExprTypeMap)
+	archinfo := compiler.ArchInfo()
+	ctx := &types.Context{
+		IntSize: archinfo.IntSize,
+		PtrSize: archinfo.PtrSize,
+		Expr: func(x ast.Expr, typ types.Type, val interface{}) {
+			exprTypes[x] = llgo.ExprTypeInfo{Type: typ, Value: val}
+		},
 	}
 
-	// an empty importpath means the same as the package name
-	if importpath == "" {
-		importpath = pkg.Name
-	}
-
-	exprTypes, err := types.Check(importpath, compiler, fset, pkg)
+	pkg, err := ctx.Check(fset, files)
 	if err != nil {
 		report(err)
 		return nil, err
@@ -158,6 +156,10 @@ func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[strin
 		os.Exit(0)
 	}
 
+	// an empty importpath means the same as the package name
+	if importpath == "" {
+		importpath = pkg.Name
+	}
 	return compiler.Compile(fset, pkg, importpath, exprTypes)
 }
 
