@@ -25,13 +25,13 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/types"
 )
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
-	typ := c.types.expr[expr]
-	switch utyp := types.Underlying(typ).(type) {
+	typ := c.types.expr[expr].Type
+	switch utyp := underlyingType(typ).(type) {
 	case *types.Slice:
 		var length, capacity Value
 		switch len(expr.Args) {
@@ -42,7 +42,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 			length = c.VisitExpr(expr.Args[1])
 		}
 		slice := c.makeSlice(utyp.Elt, length, capacity)
-		return c.NewLLVMValue(slice, typ)
+		return c.NewValue(slice, typ)
 	case *types.Chan:
 		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap uint32) uintptr")
 		dyntyp := c.types.ToRuntime(typ)
@@ -53,13 +53,13 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		}
 		args := []llvm.Value{dyntyp, cap_}
 		ptr := c.builder.CreateCall(f, args, "")
-		return c.NewLLVMValue(ptr, typ)
+		return c.NewValue(ptr, typ)
 	case *types.Map:
 		f := c.NamedFunction("runtime.makemap", "func f(t uintptr) uintptr")
 		dyntyp := c.types.ToRuntime(typ)
 		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 		mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp}, "")
-		return c.NewLLVMValue(mapval, typ)
+		return c.NewValue(mapval, typ)
 	}
 	panic(fmt.Sprintf("unhandled type: %s", typ))
 }

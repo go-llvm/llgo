@@ -24,8 +24,8 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/types"
 )
 
 // makeLiteralSlice allocates a new slice, storing in it the provided elements.
@@ -53,21 +53,21 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Value {
 	var lengthValue llvm.Value
 	if length != nil {
-		lengthValue = length.Convert(types.Int32).LLVMValue()
+		lengthValue = length.Convert(types.Typ[types.Int]).LLVMValue()
 	} else {
-		lengthValue = llvm.ConstNull(llvm.Int32Type())
+		lengthValue = llvm.ConstNull(c.llvmtypes.inttype)
 	}
 
 	// TODO check capacity >= length
 	capacityValue := lengthValue
 	if capacity != nil {
-		capacityValue = capacity.Convert(types.Int32).LLVMValue()
+		capacityValue = capacity.Convert(types.Typ[types.Int]).LLVMValue()
 	}
 
 	eltType := c.types.ToLLVM(elttyp)
 	sizeof := llvm.ConstTrunc(llvm.SizeOf(eltType), llvm.Int32Type())
 	size := c.builder.CreateMul(capacityValue, sizeof, "")
-	mem := c.createMalloc(c.NewLLVMValue(size, types.Int32).Convert(types.Uintptr).LLVMValue())
+	mem := c.createMalloc(size)
 	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
 	c.memsetZero(mem, size)
 
@@ -100,7 +100,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 
 	sliceappend := c.NamedFunction("runtime.sliceappend", "func f(t uintptr, dst, src slice) slice")
 	i8slice := sliceappend.Type().ElementType().ReturnType()
-	i8ptr := c.types.ToLLVM(&types.Pointer{Base: types.Int8})
+	i8ptr := c.types.ToLLVM(&types.Pointer{Base: types.Typ[types.Int8]})
 
 	// Coerce first argument into an []int8.
 	a_ := s.LLVMValue()
@@ -130,7 +130,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 	args := []llvm.Value{runtimeTyp, a, b}
 	result := c.builder.CreateCall(sliceappend, args, "")
-	return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), s.Type())
+	return c.NewValue(c.coerceSlice(result, sliceTyp), s.Type())
 }
 
 func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
@@ -152,36 +152,38 @@ func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
 	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 	args := []llvm.Value{runtimeTyp, dest_, source_}
 	result := c.builder.CreateCall(slicecopy, args, "")
-	return c.NewLLVMValue(result, types.Int)
+	return c.NewValue(result, types.Typ[types.Int])
 }
 
 func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
-	// expr.X, expr.Low, expr.High
 	value := c.VisitExpr(expr.X)
-	var low, high llvm.Value
+
+	var low llvm.Value
 	if expr.Low != nil {
-		low = c.VisitExpr(expr.Low).Convert(types.Int32).LLVMValue()
+		low = c.VisitExpr(expr.Low).LLVMValue()
 	} else {
-		low = llvm.ConstNull(llvm.Int32Type())
-	}
-	if expr.High != nil {
-		high = c.VisitExpr(expr.High).Convert(types.Int32).LLVMValue()
-	} else {
-		high = llvm.ConstAllOnes(llvm.Int32Type()) // -1
+		low = llvm.ConstNull(c.types.inttype)
 	}
 
-	if _, ok := types.Underlying(value.Type()).(*types.Pointer); ok {
+	var high llvm.Value
+	if expr.High != nil {
+		high = c.VisitExpr(expr.High).LLVMValue()
+	} else {
+		high = llvm.ConstAllOnes(c.types.inttype) // -1
+	}
+
+	if _, ok := underlyingType(value.Type()).(*types.Pointer); ok {
 		value = value.(*LLVMValue).makePointee()
 	}
 
-	switch typ := types.Underlying(value.Type()).(type) {
+	switch typ := underlyingType(value.Type()).(type) {
 	case *types.Array:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int32) slice")
+		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
 		arrayptr := value.(*LLVMValue).pointer.LLVMValue()
 		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
-		arraylen := llvm.ConstInt(llvm.Int32Type(), typ.Len, false)
+		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
@@ -191,9 +193,9 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
 		result := c.builder.CreateCall(sliceslice, args, "")
 		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
-		return c.NewLLVMValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
+		return c.NewValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int32) slice")
+		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := value.LLVMValue()
 		sliceTyp := sliceValue.Type()
@@ -202,12 +204,12 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
 		result := c.builder.CreateCall(sliceslice, args, "")
-		return c.NewLLVMValue(c.coerceSlice(result, sliceTyp), value.Type())
-	case *types.Name: // String
+		return c.NewValue(c.coerceSlice(result, sliceTyp), value.Type())
+	case *types.NamedType:
 		stringslice := c.NamedFunction("runtime.stringslice", "func f(a string, low, high int32) string")
 		args := []llvm.Value{value.LLVMValue(), low, high}
 		result := c.builder.CreateCall(stringslice, args, "")
-		return c.NewLLVMValue(result, value.Type())
+		return c.NewValue(result, value.Type())
 	default:
 		panic("unimplemented")
 	}

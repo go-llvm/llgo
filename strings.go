@@ -24,8 +24,8 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/token"
+	"go/types"
 )
 
 func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
@@ -44,8 +44,8 @@ func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
 	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
 	args := []llvm.Value{lhsstr, rhsstr}
 	result := c.builder.CreateCall(strcat, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
@@ -74,7 +74,7 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 		panic("unreachable")
 	}
 	result = c.builder.CreateICmp(pred, result, zero, "")
-	return c.NewLLVMValue(result, types.Bool)
+	return c.NewValue(result, types.Typ[types.Bool])
 }
 
 func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Value) {
@@ -91,10 +91,10 @@ func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Va
 func (v *LLVMValue) runeToString() *LLVMValue {
 	c := v.compiler
 	strrune := c.NamedFunction("runtime.strrune", "func f(n int64) _string")
-	args := []llvm.Value{v.Convert(types.Int64).LLVMValue()}
+	args := []llvm.Value{v.Convert(types.Typ[types.Int64]).LLVMValue()}
 	result := c.builder.CreateCall(strrune, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
@@ -103,9 +103,9 @@ func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
 	_string := strtorunes.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
 	result := c.builder.CreateCall(strtorunes, args, "")
-	runeslice := &types.Slice{Elt: types.Rune}
+	runeslice := &types.Slice{Elt: types.Typ[types.Rune]}
 	result = c.coerceSlice(result, c.types.ToLLVM(runeslice))
-	return c.NewLLVMValue(result, runeslice)
+	return c.NewValue(result, runeslice)
 }
 
 func (v *LLVMValue) runeSliceToString() *LLVMValue {
@@ -114,8 +114,8 @@ func (v *LLVMValue) runeSliceToString() *LLVMValue {
 	i8slice := runestostr.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceSlice(v.LLVMValue(), i8slice)}
 	result := c.builder.CreateCall(runestostr, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 // vim: set ft=go:

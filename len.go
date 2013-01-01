@@ -25,11 +25,8 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
-	"go/token"
-	"strconv"
-	"unsafe"
+	"go/types"
 )
 
 func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
@@ -44,52 +41,38 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := types.Underlying(typ).(*types.Name); ok {
+	if name, ok := underlyingType(typ).(*types.NamedType); ok {
 		typ = name.Underlying
 	}
 
-	switch typ := types.Underlying(typ).(type) {
+	var lenvalue llvm.Value
+	switch typ := underlyingType(typ).(type) {
 	case *types.Pointer:
-		// XXX Converting to a string to be converted back to an int is
-		// silly. The values need an overhaul? Perhaps have types based
-		// on fundamental types, with the additional methods to make
-		// them llgo.Value's.
-		if a, isarray := typ.Base.(*types.Array); isarray {
-			return c.NewConstValue(token.INT,
-				strconv.FormatUint(a.Len, 10))
-		}
-		v := strconv.FormatUint(uint64(unsafe.Sizeof(uintptr(0))), 10)
-		return c.NewConstValue(token.INT, v)
+		atyp := underlyingType(typ.Base).(*types.Array)
+		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len), false)
 
 	case *types.Slice:
 		sliceval := value.LLVMValue()
-		lenval := c.builder.CreateExtractValue(sliceval, 1, "")
-		return c.NewLLVMValue(lenval, types.Int32).Convert(types.Int)
+		lenvalue = c.builder.CreateExtractValue(sliceval, 1, "")
 
 	case *types.Map:
 		mapval := value.LLVMValue()
 		f := c.NamedFunction("runtime.maplen", "func f(m uintptr) int")
-		lenval := c.builder.CreateCall(f, []llvm.Value{mapval}, "")
-		return c.NewLLVMValue(lenval, types.Int)
+		lenvalue = c.builder.CreateCall(f, []llvm.Value{mapval}, "")
 
 	case *types.Array:
-		v := strconv.FormatUint(typ.Len, 10)
-		return c.NewConstValue(token.INT, v)
+		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
 
 	case *types.Basic:
-		if typ == types.String.Underlying {
-			switch value := value.(type) {
-			case *LLVMValue:
-				ptr := value.pointer
-				len_field := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
-				len_value := c.builder.CreateLoad(len_field, "")
-				return c.NewLLVMValue(len_value, types.Int32).Convert(types.Int)
-			case ConstValue:
-				s := value.Val.(string)
-				n := uint64(len(s))
-				return c.NewConstValue(token.INT, strconv.FormatUint(n, 10))
-			}
+		if isString(typ) {
+			value := value.(*LLVMValue)
+			ptr := value.pointer
+			lenptr := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
+			lenvalue = c.builder.CreateLoad(lenptr, "")
 		}
+	}
+	if !lenvalue.IsNil() {
+		return c.NewValue(lenvalue, types.Typ[types.Int])
 	}
 	panic(fmt.Sprint("Unhandled value type: ", value.Type()))
 }

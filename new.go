@@ -23,19 +23,19 @@ SOFTWARE.
 package llgo
 
 import (
-	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/types"
 )
 
 func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 	if len(expr.Args) > 1 {
 		panic("Expecting only one argument to new")
 	}
-	ptrtyp := c.types.expr[expr].(*types.Pointer)
+	ptrtyp := c.types.expr[expr].Type.(*types.Pointer)
 	typ := ptrtyp.Base
 	llvmtyp := c.types.ToLLVM(typ)
 	mem := c.createTypeMalloc(llvmtyp)
-	return c.NewLLVMValue(mem, ptrtyp)
+	return c.NewValue(mem, ptrtyp)
 }
 
 // vim: set ft=go :

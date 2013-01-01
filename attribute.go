@@ -6,8 +6,8 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
+	"go/types"
 	"strings"
 )
 
@@ -114,7 +114,7 @@ func parseLinkageAttribute(value string) linkageAttribute {
 type nameAttribute string
 
 func (a nameAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Func); isfunc {
+	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
 		fn.SetName(string(a))
 	} else {
@@ -140,7 +140,7 @@ func parseLLVMAttribute(value string) llvmAttribute {
 type llvmAttribute llvm.Attribute
 
 func (a llvmAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Func); isfunc {
+	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		v.LLVMValue().AddFunctionAttr(llvm.Attribute(a))
 	} else {
 		v.LLVMValue().AddAttribute(llvm.Attribute(a))

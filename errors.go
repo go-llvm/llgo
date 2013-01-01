@@ -6,13 +6,15 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
+	"go/types"
 )
 
 func (c *compiler) visitRecover() *LLVMValue {
 	// TODO
-	errval := llvm.ConstNull(c.types.ToLLVM(types.Error))
-	return c.NewLLVMValue(errval, types.Error)
+	errorObj := types.Universe.Lookup("error")
+	errorType := errorObj.Type.(types.Type)
+	errval := llvm.ConstNull(c.types.ToLLVM(errorType))
+	return c.NewValue(errval, errorType)
 }
 
 func (c *compiler) visitPanic(arg Value) {

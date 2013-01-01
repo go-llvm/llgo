@@ -24,7 +24,7 @@ package llgo
 
 import (
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
+	"go/types"
 )
 
 // mapLookup searches a map for a specified key, returning a pointer to the
@@ -60,8 +60,8 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 	result = c.builder.CreateIntToPtr(result, llvmtyp, "")
 	notnull_ := c.builder.CreateIsNotNull(result, "")
 	result = c.builder.CreateSelect(notnull_, result, zeroglobal, "")
-	value := c.NewLLVMValue(result, eltPtrType)
-	return value.makePointee(), c.NewLLVMValue(notnull_, types.Bool)
+	value := c.NewValue(result, eltPtrType)
+	return value.makePointee(), c.NewValue(notnull_, types.Typ[types.Bool])
 }
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
