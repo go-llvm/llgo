@@ -61,7 +61,7 @@ func maplen(m *map_) int {
 }
 
 // #llgo name: reflect.mapassign
-func reflect_mapassign(t *type_, m_, key, val unsafe.Pointer, ok bool) {
+func reflect_mapassign(t *rtype, m_, key, val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
 	if ok {
 		ptr := maplookup(unsafe.Pointer(t), m, key, true)
@@ -73,7 +73,7 @@ func reflect_mapassign(t *type_, m_, key, val unsafe.Pointer, ok bool) {
 }
 
 // #llgo name: reflect.mapaccess
-func reflect_mapaccess(t *type_, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
+func reflect_mapaccess(t *rtype, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
 	ptr := maplookup(unsafe.Pointer(t), m, key, false)
 	return ptr, ptr != nil
@@ -84,8 +84,7 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 		return nil
 	}
 
-	typ := (*type_)(t)
-	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
@@ -131,8 +130,7 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 		return
 	}
 
-	typ := (*type_)(t)
-	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
@@ -159,7 +157,7 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 }
 
 // #llgo name: reflect.mapiterinit
-func reflect_mapiterinit(t *type_, m_ unsafe.Pointer) *byte {
+func reflect_mapiterinit(t *rtype, m_ unsafe.Pointer) *byte {
 	// TODO
 	return nil
 }
@@ -186,8 +184,7 @@ func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv 
 		ptr = ptr.next
 	}
 	if ptr != nil {
-		typ := (*type_)(t)
-		maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+		maptyp := (*mapType)(t)
 		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 		keysize := uintptr(maptyp.key.size)
 		keyoffset := align(ptrsize, uintptr(maptyp.key.align))

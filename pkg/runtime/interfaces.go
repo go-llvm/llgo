@@ -24,10 +24,10 @@ package runtime
 
 import "unsafe"
 
-func compareI2I(atyp, btyp, aval, bval uintptr) bool {
-	if atyp == btyp {
-		atyp := (*type_)(unsafe.Pointer(atyp))
-		btyp := (*type_)(unsafe.Pointer(btyp))
+func compareI2I(atyp_, btyp_, aval, bval uintptr) bool {
+	atyp := (*rtype)(unsafe.Pointer(atyp_))
+	btyp := (*rtype)(unsafe.Pointer(btyp_))
+	if eqtyp(atyp, btyp) {
 		algs := unsafe.Pointer(atyp.alg)
 		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(algs))
 		eqFn := *(*equalalg)(eqPtr)
@@ -51,14 +51,13 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 //
 // FIXME cache type-to-interface conversions.
 func convertI2I(typ_, from_, to_ uintptr) bool {
-	dyntypptr := (**type_)(unsafe.Pointer(from_))
+	dyntypptr := (**rtype)(unsafe.Pointer(from_))
 	if dyntypptr == nil {
 		return false
 	}
 	dyntyp := *dyntypptr
 	if dyntyp.uncommonType != nil {
-		typ := (*type_)(unsafe.Pointer(typ_))
-		targettyp := (*interfaceType)(unsafe.Pointer(&typ.commonType))
+		targettyp := (*interfaceType)(unsafe.Pointer(typ_))
 		if len(targettyp.methods) > len(dyntyp.methods) {
 			return false
 		}
@@ -80,7 +79,7 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 			}
 		}
 		targetvalue := (*uintptr)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
-		targetdyntyp := (**type_)(unsafe.Pointer(to_))
+		targetdyntyp := (**rtype)(unsafe.Pointer(to_))
 		*targetvalue = *(*uintptr)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
 		*targetdyntyp = dyntyp
 		return true
@@ -89,7 +88,7 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 }
 
 // #llgo name: reflect.ifaceE2I
-func reflect_ifaceE2I(t *type_, src interface{}, dst unsafe.Pointer) {
+func reflect_ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	// TODO
 	println("TODO: reflect.ifaceE2I")
 	llvm_trap()

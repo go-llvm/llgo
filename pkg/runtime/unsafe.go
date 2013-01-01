@@ -10,14 +10,14 @@ import "unsafe"
 func llvm_trap()
 
 // #llgo name: reflect.unsafe_New
-func unsafe_New(t type_) unsafe.Pointer {
+func unsafe_New(t *rtype) unsafe.Pointer {
 	ptr := malloc(t.size)
 	bzero(ptr, t.size)
 	return ptr
 }
 
 // #llgo name: reflect.unsafe_NewArray
-func unsafe_NewArray(t type_, n int) unsafe.Pointer {
+func unsafe_NewArray(t *rtype, n int) unsafe.Pointer {
 	ptr := malloc(t.size * uintptr(n))
 	bzero(ptr, t.size*uintptr(n))
 	return ptr

@@ -77,7 +77,7 @@ func memalign(align_ uintptr, size uintptr) unsafe.Pointer {
 	const prot = PROT_READ | PROT_WRITE | PROT_EXEC
 	const flags = MAP_ANON | MAP_PRIVATE
 	p := mmap(nil, size, prot, flags, -1, 0)
-	if p == unsafe.Pointer(uintptr(-1)) {
+	if p == unsafe.Pointer(uintptr((1<<32)-1)) {
 		panic("mmap failed")
 	}
 	return unsafe.Pointer(align(uintptr(p), align_))

@@ -28,8 +28,7 @@ import "unsafe"
 // result of appending the second slice to the first, growing the
 // slice as necessary.
 func sliceappend(t unsafe.Pointer, a, b slice) slice {
-	typ := (*type_)(t)
-	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+	slicetyp := (*sliceType)(t)
 	if a.cap-a.len < b.len {
 		a = slicegrow(slicetyp, a, a.cap+(b.len-(a.cap-a.len)))
 	}
@@ -46,8 +45,7 @@ func sliceappend(t unsafe.Pointer, a, b slice) slice {
 // The number of elements copied will be the minimum of the len of
 // either slice.
 func slicecopy(t unsafe.Pointer, a, b slice) uint {
-	typ := (*type_)(t)
-	slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+	slicetyp := (*sliceType)(t)
 	n := a.len
 	if b.len < n {
 		n = b.len
@@ -75,8 +73,7 @@ func sliceslice(t unsafe.Pointer, a slice, low, high int) slice {
 	a.cap -= uint(low)
 	a.len = uint(high - low)
 	if low > 0 {
-		typ := (*type_)(t)
-		slicetyp := (*sliceType)(unsafe.Pointer(&typ.commonType))
+		slicetyp := (*sliceType)(t)
 		newptr := uintptr(unsafe.Pointer(a.array))
 		newptr += uintptr(slicetyp.elem.size * uintptr(low))
 		a.array = (*uint8)(unsafe.Pointer(newptr))

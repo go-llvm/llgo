@@ -8,4 +8,3 @@ package runtime
 func sigpipe() {
 	// TODO
 }
-
