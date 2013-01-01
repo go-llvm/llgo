@@ -25,17 +25,16 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"reflect"
 	"sort"
-	"strconv"
 )
 
 func isNilIdent(x ast.Expr) bool {
 	ident, ok := x.(*ast.Ident)
-	return ok && ident.Obj == types.Nil
+	return ok && ident.Obj == types.Universe.Lookup("nil")
 }
 
 // Binary logical operators are handled specially, outside of the Value
@@ -76,37 +75,22 @@ func (c *compiler) compileLogicalOp(op token.Token, lhs Value, rhsFunc func() Va
 		blocks = []llvm.BasicBlock{rhsBlock, falseBlock}
 	}
 	result.AddIncoming(values, blocks)
-	return c.NewLLVMValue(result, types.Bool)
+	return c.NewValue(result, types.Typ[types.Bool])
 }
 
-func (c *compiler) VisitBinaryExpr(expr *ast.BinaryExpr) Value {
-	lhs := c.VisitExpr(expr.X)
-	switch expr.Op {
-	case token.LOR, token.LAND:
-		if lhs, ok := lhs.(ConstValue); ok {
-			lhsvalue := lhs.Const.Val.(bool)
-			switch expr.Op {
-			case token.LOR:
-				if lhsvalue {
-					return lhs
-				}
-			case token.LAND:
-				if !lhsvalue {
-					return lhs
-				}
-			}
-			return c.VisitExpr(expr.Y)
-		}
-		return c.compileLogicalOp(expr.Op, lhs, func() Value { return c.VisitExpr(expr.Y) })
-	case token.SHL, token.SHR:
-		rhs := c.VisitExpr(expr.Y)
-		if _, ok := lhs.(ConstValue); ok {
-			typ := c.types.expr[expr]
-			lhs = lhs.Convert(typ)
-		}
-		return lhs.BinaryOp(expr.Op, rhs)
+func (c *compiler) VisitBinaryExpr(x *ast.BinaryExpr) Value {
+	if x.Op == token.SHL || x.Op == token.SHR {
+		c.convertUntyped(x.X, x)
 	}
-	return lhs.BinaryOp(expr.Op, c.VisitExpr(expr.Y))
+	if !c.convertUntyped(x.X, x.Y) {
+		c.convertUntyped(x.Y, x.X)
+	}
+	lhs := c.VisitExpr(x.X)
+	switch x.Op {
+	case token.LOR, token.LAND:
+		return c.compileLogicalOp(x.Op, lhs, func() Value { return c.VisitExpr(x.Y) })
+	}
+	return lhs.BinaryOp(x.Op, c.VisitExpr(x.Y))
 }
 
 func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
@@ -115,15 +99,29 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 }
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
-	switch x := (expr.Fun).(type) {
-	case *ast.Ident:
-		switch x.String() {
+	// Is it a type conversion?
+	if len(expr.Args) == 1 && isType(expr.Fun) {
+		typ := c.types.expr[expr].Type
+		value := c.VisitExpr(expr.Args[0])
+		return value.Convert(typ)
+	}
+
+	// Builtin functions.
+	// Builtin function's have a special Type (types.builtin).
+	//
+	// Note: we do not handle unsafe.{Align,Offset,Size}of here,
+	// as they are evaluated during type-checking.
+	switch c.types.expr[expr.Fun].Type.(type) {
+	case *types.NamedType, *types.Signature:
+	default:
+		ident := expr.Fun.(*ast.Ident)
+		switch ident.Obj.Name {
 		case "copy":
 			return c.VisitCopy(expr)
 		case "print":
-			return c.VisitPrint(expr, false)
+			return c.visitPrint(expr)
 		case "println":
-			return c.VisitPrint(expr, true)
+			return c.visitPrintln(expr)
 		case "cap":
 			return c.VisitCap(expr)
 		case "len":
@@ -157,55 +155,28 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		case "complex":
 			r := c.VisitExpr(expr.Args[0]).LLVMValue()
 			i := c.VisitExpr(expr.Args[1]).LLVMValue()
-			typ := c.types.expr[expr]
+			typ := c.types.expr[expr].Type
 			cmplx := llvm.Undef(c.types.ToLLVM(typ))
 			cmplx = c.builder.CreateInsertValue(cmplx, r, 0, "")
 			cmplx = c.builder.CreateInsertValue(cmplx, i, 1, "")
-			return c.NewLLVMValue(cmplx, typ)
+			return c.NewValue(cmplx, typ)
 		}
-
-	case *ast.SelectorExpr:
-		// Handle unsafe functions specially.
-		if pkgobj, ok := x.X.(*ast.Ident); ok && pkgobj.Obj.Data == types.Unsafe.Data {
-			var value int
-			switch x.Sel.Name {
-			case "Alignof":
-				argtype := c.types.expr[expr.Args[0]]
-				value = c.Alignof(argtype)
-				value := c.NewConstValue(token.INT, strconv.Itoa(value))
-				value.typ = types.Uintptr
-				return value
-			case "Sizeof":
-				argtype := c.types.expr[expr.Args[0]]
-				value = c.Sizeof(argtype)
-				value := c.NewConstValue(token.INT, strconv.Itoa(value))
-				value.typ = types.Uintptr
-				return value
-			case "Offsetof":
-				// FIXME this should be constant, but I'm lazy, and this ought
-				// to be done when we're doing constant folding anyway.
-				lhs := expr.Args[0].(*ast.SelectorExpr).X
-				baseaddr := c.VisitExpr(lhs).(*LLVMValue).pointer.LLVMValue()
-				addr := c.VisitExpr(expr.Args[0]).(*LLVMValue).pointer.LLVMValue()
-				baseaddr = c.builder.CreatePtrToInt(baseaddr, c.target.IntPtrType(), "")
-				addr = c.builder.CreatePtrToInt(addr, c.target.IntPtrType(), "")
-				diff := c.builder.CreateSub(addr, baseaddr, "")
-				return c.NewLLVMValue(diff, types.Uintptr)
-			}
-		}
-	}
-
-	// Is it a type conversion?
-	if len(expr.Args) == 1 && isType(expr.Fun) {
-		typ := c.types.expr[expr]
-		value := c.VisitExpr(expr.Args[0])
-		return value.Convert(typ)
 	}
 
 	// Not a type conversion, so must be a function call.
 	lhs := c.VisitExpr(expr.Fun)
 	fn := lhs.(*LLVMValue)
-	fn_type := types.Underlying(fn.Type()).(*types.Func)
+	fn_type := underlyingType(fn.Type()).(*types.Signature)
+
+	// Convert untyped argument types.
+	for i, p := range fn_type.Params {
+		arginfo := c.types.expr[expr.Args[i]]
+		if isUntyped(arginfo.Type) {
+			arginfo.Type = p.Type.(types.Type)
+			c.types.expr[expr.Args[i]] = arginfo
+		}
+	}
+
 	args := make([]llvm.Value, 0)
 	if fn.receiver != nil {
 		// Don't dereference the receiver here. It'll have been worked out in
@@ -247,11 +218,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	case 1:
 		result_type = fn_type.Results[0].Type.(types.Type)
 	default:
-		fields := make([]*ast.Object, len(fn_type.Results))
-		for i, result := range fn_type.Results {
-			fields[i] = result
-		}
-		result_type = &types.Struct{Fields: fields}
+		result_type = &types.Result{Values: fn_type.Results}
 	}
 
 	// After calling the function, we must bitcast to the computed LLVM
@@ -261,53 +228,32 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	if len(fn_type.Results) == 1 {
 		result = c.builder.CreateBitCast(result, c.types.ToLLVM(result_type), "")
 	}
-	return c.NewLLVMValue(result, result_type)
-}
-
-func isIntType(t types.Type) bool {
-	for {
-		switch x := t.(type) {
-		case *types.Name:
-			t = x.Underlying
-		case *types.Basic:
-			switch x.Kind {
-			case types.UintKind, types.Uint8Kind, types.Uint16Kind,
-				types.Uint32Kind, types.Uint64Kind, types.IntKind,
-				types.Int8Kind, types.Int16Kind, types.Int32Kind,
-				types.Int64Kind:
-				return true
-			default:
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	panic("unreachable")
+	return c.NewValue(result, result_type)
 }
 
 func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	value := c.VisitExpr(expr.X)
 	index := c.VisitExpr(expr.Index)
 
-	typ := types.Underlying(value.Type())
-	if typ == types.String {
+	typ := underlyingType(value.Type())
+	if isString(typ) {
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		gepindices := []llvm.Value{index.LLVMValue()}
 		ptr = c.builder.CreateGEP(ptr, gepindices, "")
-		result := c.NewLLVMValue(ptr, &types.Pointer{Base: types.Byte})
+		byteType := types.Typ[types.Byte]
+		result := c.NewValue(ptr, &types.Pointer{Base: byteType})
 		return result.makePointee()
 	}
 
 	// We can index a pointer to an array.
 	if _, ok := typ.(*types.Pointer); ok {
 		value = value.(*LLVMValue).makePointee()
-		typ = value.Type()
+		typ = underlyingType(value.Type())
 	}
 
-	switch typ := types.Underlying(typ).(type) {
+	switch typ := typ.(type) {
 	case *types.Array:
-		index := index.Convert(types.Int).LLVMValue()
+		index := index.Convert(types.Typ[types.Int]).LLVMValue()
 		var ptr llvm.Value
 		value := value.(*LLVMValue)
 		if value.pointer != nil {
@@ -319,14 +265,14 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		}
 		zero := llvm.ConstNull(llvm.Int32Type())
 		element := c.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
-		result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+		result := c.NewValue(element, &types.Pointer{Base: typ.Elt})
 		return result.makePointee()
 
 	case *types.Slice:
-		index := index.Convert(types.Int).LLVMValue()
+		index := index.Convert(types.Typ[types.Int]).LLVMValue()
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
-		result := c.NewLLVMValue(element, &types.Pointer{Base: typ.Elt})
+		result := c.NewValue(element, &types.Pointer{Base: typ.Elt})
 		return result.makePointee()
 
 	case *types.Map:
@@ -361,31 +307,31 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	if _, ok := lhs.(TypeValue); ok {
 		methodobj := expr.Sel.Obj
 		value := c.Resolve(methodobj).(*LLVMValue)
-		return c.NewLLVMValue(value.value, c.types.expr[expr])
+		return c.NewValue(value.value, c.types.expr[expr].Type)
 	}
 
-	// TODO(?) record path to field/method during typechecking, so we don't
-	// have to search again here.
-
-	if iface, ok := types.Underlying(lhs.Type()).(*types.Interface); ok {
+	// Interface: search for method by name.
+	if iface, ok := underlyingType(lhs.Type()).(*types.Interface); ok {
 		i := sort.Search(len(iface.Methods), func(i int) bool {
 			return iface.Methods[i].Name >= name
 		})
 		structValue := lhs.LLVMValue()
 		receiver := c.builder.CreateExtractValue(structValue, 1, "")
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
-		i8ptr := &types.Pointer{Base: types.Int8}
-		ftype := iface.Methods[i].Type.(*types.Func)
+		i8ptr := &types.Pointer{Base: types.Typ[types.Int8]}
+		ftype := iface.Methods[i].Type
 		ftype.Recv = ast.NewObj(ast.Var, "")
 		ftype.Recv.Type = i8ptr
 		f = c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), "")
 		ftype.Recv = nil
-		method := c.NewLLVMValue(f, ftype)
-		method.receiver = c.NewLLVMValue(receiver, i8ptr)
+		method := c.NewValue(f, ftype)
+		method.receiver = c.NewValue(receiver, i8ptr)
 		return method
 	}
 
-	// Search through embedded types for field/method.
+	// Otherwise, search for field/method,
+	// recursing through embedded types.
+	var method *ast.Object
 	var result selectorCandidate
 	curr := []selectorCandidate{{nil, lhs.Type()}}
 	for result.Type == nil && len(curr) > 0 {
@@ -394,33 +340,35 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			indices := candidate.Indices[0:]
 			t := candidate.Type
 
-			if p, ok := types.Underlying(t).(*types.Pointer); ok {
-				if _, ok := types.Underlying(p.Base).(*types.Struct); ok {
+			if p, ok := underlyingType(t).(*types.Pointer); ok {
+				if _, ok := underlyingType(p.Base).(*types.Struct); ok {
 					t = p.Base
 				}
 			}
 
-			if n, ok := t.(*types.Name); ok {
-				i := sort.Search(len(n.Methods), func(i int) bool {
-					return n.Methods[i].Name >= name
-				})
-				if i < len(n.Methods) && n.Methods[i].Name == name {
-					result.Indices = indices
-					result.Type = t
+			if n, ok := t.(*types.NamedType); ok {
+				if scope, ok := n.Obj.Data.(*ast.Scope); ok {
+					method = scope.Lookup(name)
+					if method != nil {
+						result.Indices = indices
+						result.Type = t
+						break
+					}
 				}
 			}
 
-			if t, ok := types.Underlying(t).(*types.Struct); ok {
-				if i, ok := t.FieldIndices[name]; ok {
-					result.Indices = append(indices, int(i))
-					result.Type = t
+			if t, ok := underlyingType(t).(*types.Struct); ok {
+				if i := fieldIndex(t, name); i != -1 {
+					result.Indices = append(indices, i)
+					result.Type = t.Fields[i].Type
+					break
 				} else {
 					// Add embedded types to the next set of types
 					// to check.
 					for i, field := range t.Fields {
-						if field.Name == "" {
+						if field.IsAnonymous {
 							indices = append(indices[0:], i)
-							t := field.Type.(types.Type)
+							t := field.Type
 							candidate := selectorCandidate{indices, t}
 							next = append(next, candidate)
 						}
@@ -434,7 +382,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// Get a pointer to the field/receiver.
 	recvValue := lhs.(*LLVMValue)
 	if len(result.Indices) > 0 {
-		if _, ok := types.Underlying(lhs.Type()).(*types.Pointer); !ok {
+		if _, ok := underlyingType(lhs.Type()).(*types.Pointer); !ok {
 			if recvValue.pointer != nil {
 				recvValue = recvValue.pointer
 			} else {
@@ -446,15 +394,15 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				stackptr := c.builder.CreateAlloca(v.Type(), "")
 				c.builder.CreateStore(v, stackptr)
 				ptrtyp := &types.Pointer{Base: recvValue.Type()}
-				recvValue = c.NewLLVMValue(stackptr, ptrtyp)
+				recvValue = c.NewValue(stackptr, ptrtyp)
 			}
 		}
 		for _, v := range result.Indices {
 			ptr := recvValue.LLVMValue()
-			field := types.Underlying(types.Deref(recvValue.typ)).(*types.Struct).Fields[v]
+			field := underlyingType(derefType(recvValue.typ)).(*types.Struct).Fields[v]
 			fieldPtr := c.builder.CreateStructGEP(ptr, v, "")
 			fieldPtrTyp := &types.Pointer{Base: field.Type.(types.Type)}
-			recvValue = c.NewLLVMValue(fieldPtr, fieldPtrTyp)
+			recvValue = c.NewValue(fieldPtr, fieldPtrTyp)
 
 			// GEP returns a pointer; if the field is a pointer,
 			// we must load our pointer-to-a-pointer.
@@ -465,23 +413,22 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method?
-	if expr.Sel.Obj.Kind == ast.Fun {
-		method := c.Resolve(expr.Sel.Obj).(*LLVMValue)
-		methodType := expr.Sel.Obj.Type.(*types.Func)
+	if method != nil {
+		method := c.Resolve(method).(*LLVMValue)
+		methodType := method.Type().(*types.Signature)
 		receiverType := methodType.Recv.Type.(types.Type)
-		if types.Identical(recvValue.Type(), receiverType) {
+		if isIdentical(recvValue.Type(), receiverType) {
 			method.receiver = recvValue
-		} else if types.Identical(&types.Pointer{Base: recvValue.Type()}, receiverType) {
+		} else if isIdentical(&types.Pointer{Base: recvValue.Type()}, receiverType) {
 			method.receiver = recvValue.pointer
 		} else {
 			method.receiver = recvValue.makePointee()
 		}
 		return method
 	} else {
-		resultType := expr.Sel.Obj.Type.(types.Type)
-		if types.Identical(recvValue.Type(), resultType) {
+		if isIdentical(recvValue.Type(), result.Type) {
 			// no-op
-		} else if types.Identical(&types.Pointer{Base: recvValue.Type()}, resultType) {
+		} else if isIdentical(&types.Pointer{Base: recvValue.Type()}, result.Type) {
 			recvValue = recvValue.pointer
 		} else {
 			recvValue = recvValue.makePointee()
@@ -505,15 +452,20 @@ func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
-	typ := c.types.expr[expr]
+	typ := c.types.expr[expr].Type
 	lhs := c.VisitExpr(expr.X)
 	return lhs.Convert(typ)
 }
 
 func (c *compiler) VisitExpr(expr ast.Expr) Value {
+	// Before all else, check if we've got a constant expression.
+	// go/types performs constant folding, and we store the value
+	// alongside the expression's type.
+	if info := c.types.expr[expr]; info.Value != nil {
+		return c.NewConstValue(info.Value, info.Type)
+	}
+
 	switch x := expr.(type) {
-	case *ast.BasicLit:
-		return c.VisitBasicLit(x)
 	case *ast.BinaryExpr:
 		return c.VisitBinaryExpr(x)
 	case *ast.FuncLit:
@@ -537,9 +489,6 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	case *ast.SliceExpr:
 		return c.VisitSliceExpr(x)
 	case *ast.Ident:
-		if x.Obj == nil {
-			x.Obj = c.LookupObj(x.Name)
-		}
 		return c.Resolve(x.Obj)
 	}
 	panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))

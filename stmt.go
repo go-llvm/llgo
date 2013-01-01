@@ -25,9 +25,9 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"reflect"
 )
 
@@ -52,12 +52,12 @@ func (c *compiler) maybeImplicitBranch(dest llvm.BasicBlock) {
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 	lhs := c.VisitExpr(stmt.X).(*LLVMValue)
-	rhs := c.NewConstValue(token.INT, "1").Convert(lhs.Type())
+	rhs := llvm.ConstInt(c.types.ToLLVM(lhs.Type()), 1, false)
 	op := token.ADD
 	if stmt.Tok == token.DEC {
 		op = token.SUB
 	}
-	result := lhs.BinaryOp(op, rhs)
+	result := lhs.BinaryOp(op, c.NewValue(rhs, lhs.Type()))
 	c.builder.CreateStore(result.LLVMValue(), lhs.pointer.LLVMValue())
 
 	// TODO make sure we cover all possibilities (maybe just delegate this to
@@ -103,10 +103,19 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 
 func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	f := c.functions[len(c.functions)-1]
-	ftyp := f.Type().(*types.Func)
+	ftyp := f.Type().(*types.Signature)
 	if len(ftyp.Results) == 0 {
 		c.builder.CreateRetVoid()
 		return
+	}
+
+	// Convert untyped values.
+	for i, expr := range stmt.Results {
+		info := c.types.expr[expr]
+		if isUntyped(info.Type) {
+			info.Type = ftyp.Results[i].Type.(types.Type)
+			c.types.expr[expr] = info
+		}
 	}
 
 	values := make([]llvm.Value, len(ftyp.Results))
@@ -120,12 +129,12 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		results := make([]Value, len(ftyp.Results))
 		if len(stmt.Results) == 1 && len(ftyp.Results) > 1 {
 			aggresult := c.VisitExpr(stmt.Results[0])
-			aggtyp := aggresult.Type().(*types.Struct)
+			aggtyp := aggresult.Type().(*types.Result)
 			aggval := aggresult.LLVMValue()
 			for i := 0; i < len(results); i++ {
-				elemtyp := aggtyp.Fields[i].Type.(types.Type)
+				elemtyp := aggtyp.Values[i].Type.(types.Type)
 				elemval := c.builder.CreateExtractValue(aggval, i, "")
-				result := c.NewLLVMValue(elemval, elemtyp)
+				result := c.NewValue(elemval, elemtyp)
 				results[i] = result
 			}
 		} else {
@@ -151,7 +160,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	}
 }
 
-// nonAssignmentToken returns the non-assignment token 
+// nonAssignmentToken returns the non-assignment token
 func nonAssignmentToken(t token.Token) token.Token {
 	switch t {
 	case token.ADD_ASSIGN,
@@ -185,17 +194,17 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 	case *ast.CallExpr:
 		value := c.VisitExpr(x)
 		aggregate := value.LLVMValue()
-		struct_type := value.Type().(*types.Struct)
-		values = make([]Value, len(struct_type.Fields))
-		for i, f := range struct_type.Fields {
+		struct_type := value.Type().(*types.Result)
+		values = make([]Value, len(struct_type.Values))
+		for i, f := range struct_type.Values {
 			t := f.Type.(types.Type)
 			value_ := c.builder.CreateExtractValue(aggregate, i, "")
-			values[i] = c.NewLLVMValue(value_, t)
+			values[i] = c.NewValue(value_, t)
 		}
 	case *ast.TypeAssertExpr:
 		lhs := c.VisitExpr(x.X).(*LLVMValue)
-		typ := c.types.expr[x]
-		switch typ := types.Underlying(typ).(type) {
+		typ := c.types.expr[x].Type
+		switch typ := underlyingType(typ).(type) {
 		case *types.Interface:
 			value, ok := lhs.convertI2I(typ)
 			values = []Value{value, ok}
@@ -211,6 +220,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	// x (add_op|mul_op)= y
 	if stmt.Tok != token.DEFINE && stmt.Tok != token.ASSIGN {
 		// TODO handle assignment to map element.
+		c.convertUntyped(stmt.Rhs[0], stmt.Lhs[0])
 		op := nonAssignmentToken(stmt.Tok)
 		lhs := c.VisitExpr(stmt.Lhs[0])
 		rhsValue := c.VisitExpr(stmt.Rhs[0])
@@ -227,6 +237,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	} else {
 		values = make([]Value, len(stmt.Lhs))
 		for i, expr := range stmt.Rhs {
+			c.convertUntyped(expr, stmt.Lhs[i])
 			values[i] = c.VisitExpr(expr)
 		}
 	}
@@ -245,7 +256,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				llvmtyp := c.types.ToLLVM(typ)
 				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
 				ptrtyp := &types.Pointer{Base: typ}
-				stackvar := c.NewLLVMValue(ptr, ptrtyp).makePointee()
+				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
 				stackvar.stack = c.functions[len(c.functions)-1]
 				obj.Data = stackvar
 				lhsptrs[i] = ptr
@@ -257,19 +268,18 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				// dependent order.)
 				functions := c.functions
 				c.functions = nil
-				c.VisitValueSpec(obj.Decl.(*ast.ValueSpec), false)
+				c.VisitValueSpec(obj.Decl.(*ast.ValueSpec))
 				c.functions = functions
 			}
 		case *ast.IndexExpr:
-			if t, ok := c.types.expr[x.X]; ok {
-				if _, ok := t.(*types.Map); ok {
-					m := c.VisitExpr(x.X).(*LLVMValue)
-					index := c.VisitExpr(x.Index)
-					elem, _ := c.mapLookup(m, index, true)
-					lhsptrs[i] = elem.pointer.LLVMValue()
-					values[i] = values[i].Convert(elem.Type())
-					continue
-				}
+			t := c.types.expr[x.X].Type
+			if _, ok := underlyingType(t).(*types.Map); ok {
+				m := c.VisitExpr(x.X).(*LLVMValue)
+				index := c.VisitExpr(x.Index)
+				elem, _ := c.mapLookup(m, index, true)
+				lhsptrs[i] = elem.pointer.LLVMValue()
+				values[i] = values[i].Convert(elem.Type())
+				continue
 			}
 		}
 
@@ -359,7 +369,6 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 		c.continueblocks = c.continueblocks[:len(c.continueblocks)-1]
 	}()
 
-	// Is there an initializer? Create a new scope and visit the statement.
 	if stmt.Init != nil {
 		c.VisitStmt(stmt.Init)
 	}
@@ -388,7 +397,7 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 }
 
 func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
-	// TODO 
+	// TODO
 	c.builder.CreateUnreachable()
 	/*
 		var fn *LLVMValue
@@ -484,6 +493,17 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	}
 	if len(stmt.Body.List) == 0 {
 		return
+	}
+
+	// Convert untyped constant clauses.
+	for _, clause := range stmt.Body.List {
+		for _, expr := range clause.(*ast.CaseClause).List {
+			exprinfo := c.types.expr[expr]
+			if isUntyped(exprinfo.Type) {
+				exprinfo.Type = tag.Type()
+				c.types.expr[expr] = exprinfo
+			}
+		}
 	}
 
 	// makeValueFunc takes an expression, evaluates it, and returns
@@ -593,7 +613,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	x := c.VisitExpr(stmt.X)
 
 	// If it's a pointer type, we'll first check that it's non-nil.
-	typ := types.Underlying(x.Type())
+	typ := underlyingType(x.Type())
 	if _, ok := typ.(*types.Pointer); ok {
 		ifBlock := llvm.InsertBasicBlock(doneBlock, "if")
 		isnotnull := c.builder.CreateIsNotNull(x.LLVMValue(), "")
@@ -608,7 +628,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
 			keyType = key.Obj.Type.(types.Type)
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
-			stackvar := c.NewLLVMValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
+			stackvar := c.NewValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
 			stackvar.stack = c.functions[len(c.functions)-1]
 			key.Obj.Data = stackvar
 		}
@@ -616,7 +636,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
 				valueType = value.Obj.Type.(types.Type)
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
-				stackvar := c.NewLLVMValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
+				stackvar := c.NewValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
 				stackvar.stack = c.functions[len(c.functions)-1]
 				value.Obj.Data = stackvar
 			}
@@ -643,10 +663,10 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	if isptr {
 		typ = typ.(*types.Pointer).Base
 	}
-	switch typ := types.Underlying(typ).(type) {
+	switch typ := underlyingType(typ).(type) {
 	case *types.Map:
 		goto maprange
-	case *types.Name:
+	case *types.NamedType:
 		stringvalue := x.LLVMValue()
 		length = c.builder.CreateExtractValue(stringvalue, 1, "")
 		goto stringrange
@@ -661,7 +681,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			}
 		}
 		base = x.LLVMValue()
-		length = llvm.ConstInt(llvm.Int32Type(), typ.Len, false)
+		length = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
 		goto arrayrange
 	case *types.Slice:
 		slicevalue := x.LLVMValue()
@@ -856,10 +876,10 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					iface := iface.LLVMValue()
 					ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
 					isnil := c.builder.CreateIsNull(ifacetyp, "")
-					return c.NewLLVMValue(isnil, types.Bool)
+					return c.NewValue(isnil, types.Typ[types.Bool])
 				}
-				typ := c.types.expr[caseClause.List[j]]
-				switch typ := types.Underlying(typ).(type) {
+				typ := c.types.expr[caseClause.List[j]].Type
+				switch typ := underlyingType(typ).(type) {
 				case *types.Interface:
 					_, ok := iface.convertI2I(typ)
 					return ok
@@ -886,7 +906,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		if caseClause.List != nil {
 			block = stmtBlocks[i]
 			if len(caseClause.List) == 1 {
-				typ = c.types.expr[caseClause.List[0]]
+				typ = c.types.expr[caseClause.List[0]].Type
 			}
 			i++
 		} else {
@@ -895,7 +915,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
 			if len(caseClause.List) == 1 && !isNilIdent(caseClause.List[0]) {
-				switch typ := types.Underlying(typ).(type) {
+				switch typ := underlyingType(typ).(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
 					// clause condition test.
