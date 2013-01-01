@@ -1,40 +1,16 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 Andrew Wilkins.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package llgo
 
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/token"
-	"math"
+	"go/types"
 	"math/big"
-)
-
-var (
-	maxBigInt32 = big.NewInt(math.MaxInt32)
-	minBigInt32 = big.NewInt(math.MinInt32)
 )
 
 // Resolver is an interface for resolving AST objects to values.
@@ -73,66 +49,121 @@ type LLVMValue struct {
 	stack    *LLVMValue // If a stack value, the Value for the containing function.
 }
 
-// ConstValue represents a constant value produced as the result of an
-// expression.
-type ConstValue struct {
-	types.Const
-	compiler *compiler
-	typ      types.Type
-}
-
 // TypeValue represents a Type result of an expression. All methods
 // other than Type() will panic when called.
 type TypeValue struct {
 	typ types.Type
 }
 
-// NilValue represents a nil value. All methods other than Convert will
-// panic when called.
-type NilValue struct {
-	compiler *compiler
-}
-
-// Create a new dynamic value from a (LLVM Builder, LLVM Value, Type) triplet.
-func (c *compiler) NewLLVMValue(v llvm.Value, t types.Type) *LLVMValue {
+// Create a new dynamic value from a (LLVM Value, Type) pair.
+func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
 	return &LLVMValue{c, v, t, nil, nil, nil}
 }
 
-// Create a new constant value from a literal with accompanying type, as
-// provided by ast.BasicLit.
-func (c *compiler) NewConstValue(tok token.Token, lit string) ConstValue {
-	var typ types.Type
-	switch tok {
-	case token.INT:
-		typ = types.Int.Underlying
-	case token.FLOAT:
-		typ = types.Float64.Underlying
-	case token.IMAG:
-		typ = types.Complex128.Underlying
-	case token.CHAR:
-		typ = types.Rune.Underlying
-	case token.STRING:
-		typ = types.String.Underlying
+func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
+	switch {
+	case v == types.NilType{}:
+		llvmtyp := c.types.ToLLVM(typ)
+		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
+	case isString(typ):
+		if isUntyped(typ) {
+			typ = types.Typ[types.String]
+		}
+		strval := v.(string)
+		strlen := len(strval)
+		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+		var ptr llvm.Value
+		if strlen > 0 {
+			ptr = c.builder.CreateGlobalStringPtr(strval, "")
+			ptr = llvm.ConstBitCast(ptr, i8ptr)
+		} else {
+			ptr = llvm.ConstNull(i8ptr)
+		}
+		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(strlen), false)
+		llvmvalue := llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
+		return c.NewValue(llvmvalue, typ)
+	case isInteger(typ):
+		if isUntyped(typ) {
+			typ = types.Typ[types.Int]
+		}
+		llvmtyp := c.types.ToLLVM(typ)
+		signed := !isUnsigned(typ)
+		// TODO (go/types) check constant doesn't overflow
+		switch v := v.(type) {
+		case int64:
+			llvmvalue := llvm.ConstInt(llvmtyp, uint64(v), signed)
+			return c.NewValue(llvmvalue, typ)
+		case *big.Int:
+			llvmvalue := llvm.ConstInt(llvmtyp, v.Uint64(), signed)
+			return c.NewValue(llvmvalue, typ)
+		}
+	case isBoolean(typ):
+		if isUntyped(typ) {
+			typ = types.Typ[types.Bool]
+		}
+		var llvmvalue llvm.Value
+		if v.(bool) {
+			llvmvalue = llvm.ConstAllOnes(llvm.Int1Type())
+		} else {
+			llvmvalue = llvm.ConstNull(llvm.Int1Type())
+		}
+		return c.NewValue(llvmvalue, typ)
+	case isFloat(typ):
+		if isUntyped(typ) {
+			typ = types.Typ[types.Float64]
+		}
+		llvmtyp := c.types.ToLLVM(typ)
+		// TODO (go/types) check constant doesn't overflow
+		switch v := v.(type) {
+		case float64:
+			llvmvalue := llvm.ConstFloat(llvmtyp, v)
+			return c.NewValue(llvmvalue, typ)
+		case int64:
+			llvmvalue := llvm.ConstFloat(llvmtyp, float64(v))
+			return c.NewValue(llvmvalue, typ)
+		case *big.Rat:
+			floatv := float64(v.Num().Int64()) / float64(v.Denom().Int64())
+			llvmvalue := llvm.ConstFloat(llvmtyp, floatv)
+			return c.NewValue(llvmvalue, typ)
+		}
+	case typ == types.Typ[types.UnsafePointer]:
+		llvmtyp := c.types.ToLLVM(typ)
+		signed := !isUnsigned(typ)
+		llvmvalue := llvm.ConstInt(llvmtyp, uint64(v.(int64)), signed)
+		return c.NewValue(llvmvalue, typ)
+	case isComplex(typ):
+		if isUntyped(typ) {
+			typ = types.Typ[types.Complex128]
+		}
+		llvmtyp := c.types.ToLLVM(typ)
+		floattyp := llvmtyp.StructElementTypes()[0]
+		llvmvalue := llvm.ConstNull(llvmtyp)
+		switch v := v.(type) {
+		case float64:
+			llvmre := llvm.ConstFloat(floattyp, v)
+			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
+		case int64:
+			llvmre := llvm.ConstFloat(floattyp, float64(v))
+			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
+		//case *big.Rat:
+		//	floatv := float64(v.Num().Int64()) / float64(v.Denom().Int64())
+		//	llvmvalue := llvm.ConstFloat(llvmtyp, floatv)
+		//	return c.NewValue(llvmvalue, typ)
+		case *types.Complex:
+			re := float64(v.Re.Num().Int64()) / float64(v.Re.Denom().Int64())
+			im := float64(v.Im.Num().Int64()) / float64(v.Im.Denom().Int64())
+			llvmre := llvm.ConstFloat(floattyp, re)
+			llvmim := llvm.ConstFloat(floattyp, im)
+			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
+			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmim, []uint32{1})
+		}
+		return c.NewValue(llvmvalue, typ)
 	}
-	return ConstValue{types.MakeConst(tok, lit), c, typ}
+	panic(fmt.Sprintf("unhandled: %s (%T)", c.types.TypeString(typ), typ))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // LLVMValue methods
-
-func signed(typ types.Type) bool {
-	if typ_, ok := typ.(*types.Name); ok {
-		typ = typ_.Underlying
-	}
-	if basic, ok := typ.(*types.Basic); ok {
-		switch basic.Kind {
-		case types.IntKind, types.Int8Kind, types.Int16Kind,
-			types.Int32Kind, types.Int64Kind:
-			return true
-		}
-	}
-	return false
-}
 
 func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	if op == token.NEQ {
@@ -144,35 +175,21 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	c := lhs.compiler
 	b := lhs.compiler.builder
 
-	// Later we can do better by treating constants specially. For now, let's
-	// convert to LLVMValue's.
-	var rhs *LLVMValue
-	rhsisnil := false
-	switch rhs_ := rhs_.(type) {
-	case *LLVMValue:
-		rhs = rhs_
-	case NilValue:
-		rhsisnil = true
-		switch rhs_ := rhs_.Convert(lhs.Type()).(type) {
-		case ConstValue:
-			rhs = c.NewLLVMValue(rhs_.LLVMValue(), rhs_.Type())
-		case *LLVMValue:
-			rhs = rhs_
-		}
-	case ConstValue:
-		value := rhs_.Convert(lhs.Type())
-		rhs = c.NewLLVMValue(value.LLVMValue(), value.Type())
-	}
+	// We can avoid various runtime calls by treating
+	// nil specially. For all nil-able types, nil is
+	// equivalent to the zero value.
+	rhs := rhs_.(*LLVMValue)
+	rhsisnil := rhs.pointer == nil && rhs.LLVMValue().IsNull()
 
-	switch typ := types.Underlying(lhs.typ).(type) {
+	switch typ := underlyingType(lhs.typ).(type) {
 	case *types.Struct:
 		// TODO check types are the same.
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		struct_fields := typ.Fields
 		if element_types_count > 0 {
 			t := struct_fields[0].Type.(types.Type)
-			first_lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
-			first_rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
+			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
+			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
 
 			logicalop := token.LAND
@@ -184,8 +201,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			for i := 1; i < element_types_count; i++ {
 				result = c.compileLogicalOp(logicalop, result, func() Value {
 					t := struct_fields[i].Type.(types.Type)
-					lhs := c.NewLLVMValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
-					rhs := c.NewLLVMValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
+					lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+					rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
 					return lhs.BinaryOp(op, rhs)
 				})
 			}
@@ -197,7 +214,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
 			valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
 			result := b.CreateAnd(typeNull, valueNull, "")
-			return c.NewLLVMValue(result, types.Bool)
+			return c.NewValue(result, types.Typ[types.Bool])
 		}
 		// TODO check for interface/interface comparison vs. interface/value comparison.
 		return lhs.compareI2I(rhs)
@@ -205,12 +222,12 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case *types.Slice:
 		// []T == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-		return c.NewLLVMValue(isnil, types.Bool)
+		return c.NewValue(isnil, types.Typ[types.Bool])
 	}
 
 	// Strings.
-	if types.Underlying(lhs.typ) == types.String {
-		if types.Underlying(rhs.typ) == types.String {
+	if isString(lhs.typ) {
+		if isString(rhs.typ) {
 			switch op {
 			case token.ADD:
 				return c.concatenateStrings(lhs, rhs)
@@ -226,132 +243,129 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	// Numbers.
 	// Determine whether to use integer or floating point instructions.
 	// TODO determine the NaN rules.
-	isfp := types.Identical(types.Underlying(lhs.typ), types.Float32) ||
-		types.Identical(types.Underlying(lhs.typ), types.Float64)
-	issigned := isfp || signed(lhs.typ)
 
 	switch op {
 	case token.MUL:
-		if isfp {
+		if isFloat(lhs.typ) {
 			result = b.CreateFMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateMul(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.QUO:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateSDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateUDiv(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.REM:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFRem(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateSRem(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateURem(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.ADD:
-		if isfp {
+		if isFloat(lhs.typ) {
 			result = b.CreateFAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateAdd(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.SUB:
-		if isfp {
+		if isFloat(lhs.typ) {
 			result = b.CreateFSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.SHL:
 		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
 		result = b.CreateShl(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.SHR:
 		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
-		if signed(lhs.Type()) {
+		if !isUnsigned(lhs.Type()) {
 			result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateLShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.NEQ:
-		if isfp {
+		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatONE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateICmp(llvm.IntNE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.EQL:
-		if isfp {
+		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		} else {
 			result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.LSS:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFCmp(llvm.FloatOLT, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateICmp(llvm.IntSLT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.LEQ:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFCmp(llvm.FloatOLE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateICmp(llvm.IntSLE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.GTR:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFCmp(llvm.FloatOGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateICmp(llvm.IntSGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.GEQ:
 		switch {
-		case isfp:
+		case isFloat(lhs.typ):
 			result = b.CreateFCmp(llvm.FloatOGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		case issigned:
+		case !isUnsigned(lhs.typ):
 			result = b.CreateICmp(llvm.IntSGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		default:
 			result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
-		return lhs.compiler.NewLLVMValue(result, types.Bool)
+		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.AND_NOT: // a &^ b
 		rhsval := rhs.LLVMValue()
 		rhsval = b.CreateXor(rhsval, llvm.ConstAllOnes(rhsval.Type()), "")
 		result = b.CreateAnd(lhs.LLVMValue(), rhsval, "")
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.OR: // a | b
 		result = b.CreateOr(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.XOR: // a ^ b
 		result = b.CreateXor(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewLLVMValue(result, lhs.typ)
+		return lhs.compiler.NewValue(result, lhs.typ)
 	default:
 		panic(fmt.Sprint("Unimplemented operator: ", op))
 	}
@@ -363,27 +377,25 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	switch op {
 	case token.SUB:
 		var value llvm.Value
-		isfp := types.Identical(types.Underlying(v.typ), types.Float32) ||
-			types.Identical(types.Underlying(v.typ), types.Float64)
-		if isfp {
+		if isFloat(v.typ) {
 			zero := llvm.ConstNull(v.compiler.types.ToLLVM(v.Type()))
 			value = b.CreateFSub(zero, v.LLVMValue(), "")
 		} else {
 			value = b.CreateNeg(v.LLVMValue(), "")
 		}
-		return v.compiler.NewLLVMValue(value, v.typ)
+		return v.compiler.NewValue(value, v.typ)
 	case token.ADD:
 		return v // No-op
 	case token.AND:
 		return v.pointer
 	case token.NOT:
 		value := b.CreateNot(v.LLVMValue(), "")
-		return v.compiler.NewLLVMValue(value, v.typ)
+		return v.compiler.NewValue(value, v.typ)
 	case token.XOR:
 		lhs := v.LLVMValue()
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
-		return v.compiler.NewLLVMValue(value, v.typ)
+		return v.compiler.NewValue(value, v.typ)
 	case token.ARROW:
 		return v.chanRecv()
 	default:
@@ -401,22 +413,22 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// Get the underlying type, if any.
 	origdsttyp := dsttyp
-	dsttyp = types.Underlying(dsttyp)
-	srctyp = types.Underlying(srctyp)
+	dsttyp = underlyingType(dsttyp)
+	srctyp = underlyingType(srctyp)
 
 	// Identical (underlying) types? Just swap in the destination type.
-	if types.Identical(srctyp, dsttyp) {
+	if isIdentical(srctyp, dsttyp) {
 		// TODO avoid load here by reusing pointer value, if exists.
-		return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
+		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
 
 	// Both pointer types with identical underlying types? Same as above.
 	if srctyp, ok := srctyp.(*types.Pointer); ok {
 		if dsttyp, ok := dsttyp.(*types.Pointer); ok {
-			srctyp := types.Underlying(srctyp.Base)
-			dsttyp := types.Underlying(dsttyp.Base)
-			if types.Identical(srctyp, dsttyp) {
-				return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
+			srctyp := underlyingType(srctyp.Base)
+			dsttyp := underlyingType(dsttyp.Base)
+			if isIdentical(srctyp, dsttyp) {
+				return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 			}
 		}
 	}
@@ -435,45 +447,55 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		return v.convertV2I(interface_)
 	}
 
-	// string -> []byte
-	byteslice := &types.Slice{Elt: types.Byte}
-	if srctyp == types.String && types.Identical(dsttyp, byteslice) {
-		c := v.compiler
-		value := v.LLVMValue()
-		strdata := c.builder.CreateExtractValue(value, 0, "")
-		strlen := c.builder.CreateExtractValue(value, 1, "")
-		struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
-		struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
-		struct_ = c.builder.CreateInsertValue(struct_, strlen, 1, "")
-		struct_ = c.builder.CreateInsertValue(struct_, strlen, 2, "")
-		return c.NewLLVMValue(struct_, byteslice)
+	byteslice := &types.Slice{Elt: types.Typ[types.Byte]}
+	runeslice := &types.Slice{Elt: types.Typ[types.Rune]}
+
+	// string ->
+	if isString(srctyp) {
+		// (untyped) string -> string
+		// XXX should untyped strings be able to escape go/types?
+		if isString(dsttyp) {
+			return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
+		}
+
+		// string -> []byte
+		if isIdentical(dsttyp, byteslice) {
+			c := v.compiler
+			value := v.LLVMValue()
+			strdata := c.builder.CreateExtractValue(value, 0, "")
+			strlen := c.builder.CreateExtractValue(value, 1, "")
+			struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
+			struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
+			struct_ = c.builder.CreateInsertValue(struct_, strlen, 1, "")
+			struct_ = c.builder.CreateInsertValue(struct_, strlen, 2, "")
+			return c.NewValue(struct_, byteslice)
+		}
+
+		// string -> []rune
+		if isIdentical(dsttyp, runeslice) {
+			return v.stringToRuneSlice()
+		}
 	}
 
 	// []byte -> string
-	if types.Identical(srctyp, byteslice) && dsttyp == types.String {
+	if isIdentical(srctyp, byteslice) && isString(dsttyp) {
 		c := v.compiler
 		value := v.LLVMValue()
 		data := c.builder.CreateExtractValue(value, 0, "")
 		len := c.builder.CreateExtractValue(value, 1, "")
-		struct_ := llvm.Undef(c.types.ToLLVM(types.String))
+		struct_ := llvm.Undef(c.types.ToLLVM(types.Typ[types.String]))
 		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")
 		struct_ = c.builder.CreateInsertValue(struct_, len, 1, "")
-		return c.NewLLVMValue(struct_, types.String)
-	}
-
-	// string -> []rune
-	runeslice := &types.Slice{Elt: types.Rune}
-	if srctyp == types.String && types.Identical(dsttyp, runeslice) {
-		return v.stringToRuneSlice()
+		return c.NewValue(struct_, types.Typ[types.String])
 	}
 
 	// []rune -> string
-	if types.Identical(srctyp, runeslice) && dsttyp == types.String {
+	if isIdentical(srctyp, runeslice) && isString(dsttyp) {
 		return v.runeSliceToString()
 	}
 
 	// rune -> string
-	if dsttyp == types.String && isIntType(srctyp) {
+	if isString(dsttyp) && isInteger(srctyp) {
 		return v.runeToString()
 	}
 
@@ -481,27 +503,25 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	llvm_type := v.compiler.types.ToLLVM(dsttyp)
 
 	// Unsafe pointer conversions.
-	if dsttyp == types.UnsafePointer { // X -> unsafe.Pointer
+	if dsttyp == types.Typ[types.UnsafePointer] { // X -> unsafe.Pointer
 		if _, isptr := srctyp.(*types.Pointer); isptr {
 			value := b.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, origdsttyp)
-		} else if srctyp == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
+			return v.compiler.NewValue(value, origdsttyp)
+		} else if srctyp == types.Typ[types.Uintptr] {
+			return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 		}
-	} else if srctyp == types.UnsafePointer { // unsafe.Pointer -> X
+	} else if srctyp == types.Typ[types.UnsafePointer] { // unsafe.Pointer -> X
 		if _, isptr := dsttyp.(*types.Pointer); isptr {
 			value := b.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewLLVMValue(value, origdsttyp)
-		} else if dsttyp == types.Uintptr {
-			return v.compiler.NewLLVMValue(v.LLVMValue(), origdsttyp)
+			return v.compiler.NewValue(value, origdsttyp)
+		} else if dsttyp == types.Typ[types.Uintptr] {
+			return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 		}
 	}
 
-	// FIXME select the appropriate cast here, depending on size, type (int/float)
-	// and sign.
 	lv := v.LLVMValue()
 	srcType := lv.Type()
-	switch srcType.TypeKind() { // source type
+	switch srcType.TypeKind() {
 	case llvm.IntegerTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.IntegerTypeKind:
@@ -515,40 +535,40 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			case delta > 0:
 				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		case llvm.FloatTypeKind, llvm.DoubleTypeKind:
-			if signed(v.Type()) {
+			if !isUnsigned(v.Type()) {
 				lv = b.CreateSIToFP(lv, llvm_type, "")
 			} else {
 				lv = b.CreateUIToFP(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	case llvm.DoubleTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.FloatTypeKind:
 			lv = b.CreateFPTrunc(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		case llvm.IntegerTypeKind:
-			if signed(dsttyp) {
+			if !isUnsigned(dsttyp) {
 				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
 				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	case llvm.FloatTypeKind:
 		switch llvm_type.TypeKind() {
 		case llvm.DoubleTypeKind:
 			lv = b.CreateFPExt(lv, llvm_type, "")
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		case llvm.IntegerTypeKind:
-			if signed(dsttyp) {
+			if !isUnsigned(dsttyp) {
 				lv = b.CreateFPToSI(lv, llvm_type, "")
 			} else {
 				lv = b.CreateFPToUI(lv, llvm_type, "")
 			}
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	}
 
@@ -557,10 +577,10 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// source type here; given that the types are not identical
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
-	if srctyp == types.Complex64 || srctyp == types.Complex128 {
+	if isComplex(srctyp) {
 		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
-		if srctyp == types.Complex64 {
+		if srctyp == types.Typ[types.Complex64] {
 			fpcast = llvm.Builder.CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
@@ -575,11 +595,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			lv = llvm.Undef(v.compiler.types.ToLLVM(dsttyp))
 			lv = b.CreateInsertValue(lv, realv, 0, "")
 			lv = b.CreateInsertValue(lv, imagv, 1, "")
-			return v.compiler.NewLLVMValue(lv, origdsttyp)
+			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	}
 
-	panic(fmt.Sprint("unimplemented conversion: ", v.typ, " -> ", origdsttyp))
+	srcstr := v.compiler.types.TypeString(v.typ)
+	dststr := v.compiler.types.TypeString(origdsttyp)
+	panic(fmt.Sprintf("unimplemented conversion: %s -> %s", srcstr, dststr))
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
@@ -594,7 +616,7 @@ func (v *LLVMValue) Type() types.Type {
 }
 
 func (v *LLVMValue) makePointee() *LLVMValue {
-	t := v.compiler.NewLLVMValue(llvm.Value{}, types.Deref(v.typ))
+	t := v.compiler.NewValue(llvm.Value{}, derefType(v.typ))
 	t.pointer = v
 	return t
 }
@@ -603,190 +625,9 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 	value := v.LLVMValue()
 	component := v.compiler.builder.CreateExtractValue(value, index, "")
 	if component.Type().TypeKind() == llvm.FloatTypeKind {
-		return v.compiler.NewLLVMValue(component, types.Float32)
+		return v.compiler.NewValue(component, types.Typ[types.Float32])
 	}
-	return v.compiler.NewLLVMValue(component, types.Float64)
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// ConstValue methods.
-
-func (lhs ConstValue) BinaryOp(op token.Token, rhs_ Value) Value {
-	switch rhs := rhs_.(type) {
-	case *LLVMValue:
-		// Cast untyped lhs to rhs type.
-		if _, ok := lhs.typ.(*types.Basic); ok {
-			lhs = lhs.Convert(rhs.Type()).(ConstValue)
-		}
-		lhs_ := rhs.compiler.NewLLVMValue(lhs.LLVMValue(), lhs.Type())
-		return lhs_.BinaryOp(op, rhs)
-
-	case ConstValue:
-		// TODO Check if either one is untyped, and convert to the
-		// other's type.
-		// TODO use type from typechecking here.
-		c := lhs.compiler
-		var typ types.Type = lhs.typ
-
-		switch op {
-		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
-			typ = types.Bool
-			// TODO deduce type from other types of operations.
-			// XXX or are they always the same type as the operands?
-		}
-
-		a, b := lhs.Const.Match(rhs.Const)
-		return ConstValue{a.BinaryOp(op, b), c, typ}
-	}
-	panic("unimplemented")
-}
-
-func (v ConstValue) UnaryOp(op token.Token) Value {
-	return ConstValue{v.Const.UnaryOp(op), v.compiler, v.typ}
-}
-
-func (v ConstValue) Convert(dstTyp types.Type) Value {
-	// Get the underlying type, if any.
-	origDstTyp := dstTyp
-	dstTyp = types.Underlying(dstTyp)
-
-	if !types.Identical(v.typ, dstTyp) {
-		isBasic := false
-		if name, isname := types.Underlying(dstTyp).(*types.Name); isname {
-			_, isBasic = name.Underlying.(*types.Basic)
-		}
-
-		compiler := v.compiler
-		if isBasic {
-			return ConstValue{v.Const.Convert(&dstTyp), compiler, origDstTyp}
-		} else {
-			return compiler.NewLLVMValue(v.LLVMValue(), v.Type()).Convert(origDstTyp)
-			//panic(fmt.Errorf("unhandled conversion from %v to %v", v.typ, dstTyp))
-		}
-	} else {
-		v.typ = origDstTyp
-	}
-	return v
-}
-
-func (v ConstValue) LLVMValue() llvm.Value {
-	typ := types.Underlying(v.Type())
-	if name, ok := typ.(*types.Name); ok {
-		typ = name.Underlying
-	}
-
-	switch typ.(*types.Basic).Kind {
-	case types.IntKind, types.UintKind:
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
-		// TODO 32/64bit (probably wait for gc)
-		//int_val := v.Val.(*big.Int)
-		//if int_val.Cmp(maxBigInt32) > 0 || int_val.Cmp(minBigInt32) < 0 {
-		//	panic(fmt.Sprint("const ", int_val, " overflows int"))
-		//}
-		//return llvm.ConstInt(v.compiler.target.IntPtrType(), uint64(v.Int64()), true)
-
-	case types.Int8Kind:
-		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), true)
-	case types.Uint8Kind:
-		return llvm.ConstInt(llvm.Int8Type(), uint64(v.Int64()), false)
-
-	case types.Int16Kind:
-		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), true)
-	case types.Uint16Kind:
-		return llvm.ConstInt(llvm.Int16Type(), uint64(v.Int64()), false)
-
-	case types.Int32Kind:
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), true)
-	case types.Uint32Kind:
-		return llvm.ConstInt(llvm.Int32Type(), uint64(v.Int64()), false)
-
-	case types.Int64Kind:
-		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), true)
-	case types.Uint64Kind:
-		return llvm.ConstInt(llvm.Int64Type(), uint64(v.Int64()), false)
-
-	case types.Float32Kind:
-		return llvm.ConstFloat(llvm.FloatType(), float64(v.Float64()))
-	case types.Float64Kind:
-		return llvm.ConstFloat(llvm.DoubleType(), float64(v.Float64()))
-
-	case types.Complex64Kind:
-		r_, i_ := v.Complex()
-		r := llvm.ConstFloat(llvm.FloatType(), r_)
-		i := llvm.ConstFloat(llvm.FloatType(), i_)
-		return llvm.ConstStruct([]llvm.Value{r, i}, false)
-	case types.Complex128Kind:
-		r_, i_ := v.Complex()
-		r := llvm.ConstFloat(llvm.DoubleType(), r_)
-		i := llvm.ConstFloat(llvm.DoubleType(), i_)
-		return llvm.ConstStruct([]llvm.Value{r, i}, false)
-
-	case types.UnsafePointerKind, types.UintptrKind:
-		inttype := v.compiler.target.IntPtrType()
-		return llvm.ConstInt(inttype, uint64(v.Int64()), false)
-
-	case types.StringKind:
-		strval := (v.Val).(string)
-		strlen := len(strval)
-		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-		var ptr llvm.Value
-		if strlen > 0 {
-			ptr = v.compiler.builder.CreateGlobalStringPtr(strval, "")
-			ptr = llvm.ConstBitCast(ptr, i8ptr)
-		} else {
-			ptr = llvm.ConstNull(i8ptr)
-		}
-		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(strlen), false)
-		return llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
-
-	case types.BoolKind:
-		if v := v.Val.(bool); v {
-			return llvm.ConstAllOnes(llvm.Int1Type())
-		}
-		return llvm.ConstNull(llvm.Int1Type())
-	}
-	panic(fmt.Errorf("Unhandled type: %v", typ)) //v.typ.Kind))
-}
-
-func (v ConstValue) Type() types.Type {
-	// From the language spec:
-	//   If the type is absent and the corresponding expression evaluates to
-	//   an untyped constant, the type of the declared variable is bool, int,
-	//   float64, or string respectively, depending on whether the value is
-	//   a boolean, integer, floating-point, or string constant.
-	if _, ok := v.typ.(*types.Basic); ok {
-		switch v.typ {
-		case types.Int.Underlying:
-			v.typ = types.Int
-		case types.Float64.Underlying:
-			v.typ = types.Float64
-		case types.Complex128.Underlying:
-			v.typ = types.Complex128
-		case types.Rune.Underlying:
-			v.typ = types.Rune
-		case types.String.Underlying:
-			v.typ = types.String
-		case types.Bool.Underlying:
-			v.typ = types.Bool
-		}
-	}
-	return v.typ
-}
-
-func (v ConstValue) Int64() int64 {
-	return v.Val.(*big.Int).Int64()
-}
-
-func (v ConstValue) Float64() float64 {
-	r := v.Val.(*big.Rat)
-	return float64(r.Num().Int64()) / float64(r.Denom().Int64())
-}
-
-func (v ConstValue) Complex() (float64, float64) {
-	c := v.Val.(types.Cmplx)
-	r := float64(c.Re.Num().Int64()) / float64(c.Re.Denom().Int64())
-	i := float64(c.Im.Num().Int64()) / float64(c.Im.Denom().Int64())
-	return r, i
+	return v.compiler.NewValue(component, types.Typ[types.Float64])
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -797,18 +638,3 @@ func (TypeValue) UnaryOp(op token.Token) Value             { panic("this should 
 func (TypeValue) Convert(typ types.Type) Value             { panic("this should not be called") }
 func (TypeValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
 func (t TypeValue) Type() types.Type                       { return t.typ }
-
-///////////////////////////////////////////////////////////////////////////////
-// NilValue
-
-func (NilValue) BinaryOp(op token.Token, rhs Value) Value { panic("this should not be called") }
-func (NilValue) UnaryOp(op token.Token) Value             { panic("this should not be called") }
-func (NilValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
-func (NilValue) Type() types.Type                         { panic("this should not be called") }
-func (n NilValue) Convert(typ types.Type) Value {
-	// TODO handle basic types specially, generating ConstValue's.
-	zero := llvm.ConstNull(n.compiler.types.ToLLVM(typ))
-	return n.compiler.NewLLVMValue(zero, typ)
-}
-
-// vim: set ft=go :
