@@ -50,7 +50,13 @@ func (c *compiler) defineRuntimeIntrinsics() {
 }
 
 func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
-	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size int)")
+	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size uintptr)")
+	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
+	case n < 0:
+		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
+	case n > 0:
+		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
+	}
 	ptr = c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	fill := llvm.ConstNull(llvm.Int8Type())
 	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
@@ -73,7 +79,7 @@ func (c *compiler) defineMemcpyFunction(fn llvm.Value, name string) {
 	sizeBits := sizeType.IntTypeWidth()
 
 	memcpyName := "llvm." + name + ".p0i8.p0i8.i" + strconv.Itoa(sizeBits)
-	memcpy := c.NamedFunction(memcpyName, "func f(dst, src *int8, size int, align int32, volatile bool)")
+	memcpy := c.NamedFunction(memcpyName, "func f(dst, src *int8, size uintptr, align int32, volatile bool)")
 
 	pint8 := memcpy.Type().ElementType().ParamTypes()[0]
 	dst = c.builder.CreateIntToPtr(dst, pint8, "")
@@ -94,7 +100,7 @@ func (c *compiler) defineMemsetFunction(fn llvm.Value) {
 	sizeType := size.Type()
 	sizeBits := sizeType.IntTypeWidth()
 	memsetName := "llvm.memset.p0i8.i" + strconv.Itoa(sizeBits)
-	memset := c.NamedFunction(memsetName, "func f(dst *int8, fill byte, size int, align int32, volatile bool)")
+	memset := c.NamedFunction(memsetName, "func f(dst *int8, fill byte, size uintptr, align int32, volatile bool)")
 	pint8 := memset.Type().ElementType().ParamTypes()[0]
 	dst = c.builder.CreateIntToPtr(dst, pint8, "")
 	args := []llvm.Value{
