@@ -38,10 +38,10 @@ func (i *identVisitor) Visit(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.Ident:
 		if value, ok := node.Obj.Data.(*LLVMValue); ok {
-			curfunc := i.functions.Top()
+			curfunc := i.functions.top()
 			// FIXME this needs review; this will currently
 			// pick up globals.
-			if value.stack != curfunc && value.pointer != nil {
+			if value.stack != curfunc.LLVMValue && value.pointer != nil {
 				if value.stack != nil {
 					value.promoteStackVar()
 				}

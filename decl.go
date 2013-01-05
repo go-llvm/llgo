@@ -115,8 +115,7 @@ func (stackvar *LLVMValue) promoteStackVar() {
 
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
-func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.BlockStmt) {
-	ftyp := f.Type().(*types.Signature)
+func (c *compiler) buildFunction(f *LLVMValue, params, results []*ast.Object, body *ast.BlockStmt) {
 	llvm_fn := f.LLVMValue()
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
@@ -124,7 +123,7 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 	// Bind receiver, arguments and return values to their identifiers/objects.
 	// We'll store each parameter on the stack so they're addressable.
 	for i, obj := range params {
-		if obj.Name != "" {
+		if obj != nil {
 			value := llvm_fn.Param(i)
 			typ := obj.Type.(types.Type)
 			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), obj.Name)
@@ -137,8 +136,8 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 	}
 
 	// Allocate space on the stack for named results.
-	for _, obj := range ftyp.Results {
-		if obj.Name != "" {
+	for _, obj := range results {
+		if obj != nil {
 			typ := obj.Type.(types.Type)
 			llvmtyp := c.types.ToLLVM(typ)
 			stackptr := c.builder.CreateAlloca(llvmtyp, obj.Name)
@@ -150,9 +149,13 @@ func (c *compiler) buildFunction(f *LLVMValue, params []*ast.Object, body *ast.B
 		}
 	}
 
-	c.functions = append(c.functions, f)
+	c.functions.push(&function{
+		LLVMValue: f,
+		params:    params,
+		results:   results,
+	})
 	c.VisitBlockStmt(body, false)
-	c.functions = c.functions[0 : len(c.functions)-1]
+	c.functions.pop()
 	last := llvm_fn.LastBasicBlock()
 	if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
 		// Assume nil return type, AST should be checked first.
@@ -195,11 +198,15 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	}
 
 	ftyp := fn.Type().(*types.Signature)
-	paramObjects := ftyp.Params
-	if f.Recv != nil {
-		paramObjects = append([]*ast.Object{ftyp.Recv}, paramObjects...)
+	paramObjects := fieldListObjects(f.Recv)
+	if ftyp.Params != nil {
+		recvObjects := paramObjects
+		paramObjects = fieldListObjects(f.Type.Params)
+		paramObjects = append(recvObjects, paramObjects...)
 	}
-	c.buildFunction(fn, paramObjects, f.Body)
+	resultObjects := fieldListObjects(f.Type.Results)
+
+	c.buildFunction(fn, paramObjects, resultObjects, f.Body)
 
 	if f.Recv != nil {
 		// Create a shim function if the receiver is not
@@ -328,7 +335,6 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 	} else if len(valspec.Values) > 0 {
 		values = make([]Value, len(valspec.Names))
 		for i, x := range valspec.Values {
-			c.convertUntyped(x, valspec.Names[i])
 			values[i] = c.VisitExpr(x)
 		}
 	}
@@ -356,7 +362,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 			c.builder.CreateStore(llvmInit, ptr)
 		}
 		stackvar := c.NewValue(ptr, &types.Pointer{Base: typ}).makePointee()
-		stackvar.stack = c.functions[len(c.functions)-1]
+		stackvar.stack = c.functions.top().LLVMValue
 		name.Obj.Data = stackvar
 	}
 }

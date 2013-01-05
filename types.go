@@ -142,31 +142,23 @@ func (ts *TypeStringer) TypeString(typ types.Type) string {
 	return buf.String()
 }
 
-func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params []*ast.Object, isVariadic bool) {
+func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params []*types.Var, isVariadic bool) {
 	buf.WriteByte('(')
 	for i, par := range params {
 		if i > 0 {
 			buf.WriteString(", ")
 		}
-		if par.Name != "" {
-			buf.WriteString(par.Name)
-			buf.WriteByte(' ')
-		}
 		if isVariadic && i == len(params)-1 {
 			buf.WriteString("...")
 		}
-		ts.writeType(buf, par.Type.(types.Type))
+		ts.writeType(buf, par.Type)
 	}
 	buf.WriteByte(')')
 }
 
 func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) {
 	if sig.Recv != nil {
-		if sig.Recv.Name == "" {
-			ts.writeType(buf, sig.Recv.Type.(types.Type))
-		} else {
-			ts.writeParams(buf, []*ast.Object{sig.Recv}, false)
-		}
+		ts.writeType(buf, sig.Recv.Type)
 		buf.WriteByte(' ')
 	}
 
@@ -177,9 +169,9 @@ func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) 
 	}
 
 	buf.WriteByte(' ')
-	if len(sig.Results) == 1 && sig.Results[0].Name == "" {
+	if len(sig.Results) == 1 {
 		// single unnamed result
-		ts.writeType(buf, sig.Results[0].Type.(types.Type))
+		ts.writeType(buf, sig.Results[0].Type)
 		return
 	}
 

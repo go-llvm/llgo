@@ -320,8 +320,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
 		i8ptr := &types.Pointer{Base: types.Typ[types.Int8]}
 		ftype := iface.Methods[i].Type
-		ftype.Recv = ast.NewObj(ast.Var, "")
-		ftype.Recv.Type = i8ptr
+		ftype.Recv = &types.Var{Type: i8ptr}
 		f = c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), "")
 		ftype.Recv = nil
 		method := c.NewValue(f, ftype)

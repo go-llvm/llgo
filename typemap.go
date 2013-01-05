@@ -324,9 +324,8 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 			// Add an opaque pointer parameter to the function for the
 			// struct pointer.
 			fntype := m.Type
-			receiver_type := &types.Pointer{Base: types.Typ[types.Int8]}
-			fntype.Recv = ast.NewObj(ast.Var, "")
-			fntype.Recv.Type = receiver_type
+			recvtyp := &types.Pointer{Base: types.Typ[types.Int8]}
+			fntype.Recv = &types.Var{Type: recvtyp}
 			elements[n+2] = tm.ToLLVM(fntype)
 			fntype.Recv = nil
 		}

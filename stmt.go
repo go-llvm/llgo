@@ -102,7 +102,7 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 }
 
 func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
-	f := c.functions[len(c.functions)-1]
+	f := c.functions.top()
 	ftyp := f.Type().(*types.Signature)
 	if len(ftyp.Results) == 0 {
 		c.builder.CreateRetVoid()
@@ -122,8 +122,15 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	if stmt.Results == nil {
 		// Bare return. No need to update named results, so just
 		// prepare return values.
-		for i, obj := range ftyp.Results {
-			values[i] = obj.Data.(*LLVMValue).LLVMValue()
+		for i, obj := range f.results {
+			if obj != nil {
+				values[i] = obj.Data.(*LLVMValue).LLVMValue()
+			} else {
+				// Should this be permitted by the spec?
+				// Seems pretty useless.
+				typ := c.types.ToLLVM(ftyp.Results[i].Type)
+				values[i] = llvm.ConstNull(typ)
+			}
 		}
 	} else {
 		results := make([]Value, len(ftyp.Results))
@@ -135,20 +142,27 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 				elemtyp := aggtyp.Values[i].Type.(types.Type)
 				elemval := c.builder.CreateExtractValue(aggval, i, "")
 				result := c.NewValue(elemval, elemtyp)
-				results[i] = result
+				results[i] = result.Convert(ftyp.Results[i].Type)
 			}
 		} else {
 			for i, expr := range stmt.Results {
-				results[i] = c.VisitExpr(expr)
+				result := c.VisitExpr(expr)
+				results[i] = result.Convert(ftyp.Results[i].Type)
 			}
 		}
+
+		// Convert results to LLVM values.
 		for i, result := range results {
-			resultobj := ftyp.Results[i]
-			value := result.Convert(resultobj.Type.(types.Type))
-			values[i] = value.LLVMValue()
-			if resultobj.Name != "_" && resultobj.Name != "" {
-				resultptr := resultobj.Data.(*LLVMValue).pointer.LLVMValue()
-				c.builder.CreateStore(value.LLVMValue(), resultptr)
+			values[i] = result.LLVMValue()
+		}
+
+		// Store values in named results.
+		if f.results != nil {
+			for i, obj := range f.results {
+				if obj != nil {
+					resultptr := obj.Data.(*LLVMValue).pointer.LLVMValue()
+					c.builder.CreateStore(values[i], resultptr)
+				}
 			}
 		}
 	}
@@ -203,7 +217,7 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 		}
 	case *ast.TypeAssertExpr:
 		lhs := c.VisitExpr(x.X).(*LLVMValue)
-		typ := c.types.expr[x].Type
+		typ := c.types.expr[x.Type].Type
 		switch typ := underlyingType(typ).(type) {
 		case *types.Interface:
 			value, ok := lhs.convertI2I(typ)
@@ -242,7 +256,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 		}
 	}
 
-	// Must evaluate lhs before evaluating rhs.
+	// FIXME must evaluate lhs before evaluating rhs.
 	lhsptrs := make([]llvm.Value, len(stmt.Lhs))
 	for i, expr := range stmt.Lhs {
 		switch x := expr.(type) {
@@ -257,7 +271,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
 				ptrtyp := &types.Pointer{Base: typ}
 				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
-				stackvar.stack = c.functions[len(c.functions)-1]
+				stackvar.stack = c.functions.top().LLVMValue
 				obj.Data = stackvar
 				lhsptrs[i] = ptr
 				continue
@@ -629,7 +643,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			keyType = key.Obj.Type.(types.Type)
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
 			stackvar := c.NewValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
-			stackvar.stack = c.functions[len(c.functions)-1]
+			stackvar.stack = c.functions.top().LLVMValue
 			key.Obj.Data = stackvar
 		}
 		if stmt.Value != nil {
@@ -637,7 +651,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 				valueType = value.Obj.Type.(types.Type)
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
 				stackvar := c.NewValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
-				stackvar.stack = c.functions[len(c.functions)-1]
+				stackvar.stack = c.functions.top().LLVMValue
 				value.Obj.Data = stackvar
 			}
 		}
@@ -718,11 +732,11 @@ maprange:
 
 stringrange:
 	{
-		zero := llvm.ConstNull(llvm.Int32Type())
+		zero := llvm.ConstNull(c.types.inttype)
 		currBlock = c.builder.GetInsertBlock()
 		c.builder.CreateBr(condBlock)
 		c.builder.SetInsertPointAtEnd(condBlock)
-		index := c.builder.CreatePHI(llvm.Int32Type(), "index")
+		index := c.builder.CreatePHI(c.types.inttype, "index")
 		lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
 		c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
 		c.builder.SetInsertPointAtEnd(loopBlock)
@@ -744,11 +758,11 @@ stringrange:
 
 arrayrange:
 	{
-		zero := llvm.ConstNull(llvm.Int32Type())
+		zero := llvm.ConstNull(c.types.inttype)
 		currBlock = c.builder.GetInsertBlock()
 		c.builder.CreateBr(condBlock)
 		c.builder.SetInsertPointAtEnd(condBlock)
-		index := c.builder.CreatePHI(llvm.Int32Type(), "index")
+		index := c.builder.CreatePHI(c.types.inttype, "index")
 		lessthan := c.builder.CreateICmp(llvm.IntULT, index, length, "")
 		c.builder.CreateCondBr(lessthan, loopBlock, doneBlock)
 		c.builder.SetInsertPointAtEnd(loopBlock)
@@ -769,7 +783,7 @@ arrayrange:
 		c.VisitBlockStmt(stmt.Body, false)
 		c.maybeImplicitBranch(postBlock)
 		c.builder.SetInsertPointAtEnd(postBlock)
-		newindex := c.builder.CreateAdd(index, llvm.ConstInt(llvm.Int32Type(), 1, false), "")
+		newindex := c.builder.CreateAdd(index, llvm.ConstInt(c.types.inttype, 1, false), "")
 		c.builder.CreateBr(condBlock)
 		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
 		return

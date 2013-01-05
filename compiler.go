@@ -60,22 +60,6 @@ type Compiler interface {
 	Dispose()
 }
 
-type FunctionStack []*LLVMValue
-
-func (s *FunctionStack) Push(v *LLVMValue) {
-	*s = append(*s, v)
-}
-
-func (s *FunctionStack) Pop() *LLVMValue {
-	f := (*s)[len(*s)-1]
-	*s = (*s)[:len(*s)-1]
-	return f
-}
-
-func (s *FunctionStack) Top() *LLVMValue {
-	return (*s)[len(*s)-1]
-}
-
 type compiler struct {
 	CompilerOptions
 
@@ -83,7 +67,7 @@ type compiler struct {
 	module         *Module
 	machine        llvm.TargetMachine
 	target         llvm.TargetData
-	functions      FunctionStack
+	functions      functionStack
 	breakblocks    []llvm.BasicBlock
 	continueblocks []llvm.BasicBlock
 	initfuncs      []Value

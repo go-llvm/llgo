@@ -7,7 +7,6 @@
 package llgo
 
 import (
-	"go/ast"
 	"go/types"
 )
 
@@ -197,13 +196,13 @@ func isIdentical(x, y types.Type) bool {
 
 // identicalTypes returns true if both lists a and b have the
 // same length and corresponding objects have identical types.
-func identicalTypes(a, b []*ast.Object) bool {
+func identicalTypes(a, b []*types.Var) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i, x := range a {
 		y := b[i]
-		if !isIdentical(x.Type.(types.Type), y.Type.(types.Type)) {
+		if !isIdentical(x.Type, y.Type) {
 			return false
 		}
 	}
