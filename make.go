@@ -44,7 +44,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		slice := c.makeSlice(utyp.Elt, length, capacity)
 		return c.NewValue(slice, typ)
 	case *types.Chan:
-		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap uint32) uintptr")
+		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap int) uintptr")
 		dyntyp := c.types.ToRuntime(typ)
 		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 		var cap_ llvm.Value

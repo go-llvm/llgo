@@ -295,8 +295,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		valuesPtr = c.builder.CreateIntToPtr(valuesPtr, llvm.PointerType(eltType, 0), "")
 
 		//valuesPtr = c.builder.CreateBitCast(valuesPtr, llvm.PointerType(valuesPtr.Type(), 0), "")
-		// TODO check result of mallocs
-		length := llvm.ConstInt(llvm.Int32Type(), uint64(len(valuelist)), false)
+		length := llvm.ConstInt(c.types.inttype, uint64(len(valuelist)), false)
 		c.builder.CreateStore(valuesPtr, c.builder.CreateStructGEP(ptr, 0, "")) // data
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 1, ""))    // len
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 2, ""))    // cap

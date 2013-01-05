@@ -22,15 +22,15 @@ type _chan struct {
 }
 
 // #llgo name: reflect.makechan
-func reflect_makechan(t *rtype, cap_ uint32) unsafe.Pointer {
+func reflect_makechan(t *rtype, cap_ int) unsafe.Pointer {
 	return unsafe.Pointer(makechan(unsafe.Pointer(t), cap_))
 }
 
-func makechan(t unsafe.Pointer, cap_ uint32) *int8 {
+func makechan(t unsafe.Pointer, cap_ int) *int8 {
 	typ := (*chanType)(t)
 	c := new(_chan)
 	c.typ = typ
-	c.cap = int(cap_)
+	c.cap = cap_
 	return (*int8)(unsafe.Pointer(c))
 }
 

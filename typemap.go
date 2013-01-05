@@ -65,11 +65,11 @@ type TypeMap struct {
 func NewLLVMTypeMap(target llvm.TargetData, ts *TypeStringer) *LLVMTypeMap {
 	// spec says int is either 32-bit or 64-bit.
 	var inttype llvm.Type
-	//if c.target.PointerSize() >= 8 {
-	//	inttyp = llvm.Int64Type()
-	//} else {
-	inttype = llvm.Int32Type()
-	//}
+	if target.PointerSize() >= 8 {
+		inttype = llvm.Int64Type()
+	} else {
+		inttype = llvm.Int32Type()
+	}
 	return &LLVMTypeMap{
 		TypeStringer: ts,
 		target:       target,

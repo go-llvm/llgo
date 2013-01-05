@@ -97,11 +97,11 @@ type compiler struct {
 func (c *compiler) ArchInfo() ArchInfo {
 	var ptrsize, intsize int64
 	ptrsize = int64(c.target.PointerSize())
-	//if ptrsize >= 8 {
-	//	intsize = 8
-	//} else {
-	intsize = 4
-	//}
+	if ptrsize >= 8 {
+		intsize = 8
+	} else {
+		intsize = 4
+	}
 	return ArchInfo{IntSize: intsize, PtrSize: ptrsize}
 }
 

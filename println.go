@@ -82,20 +82,18 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 			switch typ := typ.(type) {
 			case *types.Basic:
 				switch typ.Kind {
-				case types.Uint:
-					format += "%u" // TODO make 32/64-bit
 				case types.Uint8:
 					format += "%hhu"
 				case types.Uint16:
 					format += "%hu"
 				case types.Uint32:
 					format += "%u"
-				case types.Uintptr:
+				case types.Uintptr, types.Uint:
 					format += "%lu"
 				case types.Uint64:
 					format += "%llu" // FIXME windows
 				case types.Int:
-					format += "%d" // TODO make 32/64-bit
+					format += "%ld"
 				case types.Int8:
 					format += "%hhd"
 				case types.Int16:

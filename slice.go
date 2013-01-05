@@ -65,7 +65,7 @@ func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Val
 	}
 
 	eltType := c.types.ToLLVM(elttyp)
-	sizeof := llvm.ConstTrunc(llvm.SizeOf(eltType), llvm.Int32Type())
+	sizeof := llvm.ConstTruncOrBitCast(llvm.SizeOf(eltType), c.types.inttype)
 	size := c.builder.CreateMul(capacityValue, sizeof, "")
 	mem := c.createMalloc(size)
 	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
@@ -116,7 +116,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	} else {
 		// Construct a fresh []int8 for the temporary slice.
 		b_ := elem.LLVMValue()
-		one := llvm.ConstInt(llvm.Int32Type(), 1, false)
+		one := llvm.ConstInt(c.types.inttype, 1, false)
 		mem := c.builder.CreateAlloca(elem.LLVMValue().Type(), "")
 		c.builder.CreateStore(b_, mem)
 		b = llvm.Undef(i8slice)
@@ -160,14 +160,16 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 
 	var low llvm.Value
 	if expr.Low != nil {
-		low = c.VisitExpr(expr.Low).LLVMValue()
+		lowvalue := c.VisitExpr(expr.Low).Convert(types.Typ[types.Int])
+		low = lowvalue.LLVMValue()
 	} else {
 		low = llvm.ConstNull(c.types.inttype)
 	}
 
 	var high llvm.Value
 	if expr.High != nil {
-		high = c.VisitExpr(expr.High).LLVMValue()
+		highvalue := c.VisitExpr(expr.High).Convert(types.Typ[types.Int])
+		high = highvalue.LLVMValue()
 	} else {
 		high = llvm.ConstAllOnes(c.types.inttype) // -1
 	}
@@ -206,7 +208,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewValue(c.coerceSlice(result, sliceTyp), value.Type())
 	case *types.Basic:
-		stringslice := c.NamedFunction("runtime.stringslice", "func f(a string, low, high int32) string")
+		stringslice := c.NamedFunction("runtime.stringslice", "func f(a string, low, high int) string")
 		args := []llvm.Value{value.LLVMValue(), low, high}
 		result := c.builder.CreateCall(stringslice, args, "")
 		return c.NewValue(result, value.Type())
