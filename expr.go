@@ -288,22 +288,24 @@ type selectorCandidate struct {
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
-	lhs := c.VisitExpr(expr.X)
-	if lhs == nil {
-		// The only time we should get a nil result is if the object is
-		// a package.
-		obj := expr.Sel.Obj
-		if obj.Kind == ast.Typ {
-			return TypeValue{obj.Type.(types.Type)}
+	name := expr.Sel.Name
+	if ident, ok := expr.X.(*ast.Ident); ok {
+		if ident.Obj != nil && ident.Obj.Kind == ast.Pkg {
+			scope := ident.Obj.Data.(*ast.Scope)
+			obj := scope.Lookup(name)
+			if obj.Kind == ast.Typ {
+				return TypeValue{obj.Type.(types.Type)}
+			}
+			return c.Resolve(obj)
 		}
-		return c.Resolve(obj)
 	}
+
+	lhs := c.VisitExpr(expr.X)
 
 	// Method expression. Returns an unbound function pointer.
 	// FIXME this is just the most basic case. It's also possible to
 	// create a pointer-receiver function from a method that has a
 	// value receiver (see Method Expressions in spec).
-	name := expr.Sel.Name
 	if _, ok := lhs.(TypeValue); ok {
 		ftyp := c.types.expr[expr].Type.(*types.Signature)
 		recvtyp := ftyp.Params[0].Type

@@ -128,6 +128,11 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			floatv := float64(v.Num().Int64()) / float64(v.Denom().Int64())
 			llvmvalue := llvm.ConstFloat(llvmtyp, floatv)
 			return c.NewValue(llvmvalue, typ)
+		case *big.Int:
+			llvmvalue := llvm.ConstFloat(llvmtyp, float64(v.Int64()))
+			return c.NewValue(llvmvalue, typ)
+		default:
+			panic(fmt.Sprintf("unhandled %T", v))
 		}
 	case typ == types.Typ[types.UnsafePointer]:
 		llvmtyp := c.types.ToLLVM(typ)
