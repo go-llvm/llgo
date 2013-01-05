@@ -199,7 +199,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 				slice_value := c.VisitExpr(expr.Args[nparams]).LLVMValue()
 				args = append(args, slice_value)
 			} else {
-				param_type := fn_type.Params[nparams].Type.(*types.Slice).Elt
+				param_type := fn_type.Params[nparams].Type
 				varargs := make([]llvm.Value, 0)
 				for i := nparams; i < len(expr.Args); i++ {
 					value := c.VisitExpr(expr.Args[i])
