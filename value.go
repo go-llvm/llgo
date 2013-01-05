@@ -219,8 +219,10 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result := b.CreateAnd(typeNull, valueNull, "")
 			return c.NewValue(result, types.Typ[types.Bool])
 		}
-		// TODO check for interface/interface comparison vs. interface/value comparison.
-		return lhs.compareI2I(rhs)
+		if _, ok := underlyingType(rhs.typ).(*types.Interface); ok {
+			return lhs.compareI2I(rhs)
+		}
+		return lhs.compareI2V(rhs)
 
 	case *types.Slice:
 		// []T == nil

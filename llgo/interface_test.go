@@ -13,6 +13,7 @@ func TestInterfaceMethods(t *testing.T) { checkOutputEqual(t, "interfaces/method
 func TestInterfaceAssert(t *testing.T)  { checkOutputEqual(t, "interfaces/assert.go") }
 func TestError(t *testing.T)            { checkOutputEqual(t, "interfaces/error.go") }
 func TestInterfaceWordSize(t *testing.T) { checkOutputEqual(t, "interfaces/wordsize.go") }
+func TestCompareI2V(t *testing.T) { checkOutputEqual(t, "interfaces/comparei2v.go") }
 
 //func TestInterfaceImport(t *testing.T) { checkOutputEqual(t, "interfaces/import.go") }
 

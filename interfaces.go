@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"sort"
 	"strconv"
@@ -384,6 +385,33 @@ func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
 	f := c.NamedFunction("runtime.compareI2I", "func f(t1, t2, v1, v2 uintptr) bool")
 	result := c.builder.CreateCall(f, args, "")
 	return c.NewValue(result, types.Typ[types.Bool])
+}
+
+func (lhs *LLVMValue) compareI2V(rhs *LLVMValue) Value {
+	c := lhs.compiler
+	predicate := lhs.interfaceTypeEquals(rhs.typ).LLVMValue()
+
+	end := llvm.InsertBasicBlock(c.builder.GetInsertBlock(), "end")
+	end.MoveAfter(c.builder.GetInsertBlock())
+	nonmatch := llvm.InsertBasicBlock(end, "nonmatch")
+	match := llvm.InsertBasicBlock(nonmatch, "match")
+	c.builder.CreateCondBr(predicate, match, nonmatch)
+
+	c.builder.SetInsertPointAtEnd(match)
+	lhsValue := lhs.loadI2V(rhs.typ)
+	matchResultValue := lhsValue.BinaryOp(token.EQL, rhs).LLVMValue()
+	c.builder.CreateBr(end)
+
+	c.builder.SetInsertPointAtEnd(nonmatch)
+	nonmatchResultValue := llvm.ConstNull(llvm.Int1Type())
+	c.builder.CreateBr(end)
+
+	c.builder.SetInsertPointAtEnd(end)
+	resultValue := c.builder.CreatePHI(matchResultValue.Type(), "")
+	resultValues := []llvm.Value{matchResultValue, nonmatchResultValue}
+	resultBlocks := []llvm.BasicBlock{match, nonmatch}
+	resultValue.AddIncoming(resultValues, resultBlocks)
+	return c.NewValue(resultValue, types.Typ[types.Bool])
 }
 
 // vim: set ft=go :
