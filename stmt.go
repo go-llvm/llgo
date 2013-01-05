@@ -52,12 +52,12 @@ func (c *compiler) maybeImplicitBranch(dest llvm.BasicBlock) {
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 	lhs := c.VisitExpr(stmt.X).(*LLVMValue)
-	rhs := llvm.ConstInt(c.types.ToLLVM(lhs.Type()), 1, false)
+	rhs := c.NewConstValue(int64(1), lhs.Type())
 	op := token.ADD
 	if stmt.Tok == token.DEC {
 		op = token.SUB
 	}
-	result := lhs.BinaryOp(op, c.NewValue(rhs, lhs.Type()))
+	result := lhs.BinaryOp(op, rhs)
 	c.builder.CreateStore(result.LLVMValue(), lhs.pointer.LLVMValue())
 
 	// TODO make sure we cover all possibilities (maybe just delegate this to
