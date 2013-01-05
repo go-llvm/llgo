@@ -11,10 +11,9 @@ import (
 
 func (c *compiler) visitRecover() *LLVMValue {
 	// TODO
-	errorObj := types.Universe.Lookup("error")
-	errorType := errorObj.Type.(types.Type)
-	errval := llvm.ConstNull(c.types.ToLLVM(errorType))
-	return c.NewValue(errval, errorType)
+	emptyInterface := &types.Interface{}
+	errval := llvm.ConstNull(c.types.ToLLVM(emptyInterface))
+	return c.NewValue(errval, emptyInterface)
 }
 
 func (c *compiler) visitPanic(arg Value) {

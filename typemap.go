@@ -508,7 +508,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 		if pkgpath == "" {
 			pkgpath = "runtime"
 		}
-		globalname = "__llgo.type.*" + n.Obj.Name
+		globalname = "__llgo.type.*" + pkgpath + "." + n.Obj.Name
 		if pkgpath != tm.pkgpath {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
@@ -750,7 +750,7 @@ func (tm *TypeMap) nameRuntimeType(n *types.NamedType) (global, ptr llvm.Value) 
 		// Set to "runtime", so the builtin types have a home.
 		pkgpath = "runtime"
 	}
-	globalname := "__llgo.type." + n.Obj.Name
+	globalname := "__llgo.type." + pkgpath + "." + n.Obj.Name
 	if pkgpath != tm.pkgpath {
 		// We're not compiling the package from whence the type came,
 		// so we'll just create a pointer to it here.
@@ -809,4 +809,3 @@ func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	g.SetInitializer(str)
 	return g
 }
-

@@ -680,7 +680,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	switch typ := underlyingType(typ).(type) {
 	case *types.Map:
 		goto maprange
-	case *types.NamedType:
+	case *types.Basic:
 		stringvalue := x.LLVMValue()
 		length = c.builder.CreateExtractValue(stringvalue, 1, "")
 		goto stringrange
@@ -703,6 +703,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		length = c.builder.CreateExtractValue(slicevalue, 1, "")
 		goto arrayrange
 	}
+	panic("unreachable")
 
 maprange:
 	{

@@ -69,6 +69,7 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		if isUntyped(typ) {
 			typ = types.Typ[types.String]
 		}
+		llvmtyp := c.types.ToLLVM(typ)
 		strval := v.(string)
 		strlen := len(strval)
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
@@ -79,8 +80,10 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		} else {
 			ptr = llvm.ConstNull(i8ptr)
 		}
-		len_ := llvm.ConstInt(llvm.Int32Type(), uint64(strlen), false)
-		llvmvalue := llvm.ConstStruct([]llvm.Value{ptr, len_}, false)
+		len_ := llvm.ConstInt(c.types.inttype, uint64(strlen), false)
+		llvmvalue := llvm.Undef(llvmtyp)
+		llvmvalue = llvm.ConstInsertValue(llvmvalue, ptr, []uint32{0})
+		llvmvalue = llvm.ConstInsertValue(llvmvalue, len_, []uint32{1})
 		return c.NewValue(llvmvalue, typ)
 	case isInteger(typ):
 		if isUntyped(typ) {

@@ -185,6 +185,8 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 		buf.WriteString("<nil>")
 
 	case *types.Basic:
+		// De-alias.
+		t = types.Typ[t.Kind]
 		buf.WriteString(t.Name)
 
 	case *types.Array:

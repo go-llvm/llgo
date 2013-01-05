@@ -30,7 +30,7 @@ import (
 
 // makeLiteralSlice allocates a new slice, storing in it the provided elements.
 func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
-	n := llvm.ConstInt(llvm.Int32Type(), uint64(len(v)), false)
+	n := llvm.ConstInt(c.types.inttype, uint64(len(v)), false)
 	eltType := c.types.ToLLVM(elttyp)
 	arrayType := llvm.ArrayType(eltType, len(v))
 	mem := c.createMalloc(llvm.SizeOf(arrayType))
@@ -205,7 +205,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewValue(c.coerceSlice(result, sliceTyp), value.Type())
-	case *types.NamedType:
+	case *types.Basic:
 		stringslice := c.NamedFunction("runtime.stringslice", "func f(a string, low, high int32) string")
 		args := []llvm.Value{value.LLVMValue(), low, high}
 		result := c.builder.CreateCall(stringslice, args, "")
