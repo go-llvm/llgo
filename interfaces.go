@@ -146,7 +146,20 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				}
 			}
 			if needload {
-				ifname := fmt.Sprintf("*%s.%s", recvtyp, methodobj.Name)
+				// TODO consolidate with other similar bits of code.
+				fname := methodobj.Name
+				var recvname string
+				var pkgname string
+				switch recvtyp := recvtyp.(type) {
+				case *types.Pointer:
+					named := recvtyp.Base.(*types.NamedType)
+					recvname = "*" + named.Obj.Name
+					pkgname = v.compiler.pkgmap[named.Obj]
+				case *types.NamedType:
+					recvname = recvtyp.Obj.Name
+					pkgname = v.compiler.pkgmap[recvtyp.Obj]
+				}
+				ifname := fmt.Sprintf("*%s.%s.%s", pkgname, recvname, fname)
 				llvm_value = v.compiler.module.NamedFunction(ifname)
 			}
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
@@ -341,7 +354,7 @@ func (lhs *LLVMValue) interfaceTypeEquals(typ types.Type) *LLVMValue {
 	c, b := lhs.compiler, lhs.compiler.builder
 	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
 	rhsType := c.types.ToRuntime(typ)
-	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *type_) bool")
+	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *rtype) bool")
 	t := f.Type().ElementType().ParamTypes()[0]
 	lhsType = b.CreateBitCast(lhsType, t, "")
 	rhsType = b.CreateBitCast(rhsType, t, "")
