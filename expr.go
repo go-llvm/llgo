@@ -305,7 +305,16 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// value receiver (see Method Expressions in spec).
 	name := expr.Sel.Name
 	if _, ok := lhs.(TypeValue); ok {
-		methodobj := expr.Sel.Obj
+		ftyp := c.types.expr[expr].Type.(*types.Signature)
+		recvtyp := ftyp.Params[0].Type
+		var nameobj *ast.Object
+		if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
+			name := ptrtyp.Base.(*types.NamedType)
+			nameobj = name.Obj
+		} else {
+			nameobj = recvtyp.(*types.NamedType).Obj
+		}
+		methodobj := nameobj.Data.(*ast.Scope).Lookup(expr.Sel.Name)
 		value := c.Resolve(methodobj).(*LLVMValue)
 		return c.NewValue(value.value, c.types.expr[expr].Type)
 	}
