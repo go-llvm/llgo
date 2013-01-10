@@ -104,11 +104,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			for methodobj == nil && len(curr) > 0 {
 				var next []types.Type
 				for _, typ := range curr {
-					if p, ok := underlyingType(typ).(*types.Pointer); ok {
-						if _, ok := underlyingType(p.Base).(*types.Struct); ok {
-							typ = p.Base
-						}
-					}
+					typ = derefType(typ)
 					if n, ok := typ.(*types.NamedType); ok {
 						methodobj = n.Obj.Data.(*ast.Scope).Lookup(m.Name)
 						if methodobj != nil {
@@ -117,7 +113,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 					}
 					if typ, ok := underlyingType(typ).(*types.Struct); ok {
 						for _, field := range typ.Fields {
-							if field.Name == "" {
+							if field.IsAnonymous {
 								typ := field.Type.(types.Type)
 								next = append(next, typ)
 							}

@@ -255,12 +255,9 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 			constinfo := c.types.expr[expr]
 			if constinfo.Value != nil {
 				if globals[i] != nil {
-					if isUntyped(constinfo.Type) {
-						constinfo.Type = globals[i].Type()
-						c.types.expr[expr] = constinfo
-					}
 					gv := globals[i].pointer.value
 					value := c.VisitExpr(expr)
+					value = value.Convert(globals[i].Type())
 					gv.SetInitializer(value.LLVMValue())
 				}
 			} else {

@@ -114,7 +114,7 @@ func buildRuntime() error {
 	for _, pkg := range runtimePackages {
 		log.Printf("- %s", pkg.name)
 		dir, file := path.Split(pkg.name)
-		outfile := path.Join(outdir, dir, file+".a")
+		outfile := path.Join(outdir, dir, file+".bc")
 		err = buildPackage(pkg.name, pkg.path, outfile)
 		if err != nil {
 			return err

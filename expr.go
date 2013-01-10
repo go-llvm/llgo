@@ -225,9 +225,6 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// type. This is a no-op, and exists just to satisfy LLVM's type
 	// comparisons.
 	result := c.builder.CreateCall(fn.LLVMValue(), args, "")
-	if len(fn_type.Results) == 1 {
-		result = c.builder.CreateBitCast(result, c.types.ToLLVM(result_type), "")
-	}
 	return c.NewValue(result, result_type)
 }
 
@@ -348,13 +345,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		var next []selectorCandidate
 		for _, candidate := range curr {
 			indices := candidate.Indices[0:]
-			t := candidate.Type
-
-			if p, ok := underlyingType(t).(*types.Pointer); ok {
-				if _, ok := underlyingType(p.Base).(*types.Struct); ok {
-					t = p.Base
-				}
-			}
+			t := derefType(candidate.Type)
 
 			if n, ok := t.(*types.NamedType); ok {
 				if scope, ok := n.Obj.Data.(*ast.Scope); ok {

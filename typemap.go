@@ -134,7 +134,6 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 }
 
 func (tm *LLVMTypeMap) ToLLVM(t types.Type) llvm.Type {
-	t = underlyingType(t)
 	tstr := tm.TypeString(t)
 	lt, ok := tm.types[tstr]
 	if !ok {
@@ -325,12 +324,12 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 		elements[1] = valptr_type // value
 		for n, m := range i.Methods {
 			// Add an opaque pointer parameter to the function for the
-			// struct pointer.
-			fntype := m.Type
+			// struct pointer. Take a copy of the Type here, so we don't
+			// change how the Interface's TypeString is determined.
+			fntype := *m.Type
 			recvtyp := &types.Pointer{Base: types.Typ[types.Int8]}
 			fntype.Recv = &types.Var{Type: recvtyp}
-			elements[n+2] = tm.ToLLVM(fntype)
-			fntype.Recv = nil
+			elements[n+2] = tm.ToLLVM(&fntype)
 		}
 		typ.StructSetBody(elements, false)
 	}

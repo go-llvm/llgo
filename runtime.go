@@ -68,9 +68,12 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 			IntSize: archinfo.IntSize,
 			PtrSize: archinfo.PtrSize,
 		}
-		_, err = ctx.Check(fset, files)
+		pkg, err := ctx.Check(fset, files)
 		if err != nil {
 			panic(err)
+		}
+		for obj, pkg := range createPackageMap(pkg, "runtime") {
+			c.pkgmap[obj] = pkg
 		}
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
@@ -130,6 +133,9 @@ func (c *compiler) parseReflect() (*ast.Package, error) {
 	pkg, err := ctx.Check(fset, files)
 	if err != nil {
 		return nil, err
+	}
+	for obj, pkg := range createPackageMap(pkg, "reflect") {
+		c.pkgmap[obj] = pkg
 	}
 	return pkg, nil
 }

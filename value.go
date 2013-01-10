@@ -65,12 +65,19 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 	case v == types.NilType{}:
 		llvmtyp := c.types.ToLLVM(typ)
 		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
+
 	case isString(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.String]
 		}
 		llvmtyp := c.types.ToLLVM(typ)
-		strval := v.(string)
+		var strval string
+		switch v := v.(type) {
+		case string:
+			strval = v
+		case int64:
+			strval = string(v)
+		}
 		strlen := len(strval)
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		var ptr llvm.Value
@@ -85,6 +92,7 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, ptr, []uint32{0})
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, len_, []uint32{1})
 		return c.NewValue(llvmvalue, typ)
+
 	case isInteger(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Int]
@@ -100,6 +108,7 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			llvmvalue := llvm.ConstInt(llvmtyp, v.Uint64(), signed)
 			return c.NewValue(llvmvalue, typ)
 		}
+
 	case isBoolean(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Bool]
@@ -111,6 +120,7 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			llvmvalue = llvm.ConstNull(llvm.Int1Type())
 		}
 		return c.NewValue(llvmvalue, typ)
+
 	case isFloat(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Float64]
@@ -134,11 +144,13 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		default:
 			panic(fmt.Sprintf("unhandled %T", v))
 		}
+
 	case typ == types.Typ[types.UnsafePointer]:
 		llvmtyp := c.types.ToLLVM(typ)
 		signed := !isUnsigned(typ)
 		llvmvalue := llvm.ConstInt(llvmtyp, uint64(v.(int64)), signed)
 		return c.NewValue(llvmvalue, typ)
+
 	case isComplex(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Complex128]
@@ -167,7 +179,17 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		}
 		return c.NewValue(llvmvalue, typ)
 	}
-	panic(fmt.Sprintf("unhandled: %s (%T)", c.types.TypeString(typ), typ))
+
+	// Special case for string -> []byte
+	if isIdentical(underlyingType(typ), &types.Slice{Elt: types.Typ[types.Byte]}) {
+		switch v := v.(type) {
+		case string:
+			strval := c.NewConstValue(v, types.Typ[types.String])
+			return strval.Convert(typ).(*LLVMValue)
+		}
+	}
+
+	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", c.types.TypeString(typ), typ, v, v))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
