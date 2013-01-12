@@ -128,6 +128,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			}
 			method := v.compiler.Resolve(methodobj).(*LLVMValue)
 			llvm_value := method.LLVMValue()
+			llvm_value = builder.CreateExtractValue(llvm_value, 0, "")
 
 			// If we have a receiver wider than a word, or a pointer
 			// receiver value and non-pointer receiver method, then

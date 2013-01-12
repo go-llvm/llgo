@@ -70,8 +70,8 @@ type compiler struct {
 	functions      functionStack
 	breakblocks    []llvm.BasicBlock
 	continueblocks []llvm.BasicBlock
-	initfuncs      []Value
-	varinitfuncs   []Value
+	initfuncs      []llvm.Value
+	varinitfuncs   []llvm.Value
 	pkg            *ast.Package
 	importpath     string
 	fileset        *token.FileSet
@@ -368,7 +368,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 	// At program initialisation, the runtime initialisation
 	// function (runtime.main) will invoke the constructors
 	// in reverse order.
-	var initfuncs [][]Value
+	var initfuncs [][]llvm.Value
 	if compiler.varinitfuncs != nil {
 		initfuncs = append(initfuncs, compiler.varinitfuncs)
 	}
@@ -376,14 +376,14 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		initfuncs = append(initfuncs, compiler.initfuncs)
 	}
 	if initfuncs != nil {
-		ctortype := llvm.PointerType(llvm.FunctionType(llvm.VoidType(), nil, false), 0)
+		ctortype := llvm.PointerType(llvm.Int8Type(), 0)
 		var ctors []llvm.Value
 		var index int = 0
 		for _, initfuncs := range initfuncs {
-			for _, fn := range initfuncs {
-				fnval := fn.LLVMValue()
-				fnval.SetName("__llgo.ctor." + compiler.importpath + strconv.Itoa(index))
-				ctors = append(ctors, fnval)
+			for _, fnptr := range initfuncs {
+				fnptr.SetName("__llgo.ctor." + compiler.importpath + strconv.Itoa(index))
+				fnptr = llvm.ConstBitCast(fnptr, ctortype)
+				ctors = append(ctors, fnptr)
 				index++
 			}
 		}
@@ -429,12 +429,14 @@ func (c *compiler) createMainFunction() error {
 		mainMain = c.module.NamedFunction("main.main")
 	}
 
-	// runtime.main is called by main, with argc, argv,
-	// and a pointer to main.main.
-	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, **byte, func()) int32")
+	// runtime.main is called by main, with argc, argv, argp,
+	// and a pointer to main.main, which must be a niladic
+	// function with no result.
+	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, **byte, *int8) int32")
 	main := c.NamedFunction("main", "func f(int32, **byte, **byte) int32")
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
+	mainMain = c.builder.CreateBitCast(mainMain, runtimeMain.Type().ElementType().ParamTypes()[3], "")
 	args := []llvm.Value{main.Param(0), main.Param(1), main.Param(2), mainMain}
 	result := c.builder.CreateCall(runtimeMain, args, "")
 	c.builder.CreateRet(result)

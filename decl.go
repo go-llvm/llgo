@@ -70,23 +70,26 @@ func (c *compiler) VisitFuncProtoDecl(f *ast.FuncDecl) *LLVMValue {
 	}
 
 	// gcimporter may produce multiple AST objects for the same function.
+	llvmftyp := c.types.ToLLVM(ftyp)
 	fn := c.module.Module.NamedFunction(fname)
 	if fn.IsNil() {
-		llvmftyp := c.types.ToLLVM(ftyp).ElementType()
-		fn = llvm.AddFunction(c.module.Module, fname, llvmftyp)
+		llvmfptrtyp := llvmftyp.StructElementTypes()[0].ElementType()
+		fn = llvm.AddFunction(c.module.Module, fname, llvmfptrtyp)
 		if ftyp.Recv != nil {
 			// Create an interface function if the receiver is
 			// not a pointer type.
 			recvtyp := ftyp.Recv.Type.(types.Type)
 			if _, ptr := recvtyp.(*types.Pointer); !ptr {
-				returntyp := llvmftyp.ReturnType()
-				paramtypes := llvmftyp.ParamTypes()
+				returntyp := llvmfptrtyp.ReturnType()
+				paramtypes := llvmfptrtyp.ParamTypes()
 				paramtypes[0] = llvm.PointerType(paramtypes[0], 0)
 				ifntyp := llvm.FunctionType(returntyp, paramtypes, false)
 				llvm.AddFunction(c.module.Module, "*"+fname, ifntyp)
 			}
 		}
 	}
+
+	fn = llvm.ConstInsertValue(llvm.ConstNull(llvmftyp), fn, []uint32{0})
 	result := c.NewValue(fn, ftyp)
 	if f.Name.Obj != nil {
 		f.Name.Obj.Data = result
@@ -116,7 +119,8 @@ func (stackvar *LLVMValue) promoteStackVar() {
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
 func (c *compiler) buildFunction(f *LLVMValue, params, results []*ast.Object, body *ast.BlockStmt) {
-	llvm_fn := f.LLVMValue()
+	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	llvm_fn := llvm.ConstExtractValue(f.LLVMValue(), []uint32{0})
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
@@ -205,7 +209,6 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		paramObjects = append(recvObjects, paramObjects...)
 	}
 	resultObjects := fieldListObjects(f.Type.Results)
-
 	c.buildFunction(fn, paramObjects, resultObjects, f.Body)
 
 	if f.Recv != nil {
@@ -213,11 +216,13 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		// a pointer type.
 		recvtyp := ftyp.Recv.Type.(types.Type)
 		if _, ptr := recvtyp.(*types.Pointer); !ptr {
-			c.buildPtrRecvFunction(fn.value)
+			fnptr := llvm.ConstExtractValue(fn.value, []uint32{0})
+			c.buildPtrRecvFunction(fnptr)
 		}
 	} else if f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.
-		c.initfuncs = append(c.initfuncs, fn)
+		fnptr := llvm.ConstExtractValue(fn.value, []uint32{0})
+		c.initfuncs = append(c.initfuncs, fnptr)
 	}
 	return fn
 }
@@ -274,8 +279,7 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 	if block := c.builder.GetInsertBlock(); !block.IsNil() {
 		defer c.builder.SetInsertPointAtEnd(block)
 	}
-	fntype := &types.Signature{}
-	llvmfntype := c.types.ToLLVM(fntype).ElementType()
+	llvmfntype := llvm.FunctionType(llvm.VoidType(), nil, false)
 	fn := llvm.AddFunction(c.module.Module, "", llvmfntype)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
@@ -305,10 +309,8 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 			}
 		}
 	}
-
 	c.builder.CreateRetVoid()
-	fnvalue := c.NewValue(fn, fntype)
-	c.varinitfuncs = append(c.varinitfuncs, fnvalue)
+	c.varinitfuncs = append(c.varinitfuncs, fn)
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {

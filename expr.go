@@ -168,22 +168,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	fn := lhs.(*LLVMValue)
 	fn_type := underlyingType(fn.Type()).(*types.Signature)
 
-	// Convert untyped argument types.
-	for i, p := range fn_type.Params {
-		arginfo := c.types.expr[expr.Args[i]]
-		if isUntyped(arginfo.Type) {
-			arginfo.Type = p.Type.(types.Type)
-			c.types.expr[expr.Args[i]] = arginfo
-		}
-	}
-
-	args := make([]llvm.Value, 0)
-	if fn.receiver != nil {
-		// Don't dereference the receiver here. It'll have been worked out in
-		// the selector.
-		receiver := fn.receiver
-		args = append(args, receiver.LLVMValue())
-	}
+	var args []llvm.Value
 	if nparams := len(fn_type.Params); nparams > 0 {
 		if fn_type.IsVariadic {
 			nparams--
@@ -221,10 +206,72 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		result_type = &types.Result{Values: fn_type.Results}
 	}
 
-	// After calling the function, we must bitcast to the computed LLVM
-	// type. This is a no-op, and exists just to satisfy LLVM's type
-	// comparisons.
-	result := c.builder.CreateCall(fn.LLVMValue(), args, "")
+	var fnptr llvm.Value
+	fnval := fn.LLVMValue()
+	if fnval.Type().TypeKind() == llvm.PointerTypeKind {
+		fnptr = fnval
+	} else {
+		fnptr = c.builder.CreateExtractValue(fnval, 0, "")
+		context := c.builder.CreateExtractValue(fnval, 1, "")
+		fntyp := fnptr.Type().ElementType()
+		paramTypes := fntyp.ParamTypes()
+
+		// If the context is not a constant null, and we're not
+		// dealing with a method (where we don't care about the value
+		// of the receiver), then we must conditionally call the
+		// function with the additional receiver/closure.
+		if !context.IsNull() {
+			var nullctxblock llvm.BasicBlock
+			var nonnullctxblock llvm.BasicBlock
+			var endblock llvm.BasicBlock
+			var nullctxresult llvm.Value
+			if !context.IsConstant() && len(paramTypes) == len(args) {
+				currblock := c.builder.GetInsertBlock()
+				endblock = llvm.AddBasicBlock(currblock.Parent(), "")
+				endblock.MoveAfter(currblock)
+				nonnullctxblock = llvm.InsertBasicBlock(endblock, "")
+				nullctxblock = llvm.InsertBasicBlock(nonnullctxblock, "")
+				nullctx := c.builder.CreateIsNull(context, "")
+				c.builder.CreateCondBr(nullctx, nullctxblock, nonnullctxblock)
+
+				// null context case.
+				c.builder.SetInsertPointAtEnd(nullctxblock)
+				nullctxresult = c.builder.CreateCall(fnptr, args, "")
+				c.builder.CreateBr(endblock)
+				c.builder.SetInsertPointAtEnd(nonnullctxblock)
+			}
+
+			// non-null context case.
+			var result llvm.Value
+			args := append([]llvm.Value{context}, args...)
+			if len(paramTypes) < len(args) {
+				returnType := fntyp.ReturnType()
+				ctxType := context.Type()
+				paramTypes := append([]llvm.Type{ctxType}, paramTypes...)
+				vararg := fntyp.IsFunctionVarArg()
+				fntyp := llvm.FunctionType(returnType, paramTypes, vararg)
+				fnptrtyp := llvm.PointerType(fntyp, 0)
+				fnptr = c.builder.CreateBitCast(fnptr, fnptrtyp, "")
+			}
+			result = c.builder.CreateCall(fnptr, args, "")
+
+			// If the return type is not void, create a
+			// PHI node to select which value to return.
+			if !nullctxresult.IsNil() {
+				c.builder.CreateBr(endblock)
+				c.builder.SetInsertPointAtEnd(endblock)
+				if result.Type().TypeKind() != llvm.VoidTypeKind {
+					phiresult := c.builder.CreatePHI(result.Type(), "")
+					values := []llvm.Value{nullctxresult, result}
+					blocks := []llvm.BasicBlock{nullctxblock, nonnullctxblock}
+					phiresult.AddIncoming(values, blocks)
+					result = phiresult
+				}
+			}
+			return c.NewValue(result, result_type)
+		}
+	}
+	result := c.builder.CreateCall(fnptr, args, "")
 	return c.NewValue(result, result_type)
 }
 
@@ -326,14 +373,13 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		structValue := lhs.LLVMValue()
 		receiver := c.builder.CreateExtractValue(structValue, 1, "")
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
-		i8ptr := &types.Pointer{Base: types.Typ[types.Int8]}
 		ftype := iface.Methods[i].Type
-		ftype.Recv = &types.Var{Type: i8ptr}
-		f = c.builder.CreateBitCast(f, c.types.ToLLVM(ftype), "")
-		ftype.Recv = nil
-		method := c.NewValue(f, ftype)
-		method.receiver = c.NewValue(receiver, i8ptr)
-		return method
+		types := []llvm.Type{f.Type(), receiver.Type()}
+		llvmStructType := llvm.StructType(types, false)
+		structValue = llvm.Undef(llvmStructType)
+		structValue = c.builder.CreateInsertValue(structValue, f, 0, "")
+		structValue = c.builder.CreateInsertValue(structValue, receiver, 1, "")
+		return c.NewValue(structValue, ftype)
 	}
 
 	// Otherwise, search for field/method,
@@ -418,14 +464,24 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		method := c.Resolve(method).(*LLVMValue)
 		methodType := method.Type().(*types.Signature)
 		receiverType := methodType.Recv.Type.(types.Type)
-		if isIdentical(recvValue.Type(), receiverType) {
-			method.receiver = recvValue
-		} else if isIdentical(&types.Pointer{Base: recvValue.Type()}, receiverType) {
-			method.receiver = recvValue.pointer
-		} else {
-			method.receiver = recvValue.makePointee()
+		var receiver Value
+		switch {
+		case isIdentical(recvValue.Type(), receiverType):
+			receiver = recvValue
+		case isIdentical(&types.Pointer{Base: recvValue.Type()}, receiverType):
+			receiver = recvValue.pointer
+		default:
+			receiver = recvValue.makePointee()
 		}
-		return method
+		methodValue := method.LLVMValue()
+		methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
+		receiverValue := receiver.LLVMValue()
+		types := []llvm.Type{methodValue.Type(), receiverValue.Type()}
+		structType := llvm.StructType(types, false)
+		value := llvm.Undef(structType)
+		value = c.builder.CreateInsertValue(value, methodValue, 0, "")
+		value = c.builder.CreateInsertValue(value, receiverValue, 1, "")
+		return c.NewValue(value, methodType)
 	} else {
 		if isIdentical(recvValue.Type(), result.Type) {
 			// no-op

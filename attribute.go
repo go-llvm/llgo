@@ -116,6 +116,7 @@ type nameAttribute string
 func (a nameAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
+		fn = llvm.ConstExtractValue(fn, []uint32{0})
 		fn.SetName(string(a))
 	} else {
 		global := v.(*LLVMValue).pointer.value

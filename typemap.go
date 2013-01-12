@@ -182,9 +182,7 @@ func (tm *LLVMTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 		tm.types[tstr] = lt
 		return lt
 	case *types.Signature:
-		lt := tm.funcLLVMType(t)
-		tm.types[tstr] = lt
-		return lt
+		return tm.funcLLVMType(tstr, t)
 	case *types.Interface:
 		return tm.interfaceLLVMType(tstr, t)
 	case *types.Map:
@@ -277,39 +275,54 @@ func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	return llvm.PointerType(tm.ToLLVM(p.Base), 0)
 }
 
-func (tm *LLVMTypeMap) funcLLVMType(f *types.Signature) llvm.Type {
-	param_types := make([]llvm.Type, 0)
-
-	// Add receiver parameter.
-	if f.Recv != nil {
-		recv_type := f.Recv.Type.(types.Type)
-		param_types = append(param_types, tm.ToLLVM(recv_type))
-	}
-
-	for i, param := range f.Params {
-		param_type := param.Type.(types.Type)
-		if f.IsVariadic && i == len(f.Params)-1 {
-			param_type = &types.Slice{Elt: param_type}
+func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
+	typ, ok := tm.types[tstr]
+	if !ok {
+		// If there's a receiver change the receiver to an
+		// additional (first) parameter, and take the value of
+		// the resulting signature instead.
+		var param_types []llvm.Type
+		if f.Recv != nil {
+			f.Params = append([]*types.Var{f.Recv}, f.Params...)
+			f.Recv = nil
+			typ = tm.ToLLVM(f)
+			f.Recv = f.Params[0]
+			f.Params = f.Params[1:]
+			return typ
 		}
-		param_types = append(param_types, tm.ToLLVM(param_type))
-	}
 
-	var return_type llvm.Type
-	switch len(f.Results) {
-	case 0:
-		return_type = llvm.VoidType()
-	case 1:
-		return_type = tm.ToLLVM(f.Results[0].Type.(types.Type))
-	default:
-		elements := make([]llvm.Type, len(f.Results))
-		for i, result := range f.Results {
-			elements[i] = tm.ToLLVM(result.Type.(types.Type))
+		typ = llvm.GlobalContext().StructCreateNamed("")
+		tm.types[tstr] = typ
+
+		for i, param := range f.Params {
+			param_type := param.Type.(types.Type)
+			if f.IsVariadic && i == len(f.Params)-1 {
+				param_type = &types.Slice{Elt: param_type}
+			}
+			param_types = append(param_types, tm.ToLLVM(param_type))
 		}
-		return_type = llvm.StructType(elements, false)
-	}
 
-	fn_type := llvm.FunctionType(return_type, param_types, false)
-	return llvm.PointerType(fn_type, 0)
+		var return_type llvm.Type
+		switch len(f.Results) {
+		case 0:
+			return_type = llvm.VoidType()
+		case 1:
+			return_type = tm.ToLLVM(f.Results[0].Type.(types.Type))
+		default:
+			elements := make([]llvm.Type, len(f.Results))
+			for i, result := range f.Results {
+				elements[i] = tm.ToLLVM(result.Type.(types.Type))
+			}
+			return_type = llvm.StructType(elements, false)
+		}
+
+		fntyp := llvm.FunctionType(return_type, param_types, false)
+		fnptrtyp := llvm.PointerType(fntyp, 0)
+		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+		elements := []llvm.Type{fnptrtyp, i8ptr} // func, closure
+		typ.StructSetBody(elements, false)
+	}
+	return typ
 }
 
 func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.Type {
@@ -327,9 +340,7 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 			// struct pointer. Take a copy of the Type here, so we don't
 			// change how the Interface's TypeString is determined.
 			fntype := *m.Type
-			recvtyp := &types.Pointer{Base: types.Typ[types.Int8]}
-			fntype.Recv = &types.Var{Type: recvtyp}
-			elements[n+2] = tm.ToLLVM(&fntype)
+			elements[n+2] = tm.ToLLVM(&fntype).StructElementTypes()[0]
 		}
 		typ.StructSetBody(elements, false)
 	}
@@ -685,6 +696,7 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 
 			// tfn (standard method/function pointer for plain method calls)
 			tfn := tm.resolver.Resolve(m).LLVMValue()
+			tfn = llvm.ConstExtractValue(tfn, []uint32{0})
 			tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
 
 			// ifn (single-word receiver function pointer for interface calls)

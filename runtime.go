@@ -37,7 +37,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 			panic("Missing function: " + name)
 		}
 		value := c.Resolve(obj)
-		f = value.LLVMValue()
+		f = llvm.ConstExtractValue(value.LLVMValue(), []uint32{0})
 	} else {
 		fset := token.NewFileSet()
 		code := `package runtime;import("unsafe");` + signature + `{panic("")}`
@@ -78,8 +78,8 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
 		ftype := fdecl.Name.Obj.Type.(*types.Signature)
-		llvmfptrtype := c.types.ToLLVM(ftype)
-		f = llvm.AddFunction(c.module.Module, name, llvmfptrtype.ElementType())
+		llvmfntyp := c.types.ToLLVM(ftype).StructElementTypes()[0].ElementType()
+		f = llvm.AddFunction(c.module.Module, name, llvmfntyp)
 	}
 	c.functions[name+":"+signature] = f
 	return f

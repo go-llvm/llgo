@@ -45,8 +45,7 @@ type LLVMValue struct {
 	value    llvm.Value
 	typ      types.Type
 	pointer  *LLVMValue // Pointer value that dereferenced to this value.
-	receiver *LLVMValue // Transient; only guaranteed to exist at call point.
-	stack    *LLVMValue // If a stack value, the Value for the containing function.
+	stack *LLVMValue // If a stack value, the Value for the containing function.
 }
 
 // TypeValue represents a Type result of an expression. All methods
@@ -57,7 +56,7 @@ type TypeValue struct {
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
 func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, v, t, nil, nil, nil}
+	return &LLVMValue{c, v, t, nil, nil}
 }
 
 func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
@@ -253,6 +252,11 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 	case *types.Slice:
 		// []T == nil
+		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+		return c.NewValue(isnil, types.Typ[types.Bool])
+
+	case *types.Signature:
+		// func == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
 		return c.NewValue(isnil, types.Typ[types.Bool])
 	}

@@ -91,13 +91,13 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	ast.Walk(v, lit.Body)
 	c.functions.pop()
 
-	// Create closure by adding a "next" parameter to the function,
+	// Create closure by adding a context parameter to the function,
 	// and bind it with the values of the stack vars found in the
 	// step above.
 	//
 	// First, we store the existing values, and replace them with
 	// temporary values. Once we've created the function, we'll
-	// replace the temporary values with pointers from the nest
+	// replace the temporary values with pointers from the context
 	// parameter.
 	var origValues []*LLVMValue
 	if v.objects != nil {
@@ -115,50 +115,42 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 			}
 		}()
 
-		// Add the nest param.
-		nestType := &types.Pointer{Base: &types.Struct{Fields: ptrTypeFields}}
-		nestParam := &types.Var{Type: nestType}
-		ftyp.Params = append([]*types.Var{nestParam}, ftyp.Params...)
+		// Add the additional context param.
+		contextType := &types.Pointer{Base: &types.Struct{Fields: ptrTypeFields}}
+		contextParam := &types.Var{Type: contextType}
+		ftyp.Params = append([]*types.Var{contextParam}, ftyp.Params...)
 		for _, obj := range v.objects {
 			ptrType := &types.Pointer{Base: obj.Type.(types.Type)}
 			ptrVal := c.builder.CreateAlloca(c.types.ToLLVM(ptrType.Base), "")
 			obj.Data = c.NewValue(ptrVal, ptrType).makePointee()
 		}
-		nestParamObj := ast.NewObj(ast.Var, "")
-		nestParamObj.Type = nestType
-		paramObjs = append([]*ast.Object{nestParamObj}, paramObjs...)
+		contextParamObj := ast.NewObj(ast.Var, "")
+		contextParamObj.Type = contextType
+		paramObjs = append([]*ast.Object{contextParamObj}, paramObjs...)
 	}
 
-	fn_value := llvm.AddFunction(c.module.Module, "", c.types.ToLLVM(ftyp).ElementType())
-	fn_value.SetFunctionCallConv(llvm.FastCallConv)
+	llvmfntyp := c.types.ToLLVM(ftyp)
+	fnptrtyp := llvmfntyp.StructElementTypes()[0].ElementType()
+	fnptr := llvm.AddFunction(c.module.Module, "", fnptrtyp)
+	fnvalue := llvm.ConstNull(llvmfntyp)
+	fnvalue = llvm.ConstInsertValue(fnvalue, fnptr, []uint32{0})
 	currBlock := c.builder.GetInsertBlock()
-	f := c.NewValue(fn_value, ftyp)
+
+	f := c.NewValue(fnvalue, ftyp)
 	c.buildFunction(f, paramObjs, resultObjs, lit.Body)
 
-	// Closure? Erect a trampoline.
+	// Closure? Bind values to a context block.
 	if v.objects != nil {
-		blockPtr := fn_value.FirstParam()
-		blockPtr.AddAttribute(llvm.NestAttribute)
+		blockPtr := fnptr.FirstParam()
 		ftyp.Params = ftyp.Params[1:]
-		paramTypes := fn_value.Type().ElementType().ParamTypes()
-		c.builder.SetInsertPointBefore(fn_value.EntryBasicBlock().FirstInstruction())
+		paramTypes := fnptr.Type().ElementType().ParamTypes()
+		c.builder.SetInsertPointBefore(fnptr.EntryBasicBlock().FirstInstruction())
 		for i, obj := range v.objects {
 			tempPtrVal := obj.Data.(*LLVMValue).pointer.value
 			argPtrVal := c.builder.CreateStructGEP(blockPtr, i, "")
 			tempPtrVal.ReplaceAllUsesWith(c.builder.CreateLoad(argPtrVal, ""))
 		}
 		c.builder.SetInsertPointAtEnd(currBlock)
-
-		// FIXME This is only correct for x86. Not sure what the best
-		// thing to do is here; should we even create trampolines?
-		// Or is it better to pass a (block, funcptr) pair around?
-		memalign := c.NamedFunction("runtime.memalign", "func f(align, size uintptr) *int8")
-		align := uint64(c.target.PointerSize())
-		args := []llvm.Value{
-			llvm.ConstInt(c.target.IntPtrType(), align, false), // alignment
-			llvm.ConstInt(c.target.IntPtrType(), 100, false),   // size of trampoline
-		}
-		tramp := c.builder.CreateCall(memalign, args, "tramp")
 
 		// Store the free variables in the heap allocated block.
 		block := c.createTypeMalloc(paramTypes[0].ElementType())
@@ -168,14 +160,18 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 			c.builder.CreateStore(ptrVal, blockPtr)
 		}
 
-		initTrampFunc := c.NamedFunction("llvm.init.trampoline", "func f(tramp, fun, nval *int8)")
+		// Cast the function pointer type back to the original
+		// type, without the context parameter.
+		llvmfntyp := c.types.ToLLVM(ftyp)
+		fnptr = llvm.ConstBitCast(fnptr, llvmfntyp.StructElementTypes()[0])
+		fnvalue = llvm.Undef(llvmfntyp)
+		fnvalue = llvm.ConstInsertValue(fnvalue, fnptr, []uint32{0})
+
+		// Set the context value.
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-		funcptr := c.builder.CreateBitCast(fn_value, i8ptr, "")
 		block = c.builder.CreateBitCast(block, i8ptr, "")
-		c.builder.CreateCall(initTrampFunc, []llvm.Value{tramp, funcptr, block}, "")
-		adjustTrampFunc := c.NamedFunction("llvm.adjust.trampoline", "func f(tramp *int8) *int8")
-		funcptr = c.builder.CreateCall(adjustTrampFunc, []llvm.Value{tramp}, "")
-		f.value = c.builder.CreateBitCast(funcptr, c.types.ToLLVM(ftyp), "")
+		fnvalue = c.builder.CreateInsertValue(fnvalue, block, 1, "")
+		f.value = fnvalue
 	} else {
 		c.builder.SetInsertPointAtEnd(currBlock)
 	}
