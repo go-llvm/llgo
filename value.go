@@ -15,7 +15,7 @@ import (
 
 // Resolver is an interface for resolving AST objects to values.
 type Resolver interface {
-	Resolve(*ast.Object) Value
+	Resolve(*ast.Ident) Value
 }
 
 // Value is an interface for representing values returned by Go expressions.
@@ -46,12 +46,6 @@ type LLVMValue struct {
 	typ      types.Type
 	pointer  *LLVMValue // Pointer value that dereferenced to this value.
 	stack *LLVMValue // If a stack value, the Value for the containing function.
-}
-
-// TypeValue represents a Type result of an expression. All methods
-// other than Type() will panic when called.
-type TypeValue struct {
-	typ types.Type
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
@@ -666,11 +660,3 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 	return v.compiler.NewValue(component, types.Typ[types.Float64])
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// TypeValue
-
-func (TypeValue) BinaryOp(op token.Token, rhs Value) Value { panic("this should not be called") }
-func (TypeValue) UnaryOp(op token.Token) Value             { panic("this should not be called") }
-func (TypeValue) Convert(typ types.Type) Value             { panic("this should not be called") }
-func (TypeValue) LLVMValue() llvm.Value                    { panic("this should not be called") }
-func (t TypeValue) Type() types.Type                       { return t.typ }

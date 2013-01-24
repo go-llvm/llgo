@@ -25,7 +25,6 @@ package llgo
 import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 	"go/token"
 	"go/types"
 	"sort"
@@ -33,7 +32,7 @@ import (
 )
 
 // convertV2I converts a value to an interface.
-func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
+func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 	// TODO deref indirect value, then use 'pointer' as pointer value.
 	var srcname *types.NamedType
 	srctyp := v.Type()
@@ -76,8 +75,13 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				ptr = llvm.ConstNull(element_types[1])
 			}
 		} else {
-			ptr = c.createTypeMalloc(v.compiler.types.ToLLVM(srctyp))
-			builder.CreateStore(lv, ptr)
+			if lv.IsConstant() {
+				ptr = llvm.AddGlobal(c.module.Module, lv.Type(), "")
+				ptr.SetInitializer(lv)
+			} else {
+				ptr = c.createTypeMalloc(lv.Type())
+				builder.CreateStore(lv, ptr)
+			}
 			ptr = builder.CreateBitCast(ptr, element_types[1], "")
 			overwide = true
 		}
@@ -95,19 +99,22 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 		// value or pointer receivers.
 
 		// Look up the method by name.
-		// TODO check embedded types.
 		for i, m := range iface.Methods {
 			// TODO make this loop linear by iterating through the
 			// interface methods and type methods together.
-			var methodobj *ast.Object
+			var recv *types.NamedType
 			curr := []types.Type{srcname}
-			for methodobj == nil && len(curr) > 0 {
+			for recv == nil && len(curr) > 0 {
 				var next []types.Type
 				for _, typ := range curr {
 					typ = derefType(typ)
 					if n, ok := typ.(*types.NamedType); ok {
-						methodobj = n.Obj.Data.(*ast.Scope).Lookup(m.Name)
-						if methodobj != nil {
+						for _, m2 := range n.Methods {
+							if m2.Name == m.Name {
+								recv = n
+							}
+						}
+						if recv != nil {
 							break
 						}
 					}
@@ -122,18 +129,16 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				}
 				curr = next
 			}
-			if methodobj == nil {
-				msg := fmt.Sprintf("Failed to locate (%s).%s", srcname.Obj.Name, m.Name)
-				panic(msg)
-			}
-			method := v.compiler.Resolve(methodobj).(*LLVMValue)
-			llvm_value := method.LLVMValue()
+
+			method := v.compiler.methods(recv).Lookup(m.Name)
+			methodident := v.compiler.objectdata[method].Ident
+			llvm_value := v.compiler.Resolve(methodident).LLVMValue()
 			llvm_value = builder.CreateExtractValue(llvm_value, 0, "")
 
 			// If we have a receiver wider than a word, or a pointer
 			// receiver value and non-pointer receiver method, then
 			// we must use the "wrapper" pointer method.
-			fntyp := methodobj.Type.(*types.Signature)
+			fntyp := method.Type.(*types.Signature)
 			recvtyp := fntyp.Recv.Type.(types.Type)
 			needload := overwide
 			if !needload {
@@ -145,17 +150,18 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 			}
 			if needload {
 				// TODO consolidate with other similar bits of code.
-				fname := methodobj.Name
+				fname := method.Name
 				var recvname string
 				var pkgname string
 				switch recvtyp := recvtyp.(type) {
 				case *types.Pointer:
 					named := recvtyp.Base.(*types.NamedType)
 					recvname = "*" + named.Obj.Name
-					pkgname = v.compiler.pkgmap[named.Obj]
+					pkgname = v.compiler.objectdata[named.Obj].Package.Path
 				case *types.NamedType:
-					recvname = recvtyp.Obj.Name
-					pkgname = v.compiler.pkgmap[recvtyp.Obj]
+					named := recvtyp
+					recvname = named.Obj.Name
+					pkgname = v.compiler.objectdata[named.Obj].Package.Path
 				}
 				ifname := fmt.Sprintf("*%s.%s.%s", pkgname, recvname, fname)
 				llvm_value = v.compiler.module.NamedFunction(ifname)
@@ -169,7 +175,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 }
 
 // convertI2I converts an interface to another interface.
-func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Value) {
+func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, success *LLVMValue) {
 	c := v.compiler
 	builder := v.compiler.builder
 	src_typ := underlyingType(v.Type())
@@ -328,7 +334,7 @@ func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
 
 // loadI2V loads an interface value to a type, without checking
 // that the interface type matches.
-func (v *LLVMValue) loadI2V(typ types.Type) Value {
+func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	c := v.compiler
 	if c.types.Sizeof(typ) > uint64(c.target.PointerSize()) {
 		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")

@@ -31,24 +31,25 @@ import (
 
 type identVisitor struct {
 	*compiler
-	objects []*ast.Object
+	captures []*types.Var
 }
 
 func (i *identVisitor) Visit(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.Ident:
-		if value, ok := node.Obj.Data.(*LLVMValue); ok {
+		if v, ok := i.objects[node].(*types.Var); ok {
+			value := i.objectdata[v].Value
 			curfunc := i.functions.top()
 			// FIXME this needs review; this will currently
 			// pick up globals.
-			if value.stack != curfunc.LLVMValue && value.pointer != nil {
+			if value != nil && value.stack != curfunc.LLVMValue && value.pointer != nil {
 				if value.stack != nil {
 					value.promoteStackVar()
 				}
 				// We're referring to a variable that was
 				// not declared on the current function's
 				// stack.
-				i.objects = append(i.objects, node.Obj)
+				i.captures = append(i.captures, v)
 			}
 		}
 	case *ast.FuncLit:
@@ -68,24 +69,11 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	// (First, set a dummy "stack" value for the params and results.)
 	var dummyfunc LLVMValue
 	dummyfunc.stack = &dummyfunc
-	paramObjs := fieldListObjects(lit.Type.Params)
-	resultObjs := fieldListObjects(lit.Type.Results)
-	/*
-		for _, obj := range paramObjs {
-			if obj != nil {
-				obj.Data = dummyfunc
-			}
-		}
-		for _, obj := range resultObjs {
-			if obj != nil {
-				obj.Data = dummyfunc
-			}
-		}
-	*/
+	paramVars := ftyp.Params[:]
+	resultVars := ftyp.Results[:]
 	c.functions.push(&function{
 		LLVMValue: &dummyfunc,
-		params:    paramObjs,
-		results:   resultObjs,
+		results:   resultVars,
 	})
 	v := &identVisitor{compiler: c}
 	ast.Walk(v, lit.Body)
@@ -94,77 +82,50 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	// Create closure by adding a context parameter to the function,
 	// and bind it with the values of the stack vars found in the
 	// step above.
-	//
-	// First, we store the existing values, and replace them with
-	// temporary values. Once we've created the function, we'll
-	// replace the temporary values with pointers from the context
-	// parameter.
-	var origValues []*LLVMValue
-	if v.objects != nil {
-		origValues = make([]*LLVMValue, len(v.objects))
-		ptrTypeFields := make([]*types.Field, len(v.objects))
-		for i, obj := range v.objects {
-			origValues[i] = obj.Data.(*LLVMValue)
-			ptrTypeFields[i] = &types.Field{
-				Type: &types.Pointer{Base: obj.Type.(types.Type)},
-			}
-		}
-		defer func() {
-			for i, obj := range v.objects {
-				obj.Data = origValues[i]
-			}
-		}()
-
+	origfnpairtyp := c.types.ToLLVM(ftyp)
+	fnpairtyp := origfnpairtyp
+	fntyp := origfnpairtyp.StructElementTypes()[0].ElementType()
+	if v.captures != nil {
 		// Add the additional context param.
-		contextType := &types.Pointer{Base: &types.Struct{Fields: ptrTypeFields}}
-		contextParam := &types.Var{Type: contextType}
-		ftyp.Params = append([]*types.Var{contextParam}, ftyp.Params...)
-		for _, obj := range v.objects {
-			ptrType := &types.Pointer{Base: obj.Type.(types.Type)}
-			ptrVal := c.builder.CreateAlloca(c.types.ToLLVM(ptrType.Base), "")
-			obj.Data = c.NewValue(ptrVal, ptrType).makePointee()
+		ctxfields := make([]*types.Field, len(v.captures))
+		for i, capturevar := range v.captures {
+			ctxfields[i] = &types.Field{
+				Type: &types.Pointer{Base: capturevar.Type},
+			}
 		}
-		contextParamObj := ast.NewObj(ast.Var, "")
-		contextParamObj.Type = contextType
-		paramObjs = append([]*ast.Object{contextParamObj}, paramObjs...)
+		ctxtyp := &types.Pointer{Base: &types.Struct{Fields: ctxfields}}
+		llvmctxtyp := c.types.ToLLVM(ctxtyp)
+		rettyp := fntyp.ReturnType()
+		paramtyps := append([]llvm.Type{llvmctxtyp}, fntyp.ParamTypes()...)
+		vararg := fntyp.IsFunctionVarArg()
+		fntyp = llvm.FunctionType(rettyp, paramtyps, vararg)
+		opaqueptrtyp := origfnpairtyp.StructElementTypes()[1]
+		elttyps := []llvm.Type{llvm.PointerType(fntyp, 0), opaqueptrtyp}
+		fnpairtyp = llvm.StructType(elttyps, false)
 	}
 
-	llvmfntyp := c.types.ToLLVM(ftyp)
-	fnptrtyp := llvmfntyp.StructElementTypes()[0].ElementType()
-	fnptr := llvm.AddFunction(c.module.Module, "", fnptrtyp)
-	fnvalue := llvm.ConstNull(llvmfntyp)
+	fnptr := llvm.AddFunction(c.module.Module, "", fntyp)
+	fnvalue := llvm.ConstNull(fnpairtyp)
 	fnvalue = llvm.ConstInsertValue(fnvalue, fnptr, []uint32{0})
 	currBlock := c.builder.GetInsertBlock()
 
 	f := c.NewValue(fnvalue, ftyp)
-	c.buildFunction(f, paramObjs, resultObjs, lit.Body)
+	c.buildFunction(f, v.captures, paramVars, resultVars, lit.Body)
 
 	// Closure? Bind values to a context block.
-	if v.objects != nil {
-		blockPtr := fnptr.FirstParam()
-		ftyp.Params = ftyp.Params[1:]
-		paramTypes := fnptr.Type().ElementType().ParamTypes()
-		c.builder.SetInsertPointBefore(fnptr.EntryBasicBlock().FirstInstruction())
-		for i, obj := range v.objects {
-			tempPtrVal := obj.Data.(*LLVMValue).pointer.value
-			argPtrVal := c.builder.CreateStructGEP(blockPtr, i, "")
-			tempPtrVal.ReplaceAllUsesWith(c.builder.CreateLoad(argPtrVal, ""))
-		}
-		c.builder.SetInsertPointAtEnd(currBlock)
-
+	if v.captures != nil {
 		// Store the free variables in the heap allocated block.
-		block := c.createTypeMalloc(paramTypes[0].ElementType())
-		for i, _ := range v.objects {
-			ptrVal := origValues[i].pointer.LLVMValue()
+		block := c.createTypeMalloc(fntyp.ParamTypes()[0].ElementType())
+		for i, contextvar := range v.captures {
+			value := c.objectdata[contextvar].Value
 			blockPtr := c.builder.CreateStructGEP(block, i, "")
-			c.builder.CreateStore(ptrVal, blockPtr)
+			c.builder.CreateStore(value.pointer.LLVMValue(), blockPtr)
 		}
 
 		// Cast the function pointer type back to the original
 		// type, without the context parameter.
-		llvmfntyp := c.types.ToLLVM(ftyp)
-		fnptr = llvm.ConstBitCast(fnptr, llvmfntyp.StructElementTypes()[0])
-		fnvalue = llvm.Undef(llvmfntyp)
+		fnptr = llvm.ConstBitCast(fnptr, origfnpairtyp.StructElementTypes()[0])
+		fnvalue = llvm.Undef(origfnpairtyp)
 		fnvalue = llvm.ConstInsertValue(fnvalue, fnptr, []uint32{0})
 
 		// Set the context value.

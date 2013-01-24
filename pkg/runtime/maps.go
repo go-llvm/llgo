@@ -95,11 +95,11 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	// Search for the entry with the specified key.
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
-	keyeqfun := *(*equalalg)(keyeqptr)
+	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
 	var last *mapentry
 	for ptr := m.head; ptr != nil; ptr = ptr.next {
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		if keyeqfun(keysize, key, keyptr) {
+		if eqalg(keyeqfun, keysize, key, keyptr) {
 			elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
 			return elemptr
 		}
@@ -138,11 +138,11 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	// Search for the entry with the specified key.
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
-	keyeqfun := *(*equalalg)(keyeqptr)
+	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
 	var last *mapentry
 	for ptr := m.head; ptr != nil; ptr = ptr.next {
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		if keyeqfun(keysize, key, keyptr) {
+		if eqalg(keyeqfun, keysize, key, keyptr) {
 			if last == nil {
 				m.head = ptr.next
 			} else {

@@ -122,9 +122,9 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	if stmt.Results == nil {
 		// Bare return. No need to update named results, so just
 		// prepare return values.
-		for i, obj := range f.results {
-			if obj != nil {
-				values[i] = obj.Data.(*LLVMValue).LLVMValue()
+		for i, resultvar := range f.results {
+			if resultvar.Name != "" {
+				values[i] = c.objectdata[resultvar].Value.LLVMValue()
 			} else {
 				// Should this be permitted by the spec?
 				// Seems pretty useless.
@@ -158,10 +158,10 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 		// Store values in named results.
 		if f.results != nil {
-			for i, obj := range f.results {
-				if obj != nil {
-					resultptr := obj.Data.(*LLVMValue).pointer.LLVMValue()
-					c.builder.CreateStore(values[i], resultptr)
+			for i, resultvar := range f.results {
+				if resultvar.Name != "" {
+					resultptr := c.objectdata[resultvar].Value.pointer
+					c.builder.CreateStore(values[i], resultptr.LLVMValue())
 				}
 			}
 		}
@@ -264,25 +264,25 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			if x.Name == "_" {
 				continue
 			}
-			obj := x.Obj
+			obj := c.objects[x]
 			if stmt.Tok == token.DEFINE {
-				typ := obj.Type.(types.Type)
+				typ := obj.GetType()
 				llvmtyp := c.types.ToLLVM(typ)
 				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
 				ptrtyp := &types.Pointer{Base: typ}
 				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
 				stackvar.stack = c.functions.top().LLVMValue
-				obj.Data = stackvar
+				c.objectdata[obj].Value = stackvar
 				lhsptrs[i] = ptr
 				continue
 			}
-			if obj.Data == nil {
+			if c.objectdata[obj].Value == nil {
 				// FIXME this is crap, going to need to revisit
 				// how decl's are visited (should be in data
 				// dependent order.)
 				functions := c.functions
 				c.functions = nil
-				c.VisitValueSpec(obj.Decl.(*ast.ValueSpec))
+				c.VisitValueSpec(x.Obj.Decl.(*ast.ValueSpec))
 				c.functions = functions
 			}
 		case *ast.IndexExpr:
@@ -502,8 +502,7 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	if stmt.Tag != nil {
 		tag = c.VisitExpr(stmt.Tag)
 	} else {
-		True := types.Universe.Lookup("true")
-		tag = c.Resolve(True)
+		tag = c.NewConstValue(true, types.Typ[types.Bool])
 	}
 	if len(stmt.Body.List) == 0 {
 		return
@@ -640,19 +639,21 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	var keyPtr, valuePtr llvm.Value
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
-			keyType = key.Obj.Type.(types.Type)
+			keyobj := c.objects[key]
+			keyType = keyobj.GetType()
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
 			stackvar := c.NewValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
 			stackvar.stack = c.functions.top().LLVMValue
-			key.Obj.Data = stackvar
+			c.objectdata[keyobj].Value = stackvar
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
-				valueType = value.Obj.Type.(types.Type)
+				valueobj := c.objects[value]
+				valueType = valueobj.GetType()
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
 				stackvar := c.NewValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
 				stackvar.stack = c.functions.top().LLVMValue
-				value.Obj.Data = stackvar
+				c.objectdata[valueobj].Value = stackvar
 			}
 		}
 	}
@@ -887,7 +888,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 				nextCondBlock = condBlocks[i+1]
 			}
 			caseCond := func(j int) Value {
-				if isNilIdent(caseClause.List[j]) {
+				if c.isNilIdent(caseClause.List[j]) {
 					iface := iface.LLVMValue()
 					ifacetyp := c.builder.CreateExtractValue(iface, 0, "")
 					isnil := c.builder.CreateIsNull(ifacetyp, "")
@@ -929,17 +930,18 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		}
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
-			if len(caseClause.List) == 1 && !isNilIdent(caseClause.List[0]) {
+			obj := c.objects[assignIdent]
+			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
 				switch typ := underlyingType(typ).(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
 					// clause condition test.
-					assignIdent.Obj.Data, _ = iface.convertI2I(typ)
+					c.objectdata[obj].Value, _ = iface.convertI2I(typ)
 				default:
-					assignIdent.Obj.Data = iface.loadI2V(typ)
+					c.objectdata[obj].Value = iface.loadI2V(typ)
 				}
 			} else {
-				assignIdent.Obj.Data = iface
+				c.objectdata[obj].Value = iface
 			}
 		}
 		for _, stmt := range caseClause.Body {

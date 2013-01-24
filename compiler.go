@@ -46,17 +46,9 @@ func (m Module) Dispose() {
 	}
 }
 
-type ArchInfo struct {
-	IntSize int64
-	PtrSize int64
-}
-
 // TODO get rid of this, change compiler to Compiler.
 type Compiler interface {
-	// ArchInfo returns the size of int/uint, and
-	// the size of pointers, both in number of bytes.
-	ArchInfo() ArchInfo
-	Compile(fset *token.FileSet, pkg *ast.Package, importpath string, exprtypes ExprTypeMap) (*Module, error)
+	Compile(fset *token.FileSet, files []*ast.File, importpath string) (*Module, error)
 	Dispose()
 }
 
@@ -72,10 +64,12 @@ type compiler struct {
 	continueblocks []llvm.BasicBlock
 	initfuncs      []llvm.Value
 	varinitfuncs   []llvm.Value
-	pkg            *ast.Package
-	importpath     string
+	pkg            *types.Package
 	fileset        *token.FileSet
-	pkgmap         map[*ast.Object]string
+
+	objects    map[*ast.Ident]types.Object
+	objectdata map[types.Object]*ObjectData
+	methodsets map[*types.NamedType]*methodset
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -94,98 +88,63 @@ type compiler struct {
 	pnacl bool
 }
 
-func (c *compiler) ArchInfo() ArchInfo {
-	var ptrsize, intsize int64
+func (c *compiler) archinfo() (intsize, ptrsize int64) {
 	ptrsize = int64(c.target.PointerSize())
 	if ptrsize >= 8 {
 		intsize = 8
 	} else {
 		intsize = 4
 	}
-	return ArchInfo{IntSize: intsize, PtrSize: ptrsize}
+	return
 }
 
-func (c *compiler) Resolve(obj *ast.Object) Value {
-	if obj.Kind == ast.Pkg {
-		return nil
-	} else if obj.Kind == ast.Typ {
-		return TypeValue{obj.Type.(types.Type)}
+func (c *compiler) Resolve(ident *ast.Ident) Value {
+	obj := c.objects[ident]
+	data := c.objectdata[obj]
+	if data.Value != nil {
+		return data.Value
 	}
 
-	value, isvalue := (obj.Data).(Value)
-	if isvalue {
-		return value
-	}
+	var value *LLVMValue
+	switch obj := obj.(type) {
+	case *types.Func:
+		value = c.makeFunc(ident, obj.Type.(*types.Signature))
 
-	switch obj.Kind {
-	case ast.Con:
-		return c.NewConstValue(obj.Data, obj.Type.(types.Type))
-
-	case ast.Fun:
-		var funcdecl *ast.FuncDecl
-		if decl, ok := obj.Decl.(*ast.FuncDecl); ok {
-			funcdecl = decl
-		} else {
-			funcdecl = &ast.FuncDecl{
-				Name: &ast.Ident{Name: obj.Name, Obj: obj},
-			}
-		}
-		value = c.VisitFuncProtoDecl(funcdecl)
-		obj.Data = value
-
-	case ast.Var:
-		switch x := (obj.Decl).(type) {
+	case *types.Var:
+		ident := data.Ident
+		switch decl := ident.Obj.Decl.(type) {
 		case *ast.ValueSpec:
-			c.VisitValueSpec(x)
+			c.VisitValueSpec(decl)
 		case *ast.Field:
 			// No-op. Fields will be yielded for function
 			// arg/recv/ret. We update the .Data field of the
 			// object when we enter the function definition.
-			if obj.Data == nil {
-				panic("expected obj.Data value")
+			if data.Value == nil {
+				panic("expected object value")
 			}
 		}
 
 		// If it's an external variable, we'll need to create a global
 		// value reference here. It may be possible for multiple objects
 		// to refer to the same variable.
-		if obj.Data == nil {
+		value = data.Value
+		if value == nil {
 			module := c.module.Module
-			t := obj.Type.(types.Type)
-			name := c.pkgmap[obj] + "." + obj.Name
+			t := obj.GetType()
+			name := data.Package.Path + "." + obj.GetName()
 			g := module.NamedGlobal(name)
 			if g.IsNil() {
 				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
 			}
-			obj.Data = c.NewValue(g, &types.Pointer{Base: t}).makePointee()
+			value = c.NewValue(g, &types.Pointer{Base: t}).makePointee()
 		}
 
-		value = (obj.Data).(Value)
+	default:
+		panic(fmt.Sprintf("unreachable (%T)", obj))
 	}
 
+	data.Value = value
 	return value
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-// createPackageMap maps package-level objects to the import path of the
-// package they're defined in.
-func createPackageMap(pkg *ast.Package, pkgid string) map[*ast.Object]string {
-	// FIXME only store named type objects and functions.
-	pkgmap := make(map[*ast.Object]string)
-	for _, file := range pkg.Files {
-		for _, obj := range file.Scope.Objects {
-			pkgmap[obj] = pkgid
-		}
-	}
-	for pkgid, pkgobj := range pkg.Imports {
-		scope := pkgobj.Data.(*ast.Scope)
-		for _, obj := range scope.Objects {
-			// Use the package ID as the symbol name prefix.
-			pkgmap[obj] = pkgid
-		}
-	}
-	return pkgmap
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -280,27 +239,27 @@ func (compiler *compiler) Dispose() {
 	}
 }
 
-func (compiler *compiler) Compile(fset *token.FileSet,
-	pkg *ast.Package, importpath string,
-	exprTypes ExprTypeMap) (m *Module, err error) {
-
-	// FIXME I'd prefer if we didn't modify global state. Perhaps
-	// we should always take a copy of types.Universe?
-	defer func() {
-		types.Universe.Lookup("true").Data = true
-		types.Universe.Lookup("false").Data = false
-	}()
-
+func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, importpath string) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.fileset = fset
-	compiler.pkg = pkg
-	compiler.importpath = importpath
 	compiler.initfuncs = nil
 	compiler.varinitfuncs = nil
 
-	// Create a Builder, for building LLVM instructions.
-	compiler.builder = llvm.GlobalContext().NewBuilder()
-	defer compiler.builder.Dispose()
+	// Type-check, and store object data.
+	compiler.objects = make(map[*ast.Ident]types.Object)
+	compiler.objectdata = make(map[types.Object]*ObjectData)
+	compiler.methodsets = make(map[*types.NamedType]*methodset)
+	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
+	pkg, exprtypes, err := compiler.typecheck(fset, files)
+	if err != nil {
+		return nil, err
+	}
+	compiler.pkg = pkg
+	if importpath == "" {
+		pkg.Path = pkg.Name
+	} else {
+		pkg.Path = importpath
+	}
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
@@ -317,21 +276,18 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		}
 	}()
 
-	// Create a mapping from objects back to packages, so we can create the
-	// appropriate symbol names.
-	compiler.pkgmap = createPackageMap(pkg, importpath)
-	compiler.llvmtypes = NewLLVMTypeMap(compiler.target, NewTypeStringer(compiler.pkgmap))
-
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
 	var resolver Resolver = compiler
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, importpath, exprTypes, compiler.FunctionCache, resolver)
+	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, pkg.Path, exprtypes, compiler.FunctionCache, resolver)
+
+	// Create a Builder, for building LLVM instructions.
+	compiler.builder = llvm.GlobalContext().NewBuilder()
+	defer compiler.builder.Dispose()
 
 	// Compile each file in the package.
-	for _, file := range pkg.Files {
-		file.Scope.Outer = pkg.Scope
-		compiler.fixConstDecls(file)
+	for _, file := range files {
 		for _, decl := range file.Decls {
 			compiler.VisitDecl(decl)
 		}
@@ -381,7 +337,7 @@ func (compiler *compiler) Compile(fset *token.FileSet,
 		var index int = 0
 		for _, initfuncs := range initfuncs {
 			for _, fnptr := range initfuncs {
-				fnptr.SetName("__llgo.ctor." + compiler.importpath + strconv.Itoa(index))
+				fnptr.SetName("__llgo.ctor." + pkg.Path + strconv.Itoa(index))
 				fnptr = llvm.ConstBitCast(fnptr, ctortype)
 				ctors = append(ctors, fnptr)
 				index++

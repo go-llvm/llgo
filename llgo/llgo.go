@@ -37,17 +37,12 @@ import (
 	"go/parser"
 	"go/scanner"
 	"go/token"
-	"go/types"
 	"log"
 	"os"
 	"runtime"
 	"sort"
 	"strings"
 )
-
-var dumpast = flag.Bool(
-	"dumpast", false,
-	"Dump the AST to stderr and exit")
 
 var dump = flag.Bool(
 	"dump", false,
@@ -96,15 +91,16 @@ func parseFile(fset *token.FileSet, filename string) *ast.File {
 	return file
 }
 
-func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File) {
-	files = make(map[string]*ast.File)
-	for _, filename := range filenames {
-		if file := parseFile(fset, filename); file != nil {
-			if files[filename] != nil {
-				report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
-				continue
+func parseFiles(fset *token.FileSet, filenames []string) (files []*ast.File) {
+	sort.Strings(filenames)
+	for i, filename := range filenames {
+		if i > 0 && filenames[i-1] == filename {
+			report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
+		} else {
+			file := parseFile(fset, filename)
+			if file != nil {
+				files = append(files, file)
 			}
-			files[filename] = file
 		}
 	}
 	return
@@ -131,36 +127,8 @@ func compileFiles(compiler llgo.Compiler, filenames []string, importpath string)
 		return nil, errors.New("No Go source files were specified")
 	}
 	fset := token.NewFileSet()
-	return compilePackage(compiler, fset, parseFiles(fset, filenames[0:i]), importpath)
-}
-
-func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
-	exprTypes := make(llgo.ExprTypeMap)
-	archinfo := compiler.ArchInfo()
-	ctx := &types.Context{
-		IntSize: archinfo.IntSize,
-		PtrSize: archinfo.PtrSize,
-		Expr: func(x ast.Expr, typ types.Type, val interface{}) {
-			exprTypes[x] = llgo.ExprTypeInfo{Type: typ, Value: val}
-		},
-	}
-
-	pkg, err := ctx.Check(fset, files)
-	if err != nil {
-		report(err)
-		return nil, err
-	}
-
-	if *dumpast {
-		ast.Fprint(os.Stderr, fset, pkg, nil)
-		os.Exit(0)
-	}
-
-	// an empty importpath means the same as the package name
-	if importpath == "" {
-		importpath = pkg.Name
-	}
-	return compiler.Compile(fset, pkg, importpath, exprTypes)
+	files := parseFiles(fset, filenames[0:i])
+	return compiler.Compile(fset, files, importpath)
 }
 
 func writeObjectFile(m *llgo.Module) error {

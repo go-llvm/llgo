@@ -6,11 +6,12 @@ package llgo
 
 import (
 	"go/ast"
+	"go/types"
 )
 
 type function struct {
 	*LLVMValue
-	params, results []*ast.Object
+	results []*types.Var
 }
 
 type functionStack []*function
@@ -29,19 +30,43 @@ func (s *functionStack) top() *function {
 	return (*s)[len(*s)-1]
 }
 
-func fieldListObjects(list *ast.FieldList) (objects []*ast.Object) {
-	if list != nil {
-		for _, field := range list.List {
-			for _, ident := range field.Names {
-				var obj *ast.Object
-				if ident != nil {
-					if ident.Name != "" && ident.Name != "_" {
-						obj = ident.Obj
-					}
-				}
-				objects = append(objects, obj)
-			}
+type methodset []*types.Func
+
+func (m *methodset) Lookup(name string) *types.Func {
+	for _, f := range *m {
+		if f.Name == name {
+			return f
 		}
 	}
-	return
+	return nil
+}
+
+func (m *methodset) Insert(f *types.Func) {
+	*m = append(*m, f)
+}
+
+func (c *compiler) methods(n *types.NamedType) *methodset {
+	if m, ok := c.methodsets[n]; ok {
+		return m
+	}
+
+	// We're not privy to *Func objects for methods in
+	// imported packages, so we synthesise them.
+	pkg := c.objectdata[n.Obj].Package
+	methods := new(methodset)
+	c.methodsets[n] = methods
+	for _, m := range n.Methods {
+		f := &types.Func {
+			Name: m.Name,
+			Type: m.Type,
+		}
+		ident := ast.NewIdent(f.Name)
+		c.objects[ident] = f
+		c.objectdata[f] = &ObjectData{
+			Ident:   ident,
+			Package: pkg,
+		}
+		methods.Insert(f)
+	}
+	return methods
 }

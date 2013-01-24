@@ -10,7 +10,6 @@ import (
 	"go/ast"
 	"go/types"
 	"reflect"
-	"sort"
 )
 
 type ExprTypeInfo struct {
@@ -23,7 +22,7 @@ type ExprTypeInfo struct {
 type ExprTypeMap map[ast.Expr]ExprTypeInfo
 
 type LLVMTypeMap struct {
-	*TypeStringer
+	TypeStringer
 	target  llvm.TargetData
 	inttype llvm.Type
 	types   map[string]llvm.Type // compile-time LLVM type
@@ -62,7 +61,7 @@ type TypeMap struct {
 	copyAlgFunctionType llvm.Type
 }
 
-func NewLLVMTypeMap(target llvm.TargetData, ts *TypeStringer) *LLVMTypeMap {
+func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 	// spec says int is either 32-bit or 64-bit.
 	var inttype llvm.Type
 	if target.PointerSize() >= 8 {
@@ -71,7 +70,7 @@ func NewLLVMTypeMap(target llvm.TargetData, ts *TypeStringer) *LLVMTypeMap {
 		inttype = llvm.Int32Type()
 	}
 	return &LLVMTypeMap{
-		TypeStringer: ts,
+		TypeStringer: TypeStringer{make(map[*types.TypeName]*types.Package)},
 		target:       target,
 		types:        make(map[string]llvm.Type),
 		inttype:      inttype,
@@ -100,7 +99,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 		if obj == nil {
 			panic(fmt.Errorf("Failed to find type: %s", name))
 		}
-		return tm.ToLLVM(obj.Type.(types.Type))
+		return tm.ToLLVM(obj.GetType())
 	}
 	tm.runtimeType = reflectLLVMType("rtype")
 	tm.runtimeUncommonType = reflectLLVMType("uncommonType")
@@ -154,11 +153,10 @@ func (tm *TypeMap) toRuntime(t types.Type) (global, value llvm.Value) {
 	tstr := tm.TypeString(t)
 	info, ok := tm.types[tstr]
 	if !ok {
-		info.global, info.dyntyp = tm.makeRuntimeType(t)
+		info.global, info.dyntyp = tm.makeRuntimeType(tstr, t)
 		if info.dyntyp.IsNil() {
 			panic(fmt.Sprint("Failed to create runtime type for: ", tstr))
 		}
-		tm.types[tstr] = info
 	}
 	return info.global, info.dyntyp
 }
@@ -263,7 +261,7 @@ func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 		tm.types[tstr] = typ
 		elements := make([]llvm.Type, len(s.Fields))
 		for i, f := range s.Fields {
-			ft := f.Type.(types.Type)
+			ft := f.Type
 			elements[i] = tm.ToLLVM(ft)
 		}
 		typ.StructSetBody(elements, false)
@@ -294,12 +292,8 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		typ = llvm.GlobalContext().StructCreateNamed("")
 		tm.types[tstr] = typ
 
-		for i, param := range f.Params {
-			param_type := param.Type.(types.Type)
-			if f.IsVariadic && i == len(f.Params)-1 {
-				param_type = &types.Slice{Elt: param_type}
-			}
-			param_types = append(param_types, tm.ToLLVM(param_type))
+		for _, param := range f.Params {
+			param_types = append(param_types, tm.ToLLVM(param.Type))
 		}
 
 		var return_type llvm.Type
@@ -307,11 +301,11 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		case 0:
 			return_type = llvm.VoidType()
 		case 1:
-			return_type = tm.ToLLVM(f.Results[0].Type.(types.Type))
+			return_type = tm.ToLLVM(f.Results[0].Type)
 		default:
 			elements := make([]llvm.Type, len(f.Results))
 			for i, result := range f.Results {
-				elements[i] = tm.ToLLVM(result.Type.(types.Type))
+				elements[i] = tm.ToLLVM(result.Type)
 			}
 			return_type = llvm.StructType(elements, false)
 		}
@@ -369,30 +363,34 @@ func (tm *LLVMTypeMap) Sizeof(t types.Type) uint64 {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
+func (tm *TypeMap) makeRuntimeType(tstr string, t types.Type) (global, ptr llvm.Value) {
+	var info runtimeTypeInfo
 	switch t := t.(type) {
 	case *types.Basic:
-		return tm.basicRuntimeType(t)
+		info.global, info.dyntyp = tm.basicRuntimeType(t)
 	case *types.Array:
-		return tm.arrayRuntimeType(t)
+		info.global, info.dyntyp = tm.arrayRuntimeType(t)
 	case *types.Slice:
-		return tm.sliceRuntimeType(t)
+		info.global, info.dyntyp = tm.sliceRuntimeType(t)
 	case *types.Struct:
-		return tm.structRuntimeType(t)
+		return tm.structRuntimeType(tstr, t)
 	case *types.Pointer:
-		return tm.pointerRuntimeType(t)
+		info.global, info.dyntyp = tm.pointerRuntimeType(t)
 	case *types.Signature:
-		return tm.funcRuntimeType(t)
+		info.global, info.dyntyp = tm.funcRuntimeType(t)
 	case *types.Interface:
-		return tm.interfaceRuntimeType(t)
+		info.global, info.dyntyp = tm.interfaceRuntimeType(t)
 	case *types.Map:
-		return tm.mapRuntimeType(t)
+		info.global, info.dyntyp = tm.mapRuntimeType(t)
 	case *types.Chan:
-		return tm.chanRuntimeType(t)
+		info.global, info.dyntyp = tm.chanRuntimeType(t)
 	case *types.NamedType:
-		return tm.nameRuntimeType(t)
+		info.global, info.dyntyp = tm.nameRuntimeType(t)
+	default:
+		panic("unreachable")
 	}
-	panic("unreachable")
+	tm.types[tstr] = info
+	return info.global, info.dyntyp
 }
 
 func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
@@ -503,12 +501,13 @@ func (tm *TypeMap) sliceRuntimeType(s *types.Slice) (global, ptr llvm.Value) {
 	return tm.makeRuntimeTypeGlobal(sliceType)
 }
 
-func (tm *TypeMap) structRuntimeType(s *types.Struct) (global, ptr llvm.Value) {
+func (tm *TypeMap) structRuntimeType(tstr string, s *types.Struct) (global, ptr llvm.Value) {
 	rtype := tm.makeRtype(s, reflect.Struct)
 	structType := llvm.ConstNull(tm.runtimeStructType)
 	structType = llvm.ConstInsertValue(structType, rtype, []uint32{0})
-	// TODO set fields
-	return tm.makeRuntimeTypeGlobal(structType)
+	global, ptr = tm.makeRuntimeTypeGlobal(structType)
+	// TODO set fields, reset initialiser
+	return
 }
 
 func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value) {
@@ -517,7 +516,10 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	var globalname string
 	if n, ok := p.Base.(*types.NamedType); ok {
 		// FIXME horrible circular relationship
-		pkgpath := tm.functions.pkgmap[n.Obj]
+		var pkgpath string
+		if data, ok := tm.functions.objectdata[n.Obj]; ok {
+			pkgpath = data.Package.Path
+		}
 		if pkgpath == "" {
 			pkgpath = "runtime"
 		}
@@ -649,93 +651,88 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 
 	// FIXME clean this up
 	var pkgpathPtr llvm.Value
-	pkgpath := tm.functions.pkgmap[n.Obj]
+	var pkgpath string
+	if data, ok := tm.functions.objectdata[n.Obj]; ok {
+		pkgpath = data.Package.Path
+	}
 	if pkgpath != "" {
 		pkgpathPtr = tm.globalStringPtr(pkgpath)
 		uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 	}
 
 	// Store methods.
-	// TODO Speed up by sorting objects, rather than names.
-	var methods []llvm.Value
-	if namedTypeScope, ok := n.Obj.Data.(*ast.Scope); ok {
-		methodNames := make([]string, 0, len(namedTypeScope.Objects))
-		for name := range namedTypeScope.Objects {
-			methodNames = append(methodNames, name)
+	methods := make([]llvm.Value, 0, len(n.Methods))
+	for _, m := range n.Methods {
+		//m := namedTypeScope.Lookup(methodName)
+		ftyp := m.Type
+		ptrrecv := !isIdentical(ftyp.Recv.Type, n)
+		if !ptr && ptrrecv {
+			// For a type T, we only store methods where the
+			// receiver is T and not *T. For *T we store both.
+			continue
 		}
-		sort.Strings(methodNames)
-		methods = make([]llvm.Value, 0, len(namedTypeScope.Objects))
-		for _, methodName := range methodNames {
-			m := namedTypeScope.Lookup(methodName)
-			ftyp := m.Type.(*types.Signature)
-			ptrrecv := !isIdentical(ftyp.Recv.Type.(types.Type), n)
-			if !ptr && ptrrecv {
-				// For a type T, we only store methods where the
-				// receiver is T and not *T. For *T we store both.
-				continue
-			}
 
-			method := llvm.ConstNull(tm.runtimeMethod)
-			name := tm.globalStringPtr(m.Name)
-			name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
-			// name
-			method = llvm.ConstInsertValue(method, name, []uint32{0})
-			// pkgPath
-			method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
-			// mtyp (method type, no receiver)
-			{
-				recv := ftyp.Recv
-				ftyp.Recv = nil
-				mtyp := tm.ToRuntime(ftyp)
-				method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
-				ftyp.Recv = recv
-			}
-			// typ (function type, with receiver)
-			typ := tm.ToRuntime(ftyp)
-			method = llvm.ConstInsertValue(method, typ, []uint32{3})
-
-			// tfn (standard method/function pointer for plain method calls)
-			tfn := tm.resolver.Resolve(m).LLVMValue()
-			tfn = llvm.ConstExtractValue(tfn, []uint32{0})
-			tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
-
-			// ifn (single-word receiver function pointer for interface calls)
-			ifn := tfn
-			needload := ptr && !ptrrecv
-			if !needload {
-				recvtyp := tm.ToLLVM(ftyp.Recv.Type.(types.Type))
-				needload = int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize()
-			}
-			if needload {
-				// If the receiver type is wider than a word, we
-				// need to use an intermediate function which takes
-				// a pointer-receiver, loads it, and then calls the
-				// standard receiver function.
-
-				// TODO consolidate this with the one in
-				// VisitFuncProtoDecl. Or change the way
-				// this is done altogether...
-				fname := m.Name
-				recvtyp := ftyp.Recv.Type.(types.Type)
-				var recvname string
-				switch recvtyp := recvtyp.(type) {
-				case *types.Pointer:
-					named := recvtyp.Base.(*types.NamedType)
-					recvname = "*" + named.Obj.Name
-				case *types.NamedType:
-					recvname = recvtyp.Obj.Name
-				}
-				fname = fmt.Sprintf("%s.%s", recvname, fname)
-				fname = "*" + pkgpath + "." + fname
-
-				ifn = tm.module.NamedFunction(fname)
-				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
-			}
-
-			method = llvm.ConstInsertValue(method, ifn, []uint32{4})
-			method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-			methods = append(methods, method)
+		method := llvm.ConstNull(tm.runtimeMethod)
+		name := tm.globalStringPtr(m.Name)
+		name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
+		// name
+		method = llvm.ConstInsertValue(method, name, []uint32{0})
+		// pkgPath
+		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
+		// mtyp (method type, no receiver)
+		{
+			recv := ftyp.Recv
+			ftyp.Recv = nil
+			mtyp := tm.ToRuntime(ftyp)
+			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
+			ftyp.Recv = recv
 		}
+		// typ (function type, with receiver)
+		typ := tm.ToRuntime(ftyp)
+		method = llvm.ConstInsertValue(method, typ, []uint32{3})
+
+		// tfn (standard method/function pointer for plain method calls)
+		mfunc := tm.functions.methods(n).Lookup(m.Name)
+		tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+		tfn = llvm.ConstExtractValue(tfn, []uint32{0})
+		tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+
+		// ifn (single-word receiver function pointer for interface calls)
+		ifn := tfn
+		needload := ptr && !ptrrecv
+		if !needload {
+			recvtyp := tm.ToLLVM(ftyp.Recv.Type)
+			needload = int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize()
+		}
+		if needload {
+			// If the receiver type is wider than a word, we
+			// need to use an intermediate function which takes
+			// a pointer-receiver, loads it, and then calls the
+			// standard receiver function.
+
+			// TODO consolidate this with the one in
+			// VisitFuncProtoDecl. Or change the way
+			// this is done altogether...
+			fname := m.Name
+			recvtyp := ftyp.Recv.Type
+			var recvname string
+			switch recvtyp := recvtyp.(type) {
+			case *types.Pointer:
+				named := recvtyp.Base.(*types.NamedType)
+				recvname = "*" + named.Obj.Name
+			case *types.NamedType:
+				recvname = recvtyp.Obj.Name
+			}
+			fname = fmt.Sprintf("%s.%s", recvname, fname)
+			fname = "*" + pkgpath + "." + fname
+
+			ifn = tm.module.NamedFunction(fname)
+			ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+		}
+
+		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
+		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
+		methods = append(methods, method)
 	}
 
 	var methodsGlobalPtr llvm.Value
@@ -759,7 +756,10 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 }
 
 func (tm *TypeMap) nameRuntimeType(n *types.NamedType) (global, ptr llvm.Value) {
-	pkgpath := tm.functions.pkgmap[n.Obj]
+	var pkgpath string
+	if data, ok := tm.functions.objectdata[n.Obj]; ok {
+		pkgpath = data.Package.Path
+	}
 	if pkgpath == "" {
 		// Set to "runtime", so the builtin types have a home.
 		pkgpath = "runtime"
@@ -779,7 +779,7 @@ func (tm *TypeMap) nameRuntimeType(n *types.NamedType) (global, ptr llvm.Value) 
 		underlying = name.Underlying
 	}
 
-	global, ptr = tm.makeRuntimeType(underlying)
+	global, ptr = tm.toRuntime(underlying)
 
 	// Locate the rtype.
 	underlyingRuntimeType := global.Initializer()

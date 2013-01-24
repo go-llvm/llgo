@@ -32,9 +32,9 @@ import (
 	"sort"
 )
 
-func isNilIdent(x ast.Expr) bool {
+func (c *compiler) isNilIdent(x ast.Expr) bool {
 	ident, ok := x.(*ast.Ident)
-	return ok && ident.Obj == types.Universe.Lookup("nil")
+	return ok && c.objects[ident] == types.Universe.Lookup("nil")
 }
 
 // Binary logical operators are handled specially, outside of the Value
@@ -100,7 +100,7 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Is it a type conversion?
-	if len(expr.Args) == 1 && isType(expr.Fun) {
+	if len(expr.Args) == 1 && c.isType(expr.Fun) {
 		typ := c.types.expr[expr].Type
 		value := c.VisitExpr(expr.Args[0])
 		return value.Convert(typ)
@@ -115,7 +115,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	case *types.NamedType, *types.Signature:
 	default:
 		ident := expr.Fun.(*ast.Ident)
-		switch ident.Obj.Name {
+		switch c.objects[ident].GetName() {
 		case "copy":
 			return c.VisitCopy(expr)
 		case "print":
@@ -185,6 +185,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 				args = append(args, slice_value)
 			} else {
 				param_type := fn_type.Params[nparams].Type
+				param_type = param_type.(*types.Slice).Elt
 				varargs := make([]llvm.Value, 0)
 				for i := nparams; i < len(expr.Args); i++ {
 					value := c.VisitExpr(expr.Args[i])
@@ -334,13 +335,15 @@ type selectorCandidate struct {
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	name := expr.Sel.Name
 	if ident, ok := expr.X.(*ast.Ident); ok {
-		if ident.Obj != nil && ident.Obj.Kind == ast.Pkg {
-			scope := ident.Obj.Data.(*ast.Scope)
-			obj := scope.Lookup(name)
-			if obj.Kind == ast.Typ {
-				return TypeValue{obj.Type.(types.Type)}
+		obj := c.objects[ident]
+		if pkg, ok := obj.(*types.Package); ok {
+			obj := pkg.Scope.Lookup(expr.Sel.Name)
+			if typ, ok := obj.(*types.TypeName); ok {
+				_ = typ
+				//return TypeValue{obj.Type.(types.Type)}
+				panic("unhandled TypeName")
 			}
-			return c.Resolve(obj)
+			return c.Resolve(c.objectdata[obj].Ident)
 		}
 	}
 
@@ -350,20 +353,27 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// FIXME this is just the most basic case. It's also possible to
 	// create a pointer-receiver function from a method that has a
 	// value receiver (see Method Expressions in spec).
-	if _, ok := lhs.(TypeValue); ok {
-		ftyp := c.types.expr[expr].Type.(*types.Signature)
-		recvtyp := ftyp.Params[0].Type
-		var nameobj *ast.Object
-		if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
-			name := ptrtyp.Base.(*types.NamedType)
-			nameobj = name.Obj
-		} else {
-			nameobj = recvtyp.(*types.NamedType).Obj
+	/*
+		fmt.Println(expr.X, expr.Sel)
+		if ftyp, ok := c.types.expr[expr].Type.(*types.Signature); ok {
+			recvtyp := ftyp.Params[0].Type
+			var nameident *ast.Ident
+			if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
+				name := ptrtyp.Base.(*types.NamedType)
+				nameident = c.objectdata[name.Obj].Ident
+			} else {
+				name := recvtyp.(*types.NamedType)
+				nameident = c.objectdata[name.Obj].Ident
+			}
+			fmt.Println("Sel:", expr.Sel)
+			fmt.Println("nameident:", nameident)
+			panic("!")
+			// FIXME
+			//methodobj := nameobj.Data.(*ast.Scope).Lookup(expr.Sel.Name)
+			//value := c.Resolve(methodobj).(*LLVMValue)
+			//return c.NewValue(value.value, c.types.expr[expr].Type)
 		}
-		methodobj := nameobj.Data.(*ast.Scope).Lookup(expr.Sel.Name)
-		value := c.Resolve(methodobj).(*LLVMValue)
-		return c.NewValue(value.value, c.types.expr[expr].Type)
-	}
+	*/
 
 	// Interface: search for method by name.
 	if iface, ok := underlyingType(lhs.Type()).(*types.Interface); ok {
@@ -384,7 +394,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 	// Otherwise, search for field/method,
 	// recursing through embedded types.
-	var method *ast.Object
+	var recv *types.NamedType
 	var result selectorCandidate
 	curr := []selectorCandidate{{nil, lhs.Type()}}
 	for result.Type == nil && len(curr) > 0 {
@@ -394,9 +404,9 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			t := derefType(candidate.Type)
 
 			if n, ok := t.(*types.NamedType); ok {
-				if scope, ok := n.Obj.Data.(*ast.Scope); ok {
-					method = scope.Lookup(name)
-					if method != nil {
+				for _, m := range n.Methods {
+					if m.Name == name {
+						recv = n
 						result.Indices = indices
 						result.Type = t
 						break
@@ -460,8 +470,9 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method?
-	if method != nil {
-		method := c.Resolve(method).(*LLVMValue)
+	if recv != nil {
+		obj := c.methods(recv).Lookup(expr.Sel.Name)
+		method := c.Resolve(c.objectdata[obj].Ident).(*LLVMValue)
 		methodType := method.Type().(*types.Signature)
 		receiverType := methodType.Recv.Type.(types.Type)
 		var receiver Value
@@ -497,8 +508,6 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 	switch operand := c.VisitExpr(expr.X).(type) {
-	case TypeValue:
-		return TypeValue{&types.Pointer{Base: operand.Type()}}
 	case *LLVMValue:
 		// We don't want to immediately load the value, as we might be doing an
 		// assignment rather than an evaluation. Instead, we return the pointer
@@ -546,7 +555,7 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	case *ast.SliceExpr:
 		return c.VisitSliceExpr(x)
 	case *ast.Ident:
-		return c.Resolve(x.Obj)
+		return c.Resolve(x)
 	}
 	panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))
 }

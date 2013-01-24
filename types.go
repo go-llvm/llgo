@@ -16,27 +16,30 @@ import (
 // type conversion.
 
 // isType checks if an expression is a type.
-func isType(x ast.Expr) bool {
+func (c *compiler) isType(x ast.Expr) bool {
 	switch t := x.(type) {
 	case *ast.Ident:
-		return t.Obj != nil && t.Obj.Kind == ast.Typ
+		if obj, ok := c.objects[t]; ok {
+			_, ok = obj.(*types.TypeName)
+			return ok
+		}
 	case *ast.ParenExpr:
-		return isType(t.X)
+		return c.isType(t.X)
 	case *ast.SelectorExpr:
 		// qualified identifier
 		if ident, ok := t.X.(*ast.Ident); ok {
-			if obj := ident.Obj; obj != nil {
-				if obj.Kind != ast.Pkg {
-					return false
+			if obj, ok := c.objects[ident]; ok {
+				if pkg, ok := obj.(*types.Package); ok {
+					obj := pkg.Scope.Lookup(t.Sel.Name)
+					_, ok = obj.(*types.TypeName)
+					return ok
 				}
-				pkgscope := obj.Data.(*ast.Scope)
-				obj := pkgscope.Lookup(t.Sel.Name)
-				return obj != nil && obj.Kind == ast.Typ
+				return false
 			}
 		}
 		return false
 	case *ast.StarExpr:
-		return isType(t.X)
+		return c.isType(t.X)
 	case *ast.ArrayType,
 		*ast.StructType,
 		*ast.FuncType,
@@ -64,13 +67,14 @@ func derefType(typ types.Type) types.Type {
 
 func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 	frominfo := c.types.expr[from]
-	if isUntyped(frominfo.Type) {
+	if frominfo.Type != nil && isUntyped(frominfo.Type) {
 		switch to := to.(type) {
 		case types.Type:
 			frominfo.Type = to
 			c.types.expr[from] = frominfo
 		case *ast.Ident:
-			frominfo.Type = to.Obj.Type.(types.Type)
+			obj := c.objects[to]
+			frominfo.Type = obj.GetType()
 			c.types.expr[from] = frominfo
 		case ast.Expr:
 			toinfo := c.types.expr[to]
@@ -112,7 +116,7 @@ func (c *compiler) exportBuiltinRuntimeTypes() {
 
 	// error
 	errorObj := types.Universe.Lookup("error")
-	c.types.ToRuntime(errorObj.Type.(types.Type))
+	c.types.ToRuntime(errorObj.GetType())
 }
 
 func fieldIndex(s *types.Struct, name string) int {
@@ -125,13 +129,7 @@ func fieldIndex(s *types.Struct, name string) int {
 }
 
 type TypeStringer struct {
-	// pkgmap maps AST objects to the package they
-	// were declared within.
-	pkgmap map[*ast.Object]string
-}
-
-func NewTypeStringer(pkgmap map[*ast.Object]string) *TypeStringer {
-	return &TypeStringer{pkgmap: pkgmap}
+	pkgmap map[*types.TypeName]*types.Package
 }
 
 // typeString returns a string representation for typ.
@@ -256,11 +254,11 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 		ts.writeType(buf, t.Elt)
 
 	case *types.NamedType:
-		if pkgname, ok := ts.pkgmap[t.Obj]; ok {
-			buf.WriteString(pkgname)
+		if pkg := ts.pkgmap[t.Obj]; pkg != nil && pkg.Path != "" {
+			buf.WriteString(pkg.Path)
 			buf.WriteByte('.')
 		}
-		buf.WriteString(t.Obj.Name)
+		buf.WriteString(t.Obj.GetName())
 
 	default:
 		fmt.Fprintf(buf, "<type %T>", t)

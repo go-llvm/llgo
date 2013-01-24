@@ -5,7 +5,6 @@
 package llgo
 
 import (
-	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/build"
@@ -36,7 +35,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		if obj == nil {
 			panic("Missing function: " + name)
 		}
-		value := c.Resolve(obj)
+		value := c.Resolve(c.objectdata[obj].Ident)
 		f = llvm.ConstExtractValue(value.LLVMValue(), []uint32{0})
 	} else {
 		fset := token.NewFileSet()
@@ -61,23 +60,15 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		if err != nil {
 			panic(err)
 		}
-		files["<src>"] = file
-
-		archinfo := c.ArchInfo()
-		ctx := &types.Context{
-			IntSize: archinfo.IntSize,
-			PtrSize: archinfo.PtrSize,
-		}
-		pkg, err := ctx.Check(fset, files)
+		files = append(files, file)
+		pkg, _, err := c.typecheck(fset, files)
 		if err != nil {
 			panic(err)
 		}
-		for obj, pkg := range createPackageMap(pkg, "runtime") {
-			c.pkgmap[obj] = pkg
-		}
+		pkg.Path = "runtime"
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
-		ftype := fdecl.Name.Obj.Type.(*types.Signature)
+		ftype := c.objects[fdecl.Name].GetType().(*types.Signature)
 		llvmfntyp := c.types.ToLLVM(ftype).StructElementTypes()[0].ElementType()
 		f = llvm.AddFunction(c.module.Module, name, llvmfntyp)
 	}
@@ -89,19 +80,14 @@ func parseFile(fset *token.FileSet, name string) (*ast.File, error) {
 	return parser.ParseFile(fset, name, nil, parser.DeclarationErrors)
 }
 
-func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File, err error) {
-	files = make(map[string]*ast.File)
+func parseFiles(fset *token.FileSet, filenames []string) (files []*ast.File, err error) {
 	for _, filename := range filenames {
 		var file *ast.File
 		file, err = parseFile(fset, filename)
 		if err != nil {
 			return
 		} else if file != nil {
-			if files[filename] != nil {
-				err = fmt.Errorf("%q: duplicate file", filename)
-				return
-			}
-			files[filename] = file
+			files = append(files, file)
 		}
 	}
 	return
@@ -109,7 +95,7 @@ func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.
 
 // parseReflect parses the reflect package and type-checks its AST.
 // This is used to generate runtime type structures.
-func (c *compiler) parseReflect() (*ast.Package, error) {
+func (c *compiler) parseReflect() (*types.Package, error) {
 	buildpkg, err := build.Import("reflect", "", 0)
 	if err != nil {
 		return nil, err
@@ -125,18 +111,12 @@ func (c *compiler) parseReflect() (*ast.Package, error) {
 		return nil, err
 	}
 
-	archinfo := c.ArchInfo()
-	ctx := &types.Context{
-		IntSize: archinfo.IntSize,
-		PtrSize: archinfo.PtrSize,
-	}
-	pkg, err := ctx.Check(fset, files)
+	pkg, _, err := c.typecheck(fset, files)
 	if err != nil {
 		return nil, err
 	}
-	for obj, pkg := range createPackageMap(pkg, "reflect") {
-		c.pkgmap[obj] = pkg
-	}
+	pkg.Path = "reflect"
+
 	return pkg, nil
 }
 
