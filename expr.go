@@ -333,49 +333,27 @@ type selectorCandidate struct {
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
-	name := expr.Sel.Name
-	if ident, ok := expr.X.(*ast.Ident); ok {
-		obj := c.objects[ident]
-		if pkg, ok := obj.(*types.Package); ok {
-			obj := pkg.Scope.Lookup(expr.Sel.Name)
-			if typ, ok := obj.(*types.TypeName); ok {
-				_ = typ
-				//return TypeValue{obj.Type.(types.Type)}
-				panic("unhandled TypeName")
-			}
-			return c.Resolve(c.objectdata[obj].Ident)
-		}
-	}
-
-	lhs := c.VisitExpr(expr.X)
-
 	// Method expression. Returns an unbound function pointer.
 	// FIXME this is just the most basic case. It's also possible to
 	// create a pointer-receiver function from a method that has a
 	// value receiver (see Method Expressions in spec).
-	/*
-		fmt.Println(expr.X, expr.Sel)
-		if ftyp, ok := c.types.expr[expr].Type.(*types.Signature); ok {
-			recvtyp := ftyp.Params[0].Type
-			var nameident *ast.Ident
-			if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
-				name := ptrtyp.Base.(*types.NamedType)
-				nameident = c.objectdata[name.Obj].Ident
-			} else {
-				name := recvtyp.(*types.NamedType)
-				nameident = c.objectdata[name.Obj].Ident
-			}
-			fmt.Println("Sel:", expr.Sel)
-			fmt.Println("nameident:", nameident)
-			panic("!")
-			// FIXME
-			//methodobj := nameobj.Data.(*ast.Scope).Lookup(expr.Sel.Name)
-			//value := c.Resolve(methodobj).(*LLVMValue)
-			//return c.NewValue(value.value, c.types.expr[expr].Type)
+	if c.isType(expr.X) {
+		ftyp := c.types.expr[expr].Type.(*types.Signature)
+		recvtyp := ftyp.Params[0].Type
+		var name *types.NamedType
+		if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
+			name = ptrtyp.Base.(*types.NamedType)
+		} else {
+			name = recvtyp.(*types.NamedType)
 		}
-	*/
+		obj := c.methods(name).Lookup(expr.Sel.Name)
+		method := c.Resolve(c.objectdata[obj].Ident).(*LLVMValue)
+		return c.NewValue(method.value, ftyp)
+	}
 
 	// Interface: search for method by name.
+	lhs := c.VisitExpr(expr.X)
+	name := expr.Sel.Name
 	if iface, ok := underlyingType(lhs.Type()).(*types.Interface); ok {
 		i := sort.Search(len(iface.Methods), func(i int) bool {
 			return iface.Methods[i].Name >= name
