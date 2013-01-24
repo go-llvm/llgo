@@ -333,6 +333,13 @@ type selectorCandidate struct {
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
+	// Imported package funcs/vars.
+	if ident, ok := expr.X.(*ast.Ident); ok {
+		if _, ok := c.objects[ident].(*types.Package); ok {
+			return c.Resolve(expr.Sel)
+		}
+	}
+
 	// Method expression. Returns an unbound function pointer.
 	// FIXME this is just the most basic case. It's also possible to
 	// create a pointer-receiver function from a method that has a
