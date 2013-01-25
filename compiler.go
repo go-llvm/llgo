@@ -111,16 +111,17 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 		value = c.makeFunc(ident, obj.Type.(*types.Signature))
 
 	case *types.Var:
-		ident := data.Ident
-		switch decl := ident.Obj.Decl.(type) {
-		case *ast.ValueSpec:
-			c.VisitValueSpec(decl)
-		case *ast.Field:
-			// No-op. Fields will be yielded for function
-			// arg/recv/ret. We update the .Data field of the
-			// object when we enter the function definition.
-			if data.Value == nil {
-				panic("expected object value")
+		if data.Ident.Obj != nil {
+			switch decl := data.Ident.Obj.Decl.(type) {
+			case *ast.ValueSpec:
+				c.VisitValueSpec(decl)
+			case *ast.Field:
+				// No-op. Fields will be yielded for function
+				// arg/recv/ret. We update the .Data field of the
+				// object when we enter the function definition.
+				if data.Value == nil {
+					panic("expected object value")
+				}
 			}
 		}
 
@@ -138,6 +139,9 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 			}
 			value = c.NewValue(g, &types.Pointer{Base: t}).makePointee()
 		}
+
+	case *types.Const:
+		value = c.NewConstValue(obj.Val, obj.Type)
 
 	default:
 		panic(fmt.Sprintf("unreachable (%T)", obj))

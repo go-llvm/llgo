@@ -68,7 +68,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 		if ftyp.Recv != nil {
 			// Create an interface function if the receiver is
 			// not a pointer type.
-			recvtyp := ftyp.Recv.Type.(types.Type)
+			recvtyp := ftyp.Recv.Type
 			if _, ptr := recvtyp.(*types.Pointer); !ptr {
 				returntyp := llvmfptrtyp.ReturnType()
 				paramtypes := llvmfptrtyp.ParamTypes()
