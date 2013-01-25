@@ -45,7 +45,7 @@ type LLVMValue struct {
 	value    llvm.Value
 	typ      types.Type
 	pointer  *LLVMValue // Pointer value that dereferenced to this value.
-	stack *LLVMValue // If a stack value, the Value for the containing function.
+	stack    *LLVMValue // If a stack value, the Value for the containing function.
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
@@ -75,7 +75,9 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		var ptr llvm.Value
 		if strlen > 0 {
-			ptr = c.builder.CreateGlobalStringPtr(strval, "")
+			init := llvm.ConstString(strval, false)
+			ptr = llvm.AddGlobal(c.module.Module, init.Type(), "")
+			ptr.SetInitializer(init)
 			ptr = llvm.ConstBitCast(ptr, i8ptr)
 		} else {
 			ptr = llvm.ConstNull(i8ptr)
@@ -659,4 +661,3 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 	}
 	return v.compiler.NewValue(component, types.Typ[types.Float64])
 }
-
