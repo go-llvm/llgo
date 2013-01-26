@@ -55,7 +55,7 @@ type Compiler interface {
 type compiler struct {
 	CompilerOptions
 
-	builder        llvm.Builder
+	builder        *Builder
 	module         *Module
 	machine        llvm.TargetMachine
 	target         llvm.TargetData
@@ -287,7 +287,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, pkg.Path, exprtypes, compiler.FunctionCache, resolver)
 
 	// Create a Builder, for building LLVM instructions.
-	compiler.builder = llvm.GlobalContext().NewBuilder()
+	compiler.builder = newBuilder(compiler.types)
 	defer compiler.builder.Dispose()
 
 	// Compile each file in the package.

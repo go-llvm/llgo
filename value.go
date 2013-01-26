@@ -419,6 +419,16 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	case token.ADD:
 		return v // No-op
 	case token.AND:
+		if typ, ok := underlyingType(v.typ).(*types.Pointer); ok {
+			if underlyingType(typ.Base) == typ {
+				// Taking the address of a recursive pointer
+				// yields a value with the same type.
+				value := v.pointer.value
+				basetyp := value.Type().ElementType()
+				value = b.CreateBitCast(value, basetyp, "")
+				return v.compiler.NewValue(value, v.typ)
+			}
+		}
 		return v.pointer
 	case token.NOT:
 		value := b.CreateNot(v.LLVMValue(), "")
@@ -610,13 +620,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
 	if isComplex(srctyp) {
-		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
+		var fpcast func(*Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
 		if srctyp == types.Typ[types.Complex64] {
-			fpcast = llvm.Builder.CreateFPExt
+			fpcast = (*Builder).CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
-			fpcast = llvm.Builder.CreateFPTrunc
+			fpcast = (*Builder).CreateFPTrunc
 			fptype = llvm.FloatType()
 		}
 		if fpcast != nil {

@@ -25,7 +25,13 @@ type LLVMTypeMap struct {
 	TypeStringer
 	target  llvm.TargetData
 	inttype llvm.Type
-	types   map[string]llvm.Type // compile-time LLVM type
+
+	// ptrstandin is a type used to represent the base of a
+	// recursive pointer. See llgo/builder.go for how it is used
+	// in CreateStore and CreateLoad.
+	ptrstandin llvm.Type
+
+	types map[string]llvm.Type // compile-time LLVM type
 }
 
 type runtimeTypeInfo struct {
@@ -270,6 +276,17 @@ func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
+	if underlyingType(p.Base) == p {
+		// Recursive pointers must be handled specially, as
+		// LLVM does not permit recursive types except via
+		// named structs.
+		if tm.ptrstandin.IsNil() {
+			ctx := llvm.GlobalContext()
+			unique := ctx.StructCreateNamed("")
+			tm.ptrstandin = llvm.PointerType(unique, 0)
+		}
+		return llvm.PointerType(tm.ptrstandin, 0)
+	}
 	return llvm.PointerType(tm.ToLLVM(p.Base), 0)
 }
 
@@ -540,11 +557,25 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 		rtype = llvm.ConstInsertValue(rtype, uncommonType, []uint32{9})
 	}
 
-	baseTypeGlobal, baseTypePtr := tm.toRuntime(p.Base)
 	ptrType := llvm.ConstNull(tm.runtimePtrType)
-	ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
-	ptrType = llvm.ConstInsertValue(ptrType, baseTypePtr, []uint32{1})
-	global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
+	var baseTypeGlobal llvm.Value
+	if underlyingType(p.Base) == p {
+		// Recursive pointer.
+		ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
+		global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
+		baseTypeGlobal = global
+
+		// Update the global with its own pointer in the elem field.
+		ptrType = global.Initializer()
+		ptrType = llvm.ConstInsertValue(ptrType, ptr, []uint32{1})
+		global.SetInitializer(ptrType)
+	} else {
+		var baseTypePtr llvm.Value
+		baseTypeGlobal, baseTypePtr = tm.toRuntime(p.Base)
+		ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
+		ptrType = llvm.ConstInsertValue(ptrType, baseTypePtr, []uint32{1})
+		global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
+	}
 	global.SetName(globalname)
 
 	// Set ptrToThis in the base type's rtype.
