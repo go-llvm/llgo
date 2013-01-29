@@ -31,11 +31,11 @@ import (
 // memory location for the value. If insert is given as true, and the key
 // does not exist in the map, it will be added with an uninitialised value.
 func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMValue, notnull *LLVMValue) {
-	mapType := m.Type().(*types.Map)
+	mapType := underlyingType(m.Type()).(*types.Map)
 	maplookup := c.NamedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 4)
-	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
+	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(mapType), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	if insert {
 		args[3] = llvm.ConstAllOnes(llvm.Int1Type())
@@ -66,9 +66,10 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 	mapdelete := c.NamedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
+	mapType := underlyingType(m.Type()).(*types.Map)
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
-	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
+	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(mapType), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	if lv, islv := key.(*LLVMValue); islv && lv.pointer != nil {
 		args[2] = c.builder.CreatePtrToInt(lv.pointer.LLVMValue(), ptrType, "")
@@ -85,9 +86,11 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 // and returning a new state value, key pointer, and value pointer.
 func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llvm.Value) {
 	mapnext := c.NamedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
+	mapType := underlyingType(m.Type()).(*types.Map)
 	ptrType := c.target.IntPtrType()
+
 	args := make([]llvm.Value, 3)
-	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(m.Type()), ptrType)
+	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(mapType), ptrType)
 	args[1] = c.builder.CreatePtrToInt(m.LLVMValue(), ptrType, "")
 	args[2] = nextin
 	results := c.builder.CreateCall(mapnext, args, "")
@@ -95,8 +98,8 @@ func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llv
 	pk = c.builder.CreateExtractValue(results, 1, "")
 	pv = c.builder.CreateExtractValue(results, 2, "")
 
-	keyptrtype := &types.Pointer{Base: m.Type().(*types.Map).Key.(types.Type)}
-	valptrtype := &types.Pointer{Base: m.Type().(*types.Map).Elt.(types.Type)}
+	keyptrtype := &types.Pointer{Base: mapType.Key}
+	valptrtype := &types.Pointer{Base: mapType.Elt}
 	pk = c.builder.CreateIntToPtr(pk, c.types.ToLLVM(keyptrtype), "")
 	pv = c.builder.CreateIntToPtr(pv, c.types.ToLLVM(valptrtype), "")
 

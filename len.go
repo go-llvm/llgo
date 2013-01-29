@@ -66,9 +66,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	case *types.Basic:
 		if isString(typ) {
 			value := value.(*LLVMValue)
-			ptr := value.pointer
-			lenptr := c.builder.CreateStructGEP(ptr.LLVMValue(), 1, "")
-			lenvalue = c.builder.CreateLoad(lenptr, "")
+			lenvalue = c.builder.CreateExtractValue(value.LLVMValue(), 1, "")
 		}
 	}
 	if !lenvalue.IsNil() {
