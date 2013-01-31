@@ -341,19 +341,18 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method expression. Returns an unbound function pointer.
-	// FIXME this is just the most basic case. It's also possible to
-	// create a pointer-receiver function from a method that has a
-	// value receiver (see Method Expressions in spec).
 	if c.isType(expr.X) {
 		ftyp := c.types.expr[expr].Type.(*types.Signature)
 		recvtyp := ftyp.Params[0].Type
 		var name *types.NamedType
+		var isptr bool
 		if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
+			isptr = true
 			name = ptrtyp.Base.(*types.NamedType)
 		} else {
 			name = recvtyp.(*types.NamedType)
 		}
-		obj := c.methods(name).Lookup(expr.Sel.Name)
+		obj := c.methods(name).lookup(expr.Sel.Name, isptr)
 		method := c.Resolve(c.objectdata[obj].Ident).(*LLVMValue)
 		return c.NewValue(method.value, ftyp)
 	}
@@ -377,28 +376,44 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		return c.NewValue(structValue, ftype)
 	}
 
-	// Otherwise, search for field/method,
-	// recursing through embedded types.
-	var recv *types.NamedType
+	// Method.
+	if typ, ok := c.types.expr[expr].Type.(*types.Signature); ok && typ.Recv != nil {
+		var named *types.NamedType
+		var isptr bool
+		switch typ := lhs.Type().(type) {
+		case *types.Pointer:
+			named = typ.Base.(*types.NamedType)
+			isptr = true
+		case *types.NamedType:
+			named = typ
+			isptr = lhs.(*LLVMValue).pointer != nil
+		}
+		method := c.methods(named).lookup(name, isptr)
+		if method != nil {
+			recv := lhs.(*LLVMValue)
+			if isptr && named == lhs.Type() {
+				recv = recv.pointer
+			}
+			methodValue := c.Resolve(c.objectdata[method].Ident).LLVMValue()
+			methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
+			recvValue := recv.LLVMValue()
+			types := []llvm.Type{methodValue.Type(), recvValue.Type()}
+			structType := llvm.StructType(types, false)
+			value := llvm.Undef(structType)
+			value = c.builder.CreateInsertValue(value, methodValue, 0, "")
+			value = c.builder.CreateInsertValue(value, recvValue, 1, "")
+			return c.NewValue(value, method.Type)
+		}
+	}
+
+	// Otherwise, search for field, recursing through embedded types.
 	var result selectorCandidate
 	curr := []selectorCandidate{{nil, lhs.Type()}}
 	for result.Type == nil && len(curr) > 0 {
 		var next []selectorCandidate
 		for _, candidate := range curr {
-			indices := candidate.Indices[0:]
+			indices := candidate.Indices[:]
 			t := derefType(candidate.Type)
-
-			if n, ok := t.(*types.NamedType); ok {
-				for _, m := range n.Methods {
-					if m.Name == name {
-						recv = n
-						result.Indices = indices
-						result.Type = t
-						break
-					}
-				}
-			}
-
 			if t, ok := underlyingType(t).(*types.Struct); ok {
 				if i := fieldIndex(t, name); i != -1 {
 					result.Indices = append(indices, i)
@@ -421,74 +436,47 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		curr = next
 	}
 
-	// Get a pointer to the field/receiver.
-	recvValue := lhs.(*LLVMValue)
+	// Get a pointer to the field.
+	fieldValue := lhs.(*LLVMValue)
 	if len(result.Indices) > 0 {
 		if _, ok := underlyingType(lhs.Type()).(*types.Pointer); !ok {
-			if recvValue.pointer != nil {
-				recvValue = recvValue.pointer
+			if fieldValue.pointer != nil {
+				fieldValue = fieldValue.pointer
 			} else {
 				// XXX Temporary hack: if we've got a temporary
 				// (i.e. no pointer), then load the value onto
 				// the stack. Later, we can just extract the
 				// values.
-				v := recvValue.value
+				v := fieldValue.value
 				stackptr := c.builder.CreateAlloca(v.Type(), "")
 				c.builder.CreateStore(v, stackptr)
-				ptrtyp := &types.Pointer{Base: recvValue.Type()}
-				recvValue = c.NewValue(stackptr, ptrtyp)
+				ptrtyp := &types.Pointer{Base: fieldValue.Type()}
+				fieldValue = c.NewValue(stackptr, ptrtyp)
 			}
 		}
 		for _, v := range result.Indices {
-			ptr := recvValue.LLVMValue()
-			field := underlyingType(derefType(recvValue.typ)).(*types.Struct).Fields[v]
+			ptr := fieldValue.LLVMValue()
+			field := underlyingType(derefType(fieldValue.typ)).(*types.Struct).Fields[v]
 			fieldPtr := c.builder.CreateStructGEP(ptr, v, "")
 			fieldPtrTyp := &types.Pointer{Base: field.Type.(types.Type)}
-			recvValue = c.NewValue(fieldPtr, fieldPtrTyp)
+			fieldValue = c.NewValue(fieldPtr, fieldPtrTyp)
 
 			// GEP returns a pointer; if the field is a pointer,
 			// we must load our pointer-to-a-pointer.
 			if _, ok := field.Type.(*types.Pointer); ok {
-				recvValue = recvValue.makePointee()
+				fieldValue = fieldValue.makePointee()
 			}
 		}
 	}
 
-	// Method?
-	if recv != nil {
-		obj := c.methods(recv).Lookup(expr.Sel.Name)
-		method := c.Resolve(c.objectdata[obj].Ident).(*LLVMValue)
-		methodType := method.Type().(*types.Signature)
-		receiverType := methodType.Recv.Type.(types.Type)
-		var receiver Value
-		switch {
-		case isIdentical(recvValue.Type(), receiverType):
-			receiver = recvValue
-		case isIdentical(&types.Pointer{Base: recvValue.Type()}, receiverType):
-			receiver = recvValue.pointer
-		default:
-			receiver = recvValue.makePointee()
-		}
-		methodValue := method.LLVMValue()
-		methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
-		receiverValue := receiver.LLVMValue()
-		types := []llvm.Type{methodValue.Type(), receiverValue.Type()}
-		structType := llvm.StructType(types, false)
-		value := llvm.Undef(structType)
-		value = c.builder.CreateInsertValue(value, methodValue, 0, "")
-		value = c.builder.CreateInsertValue(value, receiverValue, 1, "")
-		return c.NewValue(value, methodType)
+	if isIdentical(fieldValue.Type(), result.Type) {
+		// no-op
+	} else if isIdentical(&types.Pointer{Base: fieldValue.Type()}, result.Type) {
+		fieldValue = fieldValue.pointer
 	} else {
-		if isIdentical(recvValue.Type(), result.Type) {
-			// no-op
-		} else if isIdentical(&types.Pointer{Base: recvValue.Type()}, result.Type) {
-			recvValue = recvValue.pointer
-		} else {
-			recvValue = recvValue.makePointee()
-		}
-		return recvValue
+		fieldValue = fieldValue.makePointee()
 	}
-	panic("unreachable")
+	return fieldValue
 }
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {

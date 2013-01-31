@@ -65,20 +65,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 	if fn.IsNil() {
 		llvmfptrtyp := llvmftyp.StructElementTypes()[0].ElementType()
 		fn = llvm.AddFunction(c.module.Module, fname, llvmfptrtyp)
-		if ftyp.Recv != nil {
-			// Create an interface function if the receiver is
-			// not a pointer type.
-			recvtyp := ftyp.Recv.Type
-			if _, ptr := recvtyp.(*types.Pointer); !ptr {
-				returntyp := llvmfptrtyp.ReturnType()
-				paramtypes := llvmfptrtyp.ParamTypes()
-				paramtypes[0] = llvm.PointerType(paramtypes[0], 0)
-				ifntyp := llvm.FunctionType(returntyp, paramtypes, false)
-				llvm.AddFunction(c.module.Module, "*"+fname, ifntyp)
-			}
-		}
 	}
-
 	fn = llvm.ConstInsertValue(llvm.ConstNull(llvmftyp), fn, []uint32{0})
 	return c.NewValue(fn, ftyp)
 }
@@ -179,24 +166,6 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 	}
 }
 
-func (c *compiler) buildPtrRecvFunction(fn llvm.Value) llvm.Value {
-	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
-	ifname := "*" + fn.Name()
-	ifn := c.module.Module.NamedFunction(ifname)
-	fntyp := fn.Type().ElementType()
-	entry := llvm.AddBasicBlock(ifn, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
-	args := ifn.Params()
-	args[0] = c.builder.CreateLoad(args[0], "recv")
-	result := c.builder.CreateCall(fn, args, "")
-	if fntyp.ReturnType().TypeKind() == llvm.VoidTypeKind {
-		c.builder.CreateRetVoid()
-	} else {
-		c.builder.CreateRet(result)
-	}
-	return ifn
-}
-
 func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	fn := c.Resolve(f.Name).(*LLVMValue)
 	attributes := parseAttributes(f.Doc)
@@ -217,15 +186,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	}
 	c.buildFunction(fn, nil, paramVars, ftyp.Results[:], f.Body)
 
-	if f.Recv != nil {
-		// Create a shim function if the receiver is not
-		// a pointer type.
-		recvtyp := ftyp.Recv.Type.(types.Type)
-		if _, ptr := recvtyp.(*types.Pointer); !ptr {
-			fnptr := llvm.ConstExtractValue(fn.value, []uint32{0})
-			c.buildPtrRecvFunction(fnptr)
-		}
-	} else if f.Name.Name == "init" {
+	if f.Recv == nil && f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.
 		fnptr := llvm.ConstExtractValue(fn.value, []uint32{0})
 		c.initfuncs = append(c.initfuncs, fnptr)

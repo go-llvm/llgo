@@ -67,9 +67,10 @@ type compiler struct {
 	pkg            *types.Package
 	fileset        *token.FileSet
 
-	objects    map[*ast.Ident]types.Object
-	objectdata map[types.Object]*ObjectData
-	methodsets map[*types.NamedType]*methodset
+	objects     map[*ast.Ident]types.Object
+	objectdata  map[types.Object]*ObjectData
+	methodfuncs map[*types.Method]*types.Func
+	methodsets  map[*types.NamedType]*methodset
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -252,6 +253,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	// Type-check, and store object data.
 	compiler.objects = make(map[*ast.Ident]types.Object)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
+	compiler.methodfuncs = make(map[*types.Method]*types.Func)
 	compiler.methodsets = make(map[*types.NamedType]*methodset)
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 	pkg, exprtypes, err := compiler.typecheck(fset, files)

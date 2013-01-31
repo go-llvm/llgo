@@ -152,17 +152,17 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 	// parameter's type to a slice of its recorded type.
 	fixVariadicSignature(sig)
 
-	// Record methods against the receiver.
+	// Record Method-to-Func mapping.
 	if sig.Recv != nil {
 		methodfunc := v.objects[name].(*types.Func)
 		recvtyp := derefType(sig.Recv.Type)
 		named := recvtyp.(*types.NamedType)
-		methods, exists := v.methodsets[named]
-		if !exists {
-			methods = new(methodset)
-			v.methodsets[named] = methods
+		for _, m := range named.Methods {
+			if m.Name == name.Name {
+				v.methodfuncs[m] = methodfunc
+				break
+			}
 		}
-		methods.Insert(methodfunc)
 	}
 
 	// go/types creates a separate types.Var for

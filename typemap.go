@@ -691,20 +691,19 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 		uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 	}
 
+	methodset := tm.functions.methods(n)
+	methodfuncs := methodset.nonptr
+	if ptr {
+		methodfuncs = methodset.ptr
+	}
+
 	// Store methods.
-	methods := make([]llvm.Value, 0, len(n.Methods))
-	for _, m := range n.Methods {
-		//m := namedTypeScope.Lookup(methodName)
-		ftyp := m.Type
-		ptrrecv := !isIdentical(ftyp.Recv.Type, n)
-		if !ptr && ptrrecv {
-			// For a type T, we only store methods where the
-			// receiver is T and not *T. For *T we store both.
-			continue
-		}
+	methods := make([]llvm.Value, len(methodfuncs))
+	for i, mfunc := range methodfuncs {
+		ftyp := mfunc.Type.(*types.Signature)
 
 		method := llvm.ConstNull(tm.runtimeMethod)
-		name := tm.globalStringPtr(m.Name)
+		name := tm.globalStringPtr(mfunc.Name)
 		name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
 		// name
 		method = llvm.ConstInsertValue(method, name, []uint32{0})
@@ -723,47 +722,22 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 		method = llvm.ConstInsertValue(method, typ, []uint32{3})
 
 		// tfn (standard method/function pointer for plain method calls)
-		mfunc := tm.functions.methods(n).Lookup(m.Name)
 		tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
 		tfn = llvm.ConstExtractValue(tfn, []uint32{0})
 		tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
 
 		// ifn (single-word receiver function pointer for interface calls)
 		ifn := tfn
-		needload := ptr && !ptrrecv
-		if !needload {
-			recvtyp := tm.ToLLVM(ftyp.Recv.Type)
-			needload = int(tm.target.TypeAllocSize(recvtyp)) > tm.target.PointerSize()
-		}
-		if needload {
-			// If the receiver type is wider than a word, we
-			// need to use an intermediate function which takes
-			// a pointer-receiver, loads it, and then calls the
-			// standard receiver function.
-
-			// TODO consolidate this with the one in
-			// VisitFuncProtoDecl. Or change the way
-			// this is done altogether...
-			fname := m.Name
-			recvtyp := ftyp.Recv.Type
-			var recvname string
-			switch recvtyp := recvtyp.(type) {
-			case *types.Pointer:
-				named := recvtyp.Base.(*types.NamedType)
-				recvname = "*" + named.Obj.Name
-			case *types.NamedType:
-				recvname = recvtyp.Obj.Name
-			}
-			fname = fmt.Sprintf("%s.%s", recvname, fname)
-			fname = "*" + pkgpath + "." + fname
-
-			ifn = tm.module.NamedFunction(fname)
+		if !ptr && tm.Sizeof(ftyp.Recv.Type) > uint64(tm.target.PointerSize()) {
+			mfunc := methodset.lookup(mfunc.Name, true)
+			ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+			ifn = llvm.ConstExtractValue(ifn, []uint32{0})
 			ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
 		}
 
 		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
 		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods = append(methods, method)
+		methods[i] = method
 	}
 
 	var methodsGlobalPtr llvm.Value

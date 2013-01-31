@@ -33,7 +33,6 @@ import (
 
 // convertV2I converts a value to an interface.
 func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
-	// TODO deref indirect value, then use 'pointer' as pointer value.
 	var srcname *types.NamedType
 	srctyp := v.Type()
 	if name, isname := srctyp.(*types.NamedType); isname {
@@ -41,7 +40,9 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 		srctyp = name.Underlying
 	}
 
+	var isptr bool
 	if p, fromptr := srctyp.(*types.Pointer); fromptr {
+		isptr = true
 		srctyp = p.Base
 		if name, isname := srctyp.(*types.NamedType); isname {
 			srcname = name
@@ -57,7 +58,6 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 	builder := v.compiler.builder
 	var ptr llvm.Value
 	lv := v.LLVMValue()
-	var overwide bool
 	if lv.Type().TypeKind() == llvm.PointerTypeKind {
 		ptr = builder.CreateBitCast(lv, element_types[1], "")
 	} else {
@@ -83,7 +83,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 				builder.CreateStore(lv, ptr)
 			}
 			ptr = builder.CreateBitCast(ptr, element_types[1], "")
-			overwide = true
+			isptr = true
 		}
 	}
 	runtimeType := v.compiler.types.ToRuntime(v.Type())
@@ -91,81 +91,13 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 0, "")
 	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 1, "")
 
-	// TODO assert either source is a named type (or pointer to), or the
-	// interface has an empty methodset.
-
 	if srcname != nil {
-		// TODO check whether the functions in the struct take
-		// value or pointer receivers.
-
 		// Look up the method by name.
 		for i, m := range iface.Methods {
-			// TODO make this loop linear by iterating through the
-			// interface methods and type methods together.
-			var recv *types.NamedType
-			curr := []types.Type{srcname}
-			for recv == nil && len(curr) > 0 {
-				var next []types.Type
-				for _, typ := range curr {
-					typ = derefType(typ)
-					if n, ok := typ.(*types.NamedType); ok {
-						for _, m2 := range n.Methods {
-							if m2.Name == m.Name {
-								recv = n
-							}
-						}
-						if recv != nil {
-							break
-						}
-					}
-					if typ, ok := underlyingType(typ).(*types.Struct); ok {
-						for _, field := range typ.Fields {
-							if field.IsAnonymous {
-								typ := field.Type.(types.Type)
-								next = append(next, typ)
-							}
-						}
-					}
-				}
-				curr = next
-			}
-
-			method := v.compiler.methods(recv).Lookup(m.Name)
+			method := v.compiler.methods(srcname).lookup(m.Name, isptr)
 			methodident := v.compiler.objectdata[method].Ident
 			llvm_value := v.compiler.Resolve(methodident).LLVMValue()
 			llvm_value = builder.CreateExtractValue(llvm_value, 0, "")
-
-			// If we have a receiver wider than a word, or a pointer
-			// receiver value and non-pointer receiver method, then
-			// we must use the "wrapper" pointer method.
-			fntyp := method.Type.(*types.Signature)
-			recvtyp := fntyp.Recv.Type.(types.Type)
-			needload := overwide
-			if !needload {
-				// TODO handle embedded types here.
-				//needload = types.Identical(v.Type(), recvtyp)
-				if p, ok := v.Type().(*types.Pointer); ok {
-					needload = isIdentical(p.Base, recvtyp)
-				}
-			}
-			if needload {
-				// TODO consolidate with other similar bits of code.
-				fname := method.Name
-				var recvname string
-				var pkgname string
-				switch recvtyp := recvtyp.(type) {
-				case *types.Pointer:
-					named := recvtyp.Base.(*types.NamedType)
-					recvname = "*" + named.Obj.Name
-					pkgname = v.compiler.objectdata[named.Obj].Package.Path
-				case *types.NamedType:
-					named := recvtyp
-					recvname = named.Obj.Name
-					pkgname = v.compiler.objectdata[named.Obj].Package.Path
-				}
-				ifname := fmt.Sprintf("*%s.%s.%s", pkgname, recvname, fname)
-				llvm_value = v.compiler.module.NamedFunction(ifname)
-			}
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
 			iface_struct = builder.CreateInsertValue(iface_struct, llvm_value, i+2, "")
 		}
