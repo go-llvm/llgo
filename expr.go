@@ -378,20 +378,18 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 
 	// Method.
 	if typ, ok := c.types.expr[expr].Type.(*types.Signature); ok && typ.Recv != nil {
-		var named *types.NamedType
 		var isptr bool
-		switch typ := lhs.Type().(type) {
-		case *types.Pointer:
-			named = typ.Base.(*types.NamedType)
+		typ := lhs.Type()
+		if ptr, ok := typ.(*types.Pointer); ok {
+			typ = ptr.Base
 			isptr = true
-		case *types.NamedType:
-			named = typ
+		} else {
 			isptr = lhs.(*LLVMValue).pointer != nil
 		}
-		method := c.methods(named).lookup(name, isptr)
+		method := c.methods(typ).lookup(name, isptr)
 		if method != nil {
 			recv := lhs.(*LLVMValue)
-			if isptr && named == lhs.Type() {
+			if isptr && typ == lhs.Type() {
 				recv = recv.pointer
 			}
 			methodValue := c.Resolve(c.objectdata[method].Ident).LLVMValue()

@@ -43,25 +43,40 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 			var recvname string
 			switch recvtyp := ftyp.Recv.Type.(type) {
 			case *types.Pointer:
-				named := recvtyp.Base.(*types.NamedType)
-				recvname = "*" + named.Obj.Name
-				pkgname = c.objectdata[named.Obj].Package.Path
+				if named, ok := recvtyp.Base.(*types.NamedType); ok {
+					recvname = "*" + named.Obj.Name
+					pkgname = c.objectdata[named.Obj].Package.Path
+				}
 			case *types.NamedType:
 				named := recvtyp
 				recvname = named.Obj.Name
 				pkgname = c.objectdata[named.Obj].Package.Path
 			}
-			fname = fmt.Sprintf("%s.%s", recvname, fname)
+
+			if recvname != "" {
+				fname = fmt.Sprintf("%s.%s", recvname, fname)
+			} else {
+				// If the receiver is an unnamed struct, we're
+				// synthesising a method for an unnamed struct
+				// type. There's no meaningful name to give the
+				// function, so leave it up to LLVM.
+				fname = ""
+			}
 		} else {
 			obj := c.objects[ident]
 			pkgname = c.objectdata[obj].Package.Path
 		}
-		fname = pkgname + "." + fname
+		if fname != "" {
+			fname = pkgname + "." + fname
+		}
 	}
 
 	// gcimporter may produce multiple AST objects for the same function.
 	llvmftyp := c.types.ToLLVM(ftyp)
-	fn := c.module.Module.NamedFunction(fname)
+	var fn llvm.Value
+	if fname != "" {
+		fn = c.module.Module.NamedFunction(fname)
+	}
 	if fn.IsNil() {
 		llvmfptrtyp := llvmftyp.StructElementTypes()[0].ElementType()
 		fn = llvm.AddFunction(c.module.Module, fname, llvmfptrtyp)

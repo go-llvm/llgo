@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/types"
@@ -71,31 +72,39 @@ func (c *compiler) methodfunc(m *types.Method) *types.Func {
 	return f
 }
 
-func (c *compiler) methods(n *types.NamedType) *methodset {
-	if m, ok := c.methodsets[n]; ok {
+// methods constructs and returns the method set for
+// a named type or unnamed struct type.
+func (c *compiler) methods(t types.Type) *methodset {
+	if m, ok := c.methodsets[t]; ok {
 		return m
 	}
 
 	methods := new(methodset)
-	c.methodsets[n] = methods
-	for _, m := range n.Methods {
-		f := c.methodfunc(m)
-		if m.Type.Recv.Type == n {
-			methods.nonptr = append(methods.nonptr, f)
+	c.methodsets[t] = methods
 
-			// Create ptr-receiver forwarding method.
-			f := c.promoteMethod(m, &types.Pointer{n}, []int{-1})
-			methods.ptr = append(methods.ptr, f)
-		} else {
-			methods.ptr = append(methods.ptr, f)
+	switch t := t.(type) {
+	case *types.NamedType:
+		for _, m := range t.Methods {
+			f := c.methodfunc(m)
+			if m.Type.Recv.Type == t {
+				methods.nonptr = append(methods.nonptr, f)
+				f := c.promoteMethod(m, &types.Pointer{t}, []int{-1})
+				methods.ptr = append(methods.ptr, f)
+			} else {
+				methods.ptr = append(methods.ptr, f)
+			}
 		}
+	case *types.Struct:
+		// No-op, handled in loop below.
+	default:
+		panic(fmt.Errorf("non NamedType/Struct: %#v", t))
 	}
 
 	// Traverse embedded types, build forwarding methods if
 	// original type is in the main package (otherwise just
 	// declaring them).
 	var curr []selectorCandidate
-	if typ, ok := derefType(underlyingType(n)).(*types.Struct); ok {
+	if typ, ok := derefType(underlyingType(t)).(*types.Struct); ok {
 		curr = append(curr, selectorCandidate{nil, typ})
 	}
 	for len(curr) > 0 {
@@ -119,14 +128,14 @@ func (c *compiler) methods(n *types.NamedType) *methodset {
 						if isptr && m.Type.Recv.Type == named {
 							indices = append(indices, -1)
 						}
-						f := c.promoteMethod(m, n, indices)
+						f := c.promoteMethod(m, t, indices)
 						methods.nonptr = append(methods.nonptr, f)
-						f = c.promoteMethod(m, &types.Pointer{Base: n}, indices)
+						f = c.promoteMethod(m, &types.Pointer{Base: t}, indices)
 						methods.ptr = append(methods.ptr, f)
 					} else {
 						// The method set of *S also includes
 						// promoted methods with receiver *T.
-						f := c.promoteMethod(m, &types.Pointer{Base: n}, indices)
+						f := c.promoteMethod(m, &types.Pointer{Base: t}, indices)
 						methods.ptr = append(methods.ptr, f)
 					}
 				}
@@ -139,9 +148,9 @@ func (c *compiler) methods(n *types.NamedType) *methodset {
 					if methods.lookup(m.Name, true) == nil {
 						indices := candidate.Indices[:]
 						indices = append(indices, -1) // always load
-						f := c.promoteInterfaceMethod(typ, i, n, indices)
+						f := c.promoteInterfaceMethod(typ, i, t, indices)
 						methods.nonptr = append(methods.nonptr, f)
-						f = c.promoteInterfaceMethod(typ, i, &types.Pointer{Base: n}, indices)
+						f = c.promoteInterfaceMethod(typ, i, &types.Pointer{Base: t}, indices)
 						methods.ptr = append(methods.ptr, f)
 					}
 				}
@@ -169,6 +178,8 @@ func (c *compiler) methods(n *types.NamedType) *methodset {
 
 // promoteInterfaceMethod promotes an interface method to a type
 // which has embedded the interface.
+//
+// TODO consolidate this and promoteMethod.
 func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex int, recv types.Type, indices []int) *types.Func {
 	m := iface.Methods[methodIndex]
 	sig := *m.Type
@@ -182,11 +193,14 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 		recv = ptr.Base
 	}
 
-	pkg := c.objectdata[recv.(*types.NamedType).Obj].Package
+	var pkg *types.Package
+	if recv, ok := recv.(*types.NamedType); ok {
+		pkg = c.objectdata[recv.Obj].Package
+	}
 	c.objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
-	if pkg == c.pkg {
+	if pkg == nil || pkg == c.pkg {
 		defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
@@ -247,11 +261,14 @@ func (c *compiler) promoteMethod(m *types.Method, recv types.Type, indices []int
 		recv = ptr.Base
 	}
 
-	pkg := c.objectdata[recv.(*types.NamedType).Obj].Package
+	var pkg *types.Package
+	if recv, ok := recv.(*types.NamedType); ok {
+		pkg = c.objectdata[recv.Obj].Package
+	}
 	c.objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
-	if pkg == c.pkg {
+	if pkg == nil || pkg == c.pkg {
 		defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
