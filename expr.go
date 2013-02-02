@@ -170,13 +170,16 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 
 	// Evaluate arguments.
 	var argValues []Value
-	if len(expr.Args) == 1 && len(fn_type.Params) > 1 {
-		// f(g(...)), where g is multi-value return
-		argValues = c.destructureExpr(expr.Args[0])
-	} else {
-		argValues = make([]Value, len(expr.Args))
-		for i, x := range expr.Args {
-			argValues[i] = c.VisitExpr(x)
+	if len(expr.Args) > 0 {
+		arg0 := expr.Args[0]
+		if _, ok := c.types.expr[arg0].Type.(*types.Result); ok {
+			// f(g(...)), where g is multi-value return
+			argValues = c.destructureExpr(expr.Args[0])
+		} else {
+			argValues = make([]Value, len(expr.Args))
+			for i, x := range expr.Args {
+				argValues[i] = c.VisitExpr(x)
+			}
 		}
 	}
 
