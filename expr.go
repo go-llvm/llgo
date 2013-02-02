@@ -168,27 +168,38 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	fn := lhs.(*LLVMValue)
 	fn_type := underlyingType(fn.Type()).(*types.Signature)
 
+	// Evaluate arguments.
+	var argValues []Value
+	if len(expr.Args) == 1 && len(fn_type.Params) > 1 {
+		// f(g(...)), where g is multi-value return
+		argValues = c.destructureExpr(expr.Args[0])
+	} else {
+		argValues = make([]Value, len(expr.Args))
+		for i, x := range expr.Args {
+			argValues[i] = c.VisitExpr(x)
+		}
+	}
+
 	var args []llvm.Value
 	if nparams := len(fn_type.Params); nparams > 0 {
 		if fn_type.IsVariadic {
 			nparams--
 		}
 		for i := 0; i < nparams; i++ {
-			value := c.VisitExpr(expr.Args[i])
+			value := argValues[i]
 			param_type := fn_type.Params[i].Type.(types.Type)
 			args = append(args, value.Convert(param_type).LLVMValue())
 		}
 		if fn_type.IsVariadic {
 			if expr.Ellipsis.IsValid() {
 				// Calling f(x...). Just pass the slice directly.
-				slice_value := c.VisitExpr(expr.Args[nparams]).LLVMValue()
+				slice_value := argValues[nparams].LLVMValue()
 				args = append(args, slice_value)
 			} else {
 				param_type := fn_type.Params[nparams].Type
 				param_type = param_type.(*types.Slice).Elt
 				varargs := make([]llvm.Value, 0)
-				for i := nparams; i < len(expr.Args); i++ {
-					value := c.VisitExpr(expr.Args[i])
+				for _, value := range argValues[nparams:] {
 					value = value.Convert(param_type)
 					varargs = append(varargs, value.LLVMValue())
 				}
