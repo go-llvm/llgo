@@ -140,10 +140,17 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	return f
 }
 
-func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
+func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	typ := c.types.expr[lit].Type
 	var valuemap map[interface{}]Value
 	var valuelist []Value
+
+	if ptr, ok := typ.(*types.Pointer); ok {
+		typ = ptr.Base
+		defer func() {
+			v = v.pointer
+		}()
+	}
 
 	var isstruct, isarray, isslice, ismap bool
 	switch underlyingType(typ).(type) {
@@ -153,8 +160,10 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) Value {
 		isarray = true
 	case *types.Slice:
 		isslice = true
-	default:
+	case *types.Map:
 		ismap = true
+	default:
+		panic(fmt.Errorf("Unhandled type: %s", typ))
 	}
 
 	if lit.Elts != nil {
