@@ -932,11 +932,11 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		if assignIdent != nil {
 			obj := c.objects[assignIdent]
 			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
-				switch typ := underlyingType(typ).(type) {
+				switch utyp := underlyingType(typ).(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
 					// clause condition test.
-					c.objectdata[obj].Value, _ = iface.convertI2I(typ)
+					c.objectdata[obj].Value, _ = iface.convertI2I(utyp)
 				default:
 					c.objectdata[obj].Value = iface.loadI2V(typ)
 				}
