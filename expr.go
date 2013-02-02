@@ -221,11 +221,13 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		// dealing with a method (where we don't care about the value
 		// of the receiver), then we must conditionally call the
 		// function with the additional receiver/closure.
-		if !context.IsNull() {
+		if !context.IsNull() || fn_type.Recv != nil {
 			var nullctxblock llvm.BasicBlock
 			var nonnullctxblock llvm.BasicBlock
 			var endblock llvm.BasicBlock
 			var nullctxresult llvm.Value
+
+			// len(paramTypes) == len(args) iff function is not a method.
 			if !context.IsConstant() && len(paramTypes) == len(args) {
 				currblock := c.builder.GetInsertBlock()
 				endblock = llvm.AddBasicBlock(currblock.Parent(), "")
