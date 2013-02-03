@@ -96,6 +96,11 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 
 func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	s := c.VisitExpr(expr.Args[0])
+	if expr.Ellipsis.IsValid() {
+		c.convertUntyped(expr.Args[1], s.Type())
+	} else {
+		c.convertUntyped(expr.Args[1], underlyingType(s.Type()).(*types.Slice).Elt)
+	}
 	elem := c.VisitExpr(expr.Args[1])
 
 	sliceappend := c.NamedFunction("runtime.sliceappend", "func f(t uintptr, dst, src slice) slice")
