@@ -427,18 +427,21 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		var next []selectorCandidate
 		for _, candidate := range curr {
 			indices := candidate.Indices[:]
-			t := derefType(candidate.Type)
+			t := candidate.Type
+			if ptr, ok := t.(*types.Pointer); ok {
+				indices = append(indices, -1)
+				t = ptr.Base
+			}
 			if t, ok := underlyingType(t).(*types.Struct); ok {
 				if i := fieldIndex(t, name); i != -1 {
 					result.Indices = append(indices, i)
 					result.Type = t.Fields[i].Type
 					break
 				} else {
-					// Add embedded types to the next set of types
-					// to check.
+					// Add embedded types to the next set of types to check.
 					for i, field := range t.Fields {
 						if field.IsAnonymous {
-							indices = append(indices[0:], i)
+							indices := append(indices[:], i)
 							t := field.Type
 							candidate := selectorCandidate{indices, t}
 							next = append(next, candidate)
@@ -453,42 +456,28 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// Get a pointer to the field.
 	fieldValue := lhs.(*LLVMValue)
 	if len(result.Indices) > 0 {
-		if _, ok := underlyingType(lhs.Type()).(*types.Pointer); !ok {
-			if fieldValue.pointer != nil {
-				fieldValue = fieldValue.pointer
-			} else {
-				// XXX Temporary hack: if we've got a temporary
-				// (i.e. no pointer), then load the value onto
-				// the stack. Later, we can just extract the
-				// values.
-				v := fieldValue.value
-				stackptr := c.builder.CreateAlloca(v.Type(), "")
-				c.builder.CreateStore(v, stackptr)
-				ptrtyp := &types.Pointer{Base: fieldValue.Type()}
-				fieldValue = c.NewValue(stackptr, ptrtyp)
-			}
+		if fieldValue.pointer == nil {
+			// If we've got a temporary (i.e. no pointer),
+			// then load the value onto the stack.
+			v := fieldValue.value
+			stackptr := c.builder.CreateAlloca(v.Type(), "")
+			c.builder.CreateStore(v, stackptr)
+			ptrtyp := &types.Pointer{Base: fieldValue.Type()}
+			fieldValue = c.NewValue(stackptr, ptrtyp).makePointee()
 		}
-		for _, v := range result.Indices {
-			ptr := fieldValue.LLVMValue()
-			field := underlyingType(derefType(fieldValue.typ)).(*types.Struct).Fields[v]
-			fieldPtr := c.builder.CreateStructGEP(ptr, v, "")
-			fieldPtrTyp := &types.Pointer{Base: field.Type.(types.Type)}
-			fieldValue = c.NewValue(fieldPtr, fieldPtrTyp)
 
-			// GEP returns a pointer; if the field is a pointer,
-			// we must load our pointer-to-a-pointer.
-			if _, ok := field.Type.(*types.Pointer); ok {
+		for _, i := range result.Indices {
+			if i == -1 {
 				fieldValue = fieldValue.makePointee()
+			} else {
+				ptr := fieldValue.pointer.LLVMValue()
+				structTyp := underlyingType(derefType(fieldValue.typ)).(*types.Struct)
+				field := structTyp.Fields[i]
+				fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
+				fieldPtrTyp := &types.Pointer{Base: field.Type.(types.Type)}
+				fieldValue = c.NewValue(fieldPtr, fieldPtrTyp).makePointee()
 			}
 		}
-	}
-
-	if isIdentical(fieldValue.Type(), result.Type) {
-		// no-op
-	} else if isIdentical(&types.Pointer{Base: fieldValue.Type()}, result.Type) {
-		fieldValue = fieldValue.pointer
-	} else {
-		fieldValue = fieldValue.makePointee()
 	}
 	return fieldValue
 }
