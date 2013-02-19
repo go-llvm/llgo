@@ -31,6 +31,7 @@ func genMath() error {
 		return err
 	}
 
+	var filenames string
 	for _, filename := range gopkg.GoFiles {
 		srcfile := filepath.Join(gopkg.Dir, filename)
 		data, err := ioutil.ReadFile(srcfile)
@@ -42,8 +43,9 @@ func genMath() error {
 		if err != nil {
 			return err
 		}
-		log.Printf("- %s", filename)
+		filenames += " " + filename
 	}
+	log.Printf("-%s", filenames)
 
 	return nil
 }

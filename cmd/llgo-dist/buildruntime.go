@@ -35,7 +35,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 	ctx.GOARCH = GOARCH
 	ctx.GOOS = GOOS
 	ctx.BuildTags = append(ctx.BuildTags[:], "llgo")
-	ctx.Compiler = "llgo"
+	//ctx.Compiler = "llgo"
 
 	// ReadDir is overridden to return a fake ".s"
 	// file for each ".ll" file in the directory.
