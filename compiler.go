@@ -261,9 +261,10 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		return nil, err
 	}
 	compiler.pkg = pkg
-	if importpath == "" {
+	switch {
+	case pkg.Name == "main", importpath == "":
 		pkg.Path = pkg.Name
-	} else {
+	default:
 		pkg.Path = importpath
 	}
 
@@ -389,6 +390,10 @@ func (c *compiler) createMainFunction() error {
 		c.builder.CreateRetVoid()
 	} else {
 		mainMain = c.module.NamedFunction("main.main")
+	}
+
+	if mainMain.IsNil() {
+		return fmt.Errorf("Could not find main.main")
 	}
 
 	// runtime.main is called by main, with argc, argv, argp,

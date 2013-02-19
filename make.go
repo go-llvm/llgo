@@ -50,6 +50,8 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		var cap_ llvm.Value
 		if len(expr.Args) > 1 {
 			cap_ = c.VisitExpr(expr.Args[1]).LLVMValue()
+		} else {
+			cap_ = llvm.ConstNull(c.types.inttype)
 		}
 		args := []llvm.Value{dyntyp, cap_}
 		ptr := c.builder.CreateCall(f, args, "")
