@@ -309,6 +309,16 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 		}
 	}
 
+	if len(valspec.Values) == len(valspec.Names) {
+		for i, name := range valspec.Names {
+			if name.Name == "" {
+				continue
+			}
+			typ := c.objects[name].GetType()
+			c.convertUntyped(valspec.Values[i], typ)
+		}
+	}
+
 	// If the ValueSpec exists at the package level, create globals.
 	if obj, ok := c.objects[valspec.Names[0]]; ok {
 		if c.pkg.Scope.Lookup(valspec.Names[0].Name) == obj {

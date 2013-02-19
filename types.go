@@ -68,21 +68,31 @@ func derefType(typ types.Type) types.Type {
 func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 	frominfo := c.types.expr[from]
 	if frominfo.Type != nil && isUntyped(frominfo.Type) {
+		var newtype types.Type
 		switch to := to.(type) {
 		case types.Type:
-			frominfo.Type = to
-			c.types.expr[from] = frominfo
+			newtype = to
 		case *ast.Ident:
 			obj := c.objects[to]
-			frominfo.Type = obj.GetType()
-			c.types.expr[from] = frominfo
+			newtype = obj.GetType()
 		case ast.Expr:
 			toinfo := c.types.expr[to]
-			frominfo.Type = toinfo.Type
-			c.types.expr[from] = frominfo
+			newtype = toinfo.Type
 		default:
 			panic(fmt.Errorf("unexpected type: %T", to))
 		}
+
+		// If untyped constant is assigned to interface{},
+		// we'll change its type to the default type for
+		// the literal instead.
+		if frominfo.Type != types.Typ[types.UntypedNil] {
+			if _, ok := newtype.(*types.Interface); ok {
+				newtype = defaultType(frominfo.Type)
+			}
+		}
+
+		frominfo.Type = newtype
+		c.types.expr[from] = frominfo
 		return true
 	}
 	return false

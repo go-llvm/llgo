@@ -102,6 +102,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Is it a type conversion?
 	if len(expr.Args) == 1 && c.isType(expr.Fun) {
 		typ := c.types.expr[expr].Type
+		c.convertUntyped(expr.Args[0], typ)
 		value := c.VisitExpr(expr.Args[0])
 		return value.Convert(typ)
 	}
@@ -178,6 +179,14 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		} else {
 			argValues = make([]Value, len(expr.Args))
 			for i, x := range expr.Args {
+				var paramtyp types.Type
+				if fn_type.IsVariadic && i >= len(fn_type.Params)-1 {
+					last := fn_type.Params[len(fn_type.Params)-1]
+					paramtyp = last.Type.(*types.Slice).Elt
+				} else {
+					paramtyp = fn_type.Params[i].Type
+				}
+				c.convertUntyped(x, paramtyp)
 				argValues[i] = c.VisitExpr(x)
 			}
 		}
