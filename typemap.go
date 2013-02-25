@@ -374,8 +374,56 @@ func (tm *LLVMTypeMap) nameLLVMType(n *types.NamedType) llvm.Type {
 	return tm.ToLLVM(n.Underlying)
 }
 
-func (tm *LLVMTypeMap) Sizeof(t types.Type) uint64 {
-	return tm.target.TypeAllocSize(tm.ToLLVM(t))
+func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
+	// Array and Struct are handled by go/types, as the spec
+	// has guarantees about their alignment relative to elements.
+	switch typ := underlyingType(typ).(type) {
+	case *types.Basic:
+		switch typ.Kind {
+		case types.Int, types.Uint, types.Int64, types.Uint64,
+			types.Float64, types.Complex64, types.Complex128:
+			return int64(tm.target.TypeAllocSize(tm.inttype))
+		case types.Uintptr, types.UnsafePointer, types.String:
+			return int64(tm.target.PointerSize())
+		}
+		return types.DefaultAlignof(typ)
+	}
+	return int64(tm.target.PointerSize())
+}
+
+func (tm *LLVMTypeMap) Sizeof(typ types.Type) (result int64) {
+	switch typ := underlyingType(typ).(type) {
+	case *types.Basic:
+		switch typ.Kind {
+		case types.Int, types.Uint:
+			return int64(tm.target.TypeAllocSize(tm.inttype))
+		case types.Uintptr, types.UnsafePointer:
+			return int64(tm.target.PointerSize())
+		case types.String:
+			return 2 * int64(tm.target.PointerSize())
+		}
+		return types.DefaultSizeof(typ)
+	case *types.Array:
+		eltsize := tm.Sizeof(typ.Elt)
+		eltalign := tm.Alignof(typ.Elt)
+		var eltpad int64
+		if eltsize%eltalign != 0 {
+			eltpad = eltalign - (eltsize % eltalign)
+		}
+		return (eltsize + eltpad) * typ.Len
+	case *types.Struct:
+		var size int64
+		for _, f := range typ.Fields {
+			falign := tm.Alignof(f.Type)
+			fsize := tm.Sizeof(f.Type)
+			if size%falign != 0 {
+				fsize += falign - (size % falign)
+			}
+			size += fsize
+		}
+		return size
+	}
+	return int64(tm.target.PointerSize())
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -728,7 +776,7 @@ func (tm *TypeMap) uncommonType(n *types.NamedType, ptr bool) llvm.Value {
 
 		// ifn (single-word receiver function pointer for interface calls)
 		ifn := tfn
-		if !ptr && tm.Sizeof(ftyp.Recv.Type) > uint64(tm.target.PointerSize()) {
+		if !ptr && tm.Sizeof(ftyp.Recv.Type) > int64(tm.target.PointerSize()) {
 			mfunc := methodset.lookup(mfunc.Name, true)
 			ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
 			ifn = llvm.ConstExtractValue(ifn, []uint32{0})

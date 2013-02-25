@@ -268,7 +268,7 @@ func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
 // that the interface type matches.
 func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	c := v.compiler
-	if c.types.Sizeof(typ) > uint64(c.target.PointerSize()) {
+	if c.types.Sizeof(typ) > int64(c.target.PointerSize()) {
 		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
 		typ = &types.Pointer{Base: typ}
 		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")

@@ -25,12 +25,15 @@ func (l methodList) Less(i, j int) bool { return l[i].Name < l[j].Name }
 func (l methodList) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
 
 func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Package, ExprTypeMap, error) {
-	intsize, ptrsize := c.archinfo()
 	exprtypes := make(ExprTypeMap)
 	objectdata := make(map[types.Object]*ObjectData)
 	ctx := &types.Context{
-		IntSize: intsize,
-		PtrSize: ptrsize,
+		Sizeof: func(t types.Type) int64 {
+			return c.llvmtypes.Sizeof(t)
+		},
+		Alignof: func(t types.Type) int64 {
+			return c.llvmtypes.Alignof(t)
+		},
 		Expr: func(x ast.Expr, typ types.Type, val interface{}) {
 			exprtypes[x] = ExprTypeInfo{Type: typ, Value: val}
 		},
