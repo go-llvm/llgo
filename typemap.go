@@ -375,9 +375,9 @@ func (tm *LLVMTypeMap) nameLLVMType(n *types.NamedType) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
-	// Array and Struct are handled by go/types, as the spec
-	// has guarantees about their alignment relative to elements.
 	switch typ := underlyingType(typ).(type) {
+	case *types.Array:
+		return tm.Alignof(typ.Elt)
 	case *types.Basic:
 		switch typ.Kind {
 		case types.Int, types.Uint, types.Int64, types.Uint64,
@@ -387,11 +387,20 @@ func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
 			return int64(tm.target.PointerSize())
 		}
 		return types.DefaultAlignof(typ)
+	case *types.Struct:
+		max := int64(1)
+		for _, f := range typ.Fields {
+			a := tm.Alignof(f.Type)
+			if a > max {
+				max = a
+			}
+		}
+		return max
 	}
 	return int64(tm.target.PointerSize())
 }
 
-func (tm *LLVMTypeMap) Sizeof(typ types.Type) (result int64) {
+func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 	switch typ := underlyingType(typ).(type) {
 	case *types.Basic:
 		switch typ.Kind {
@@ -412,18 +421,29 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) (result int64) {
 		}
 		return (eltsize + eltpad) * typ.Len
 	case *types.Struct:
-		var size int64
-		for _, f := range typ.Fields {
-			falign := tm.Alignof(f.Type)
-			fsize := tm.Sizeof(f.Type)
-			if size%falign != 0 {
-				fsize += falign - (size % falign)
-			}
-			size += fsize
+		if len(typ.Fields) == 0 {
+			return 0
 		}
-		return size
+		offsets := tm.Offsetsof(typ.Fields)
+		n := len(typ.Fields)
+		return offsets[n-1] + tm.Sizeof(typ.Fields[n-1].Type)
 	}
 	return int64(tm.target.PointerSize())
+}
+
+func (tm *LLVMTypeMap) Offsetsof(fields []*types.Field) []int64 {
+	offsets := make([]int64, len(fields))
+	var offset int64
+	for i, f := range fields {
+		falign := tm.Alignof(f.Type)
+		fsize := tm.Sizeof(f.Type)
+		if offset%falign != 0 {
+			offset += falign - (offset % falign)
+		}
+		offsets[i] = offset
+		offset += fsize
+	}
+	return offsets
 }
 
 ///////////////////////////////////////////////////////////////////////////////

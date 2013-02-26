@@ -34,6 +34,9 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 		Alignof: func(t types.Type) int64 {
 			return c.llvmtypes.Alignof(t)
 		},
+		Offsetsof: func(fields []*types.Field) []int64 {
+			return c.llvmtypes.Offsetsof(fields)
+		},
 		Expr: func(x ast.Expr, typ types.Type, val interface{}) {
 			exprtypes[x] = ExprTypeInfo{Type: typ, Value: val}
 		},
