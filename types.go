@@ -6,9 +6,9 @@ package llgo
 
 import (
 	"bytes"
+	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"go/ast"
-	"go/types"
 )
 
 // XXX the below function is a clone of the one from llgo/types.

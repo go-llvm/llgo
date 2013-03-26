@@ -5,9 +5,9 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/token"
-	"go/types"
 )
 
 func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {

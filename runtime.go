@@ -5,12 +5,12 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
-	"go/types"
 	"path"
 	"strings"
 )

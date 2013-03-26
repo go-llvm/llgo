@@ -5,10 +5,10 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/token"
-	"go/types"
 	"sort"
 	"strconv"
 )

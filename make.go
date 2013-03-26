@@ -5,10 +5,10 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
-	"go/types"
 )
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {

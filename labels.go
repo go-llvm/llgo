@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"go/ast"
 	"github.com/axw/gollvm/llvm"
+	"go/ast"
 )
 
 type LabelData struct {

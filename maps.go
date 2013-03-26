@@ -5,8 +5,8 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"github.com/axw/gollvm/llvm"
-	"go/types"
 )
 
 // mapLookup searches a map for a specified key, returning a pointer to the

@@ -5,12 +5,12 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/scanner"
 	"go/token"
-	"go/types"
 	"reflect"
 )
 
@@ -93,7 +93,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
-	// For closures, context is the captured captured context values.
+	// For closures, context is the captured context values.
 	var paramoffset int
 	if context != nil {
 		paramoffset++

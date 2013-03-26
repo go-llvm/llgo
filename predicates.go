@@ -7,7 +7,7 @@
 package llgo
 
 import (
-	"go/types"
+	"code.google.com/p/go.exp/go/types"
 )
 
 func isNamed(typ types.Type) bool {

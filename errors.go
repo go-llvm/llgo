@@ -5,8 +5,8 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"github.com/axw/gollvm/llvm"
-	"go/types"
 )
 
 func (c *compiler) visitRecover() *LLVMValue {

@@ -5,8 +5,8 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"go/ast"
-	"go/types"
 )
 
 func (c *compiler) VisitNew(expr *ast.CallExpr) Value {

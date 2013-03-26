@@ -5,9 +5,9 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"go/ast"
 	"go/token"
-	"go/types"
 	"sort"
 )
 

@@ -5,9 +5,9 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
-	"go/types"
 )
 
 func (c *compiler) VisitSendStmt(stmt *ast.SendStmt) {
