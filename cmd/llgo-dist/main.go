@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -18,10 +19,12 @@ var (
 	llvmversion string
 	llvmcflags  string
 	llvmlibdir  string
+	llvmlibs    string
 	llvmldflags string
 	llvmbindir  string
 
-	triple string
+	triple     string
+	sharedllvm bool
 )
 
 func errorf(format string, args ...interface{}) {
@@ -32,6 +35,7 @@ func errorf(format string, args ...interface{}) {
 func init() {
 	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config", "Path to the llvm-config executable")
 	flag.StringVar(&triple, "triple", "", "The target triple")
+	flag.BoolVar(&sharedllvm, "shared", false, "If possible, dynamically link against LLVM")
 }
 
 func llvmconfigValue(option string) (string, error) {
@@ -77,6 +81,13 @@ func initLlvm() error {
 	}
 	log.Printf("LLVM library directory: %s", llvmlibdir)
 
+	// llvm-config --libs
+	llvmlibs, err = llvmconfigValue("--libs")
+	if err != nil {
+		return err
+	}
+	log.Printf("LLVM libraries: %s", llvmlibs)
+
 	// llvm-config --ldflags
 	llvmldflags, err = llvmconfigValue("--ldflags")
 	if err != nil {
@@ -94,11 +105,66 @@ func initLlvm() error {
 	return nil
 }
 
+// checkLlvmLibs checks if static/shared libraries
+// are available, and switches "sharedllvm" if necessary.
+// If neither are available, returns an error.
+func checkLlvmLibs() error {
+	for i := 0; i < 2; i++ {
+		if sharedllvm {
+			// Look for a file that starts "libLLVM-<version>".
+			prefix := fmt.Sprintf("libLLVM-%s", llvmversion)
+			d, err := os.Open(llvmlibdir)
+			if err != nil {
+				return err
+			}
+			defer d.Close()
+			names, err := d.Readdirnames(-1)
+			if err != nil {
+				return err
+			}
+			for _, name := range names {
+				if strings.HasPrefix(name, prefix) {
+					// Found the .so file.
+					log.Printf("Located shared library: %s", name)
+					return nil
+				}
+			}
+		} else {
+			// llvm-config --libnames
+			llvmlibnames, err := llvmconfigValue("--libnames")
+			if err != nil {
+				return err
+			}
+			for _, f := range strings.Fields(llvmlibnames) {
+				_, err = os.Stat(filepath.Join(llvmlibdir, f))
+				if err != nil {
+					break
+				}
+			}
+			if err == nil {
+				// Found all the .a files.
+				log.Printf("Located static libraries")
+				return nil
+			}
+		}
+		if i == 0 {
+			a, b := "shared library", "static libraries"
+			if !sharedllvm {
+				a, b = b, a
+			}
+			log.Printf("Failed to locate %s, will try %s", a, b)
+			sharedllvm = !sharedllvm
+		}
+	}
+	return fmt.Errorf("No static or shared libraries found in %q", llvmlibdir)
+}
+
 func main() {
 	flag.Parse()
 
 	actions := []func() error{
 		initLlvm,
+		checkLlvmLibs,
 		buildLlgo,
 		genSyscall,
 		genMath,

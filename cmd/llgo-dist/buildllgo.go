@@ -31,11 +31,17 @@ func buildLlgo() error {
 	}
 
 	cgoCflags := fmt.Sprintf("%s -I %s/../include", llvmcflags, pkg.Dir)
-	cgoLdflags := fmt.Sprintf("%s -Wl,-L%s -lLLVM-%s",
-		llvmldflags, llvmlibdir, llvmversion)
+	cgoLdflags := fmt.Sprintf("-Wl,-L%s", llvmlibdir)
+	ldflags := fmt.Sprintf("-r %q", llvmlibdir)
+
+	if sharedllvm {
+		cgoLdflags += fmt.Sprintf(" -lLLVM-%s ", llvmversion)
+	} else {
+		cgoLdflags += " " + llvmlibs + " -lstdc++ "
+	}
+	cgoLdflags += " " + llvmldflags
 
 	var output []byte
-	ldflags := "-r " + llvmlibdir
 	args := []string{"get", "-ldflags", ldflags}
 
 	llvmtag := "llvm" + llvmversion
