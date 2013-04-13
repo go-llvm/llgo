@@ -154,12 +154,21 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 
 	c.functions.push(&function{LLVMValue: f, results: results})
 	c.VisitBlockStmt(body, false)
-	c.functions.pop()
-	last := llvm_fn.LastBasicBlock()
-	if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-		// Assume nil return type, AST should be checked first.
-		c.builder.SetInsertPointAtEnd(last)
-		c.builder.CreateRetVoid()
+	funcstate := c.functions.pop()
+
+	// If there are no results, then "return" is optional.
+	if len(results) == 0 {
+		// Use GetInsertBlock rather than LastBasicBlock, since the
+		// last basic block might actually be a "defer" block.
+		last := c.builder.GetInsertBlock()
+		if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
+			c.builder.SetInsertPointAtEnd(last)
+			if funcstate.deferblock.IsNil() {
+				c.builder.CreateRetVoid()
+			} else {
+				c.builder.CreateBr(funcstate.deferblock)
+			}
+		}
 	}
 }
 
