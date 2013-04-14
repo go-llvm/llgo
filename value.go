@@ -5,12 +5,12 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/token"
-	"math/big"
 )
 
 // Resolver is an interface for resolving AST objects to values.
@@ -53,9 +53,9 @@ func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
 	return &LLVMValue{c, v, t, nil, nil}
 }
 
-func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
+func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	switch {
-	case v == types.NilType{}:
+	case v.Kind() == exact.Nil:
 		llvmtyp := c.types.ToLLVM(typ)
 		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
 
@@ -64,13 +64,7 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			typ = types.Typ[types.String]
 		}
 		llvmtyp := c.types.ToLLVM(typ)
-		var strval string
-		switch v := v.(type) {
-		case string:
-			strval = v
-		case int64:
-			strval = string(v)
-		}
+		strval := exact.StringVal(v)
 		strlen := len(strval)
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		var ptr llvm.Value
@@ -93,23 +87,22 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			typ = types.Typ[types.Int]
 		}
 		llvmtyp := c.types.ToLLVM(typ)
-		signed := !isUnsigned(typ)
-		// TODO (go/types) check constant doesn't overflow
-		switch v := v.(type) {
-		case int64:
-			llvmvalue := llvm.ConstInt(llvmtyp, uint64(v), signed)
-			return c.NewValue(llvmvalue, typ)
-		case *big.Int:
-			llvmvalue := llvm.ConstInt(llvmtyp, v.Uint64(), signed)
-			return c.NewValue(llvmvalue, typ)
+		var llvmvalue llvm.Value
+		if isUnsigned(typ) {
+			v, _ := exact.Uint64Val(v)
+			llvmvalue = llvm.ConstInt(llvmtyp, v, false)
+		} else {
+			v, _ := exact.Int64Val(v)
+			llvmvalue = llvm.ConstInt(llvmtyp, uint64(v), true)
 		}
+		return c.NewValue(llvmvalue, typ)
 
 	case isBoolean(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Bool]
 		}
 		var llvmvalue llvm.Value
-		if v.(bool) {
+		if exact.BoolVal(v) {
 			llvmvalue = llvm.ConstAllOnes(llvm.Int1Type())
 		} else {
 			llvmvalue = llvm.ConstNull(llvm.Int1Type())
@@ -121,29 +114,14 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 			typ = types.Typ[types.Float64]
 		}
 		llvmtyp := c.types.ToLLVM(typ)
-		// TODO (go/types) check constant doesn't overflow
-		switch v := v.(type) {
-		case float64:
-			llvmvalue := llvm.ConstFloat(llvmtyp, v)
-			return c.NewValue(llvmvalue, typ)
-		case int64:
-			llvmvalue := llvm.ConstFloat(llvmtyp, float64(v))
-			return c.NewValue(llvmvalue, typ)
-		case *big.Rat:
-			floatv := float64(v.Num().Int64()) / float64(v.Denom().Int64())
-			llvmvalue := llvm.ConstFloat(llvmtyp, floatv)
-			return c.NewValue(llvmvalue, typ)
-		case *big.Int:
-			llvmvalue := llvm.ConstFloat(llvmtyp, float64(v.Int64()))
-			return c.NewValue(llvmvalue, typ)
-		default:
-			panic(fmt.Sprintf("unhandled %T", v))
-		}
+		floatval, _ := exact.Float64Val(v)
+		llvmvalue := llvm.ConstFloat(llvmtyp, floatval)
+		return c.NewValue(llvmvalue, typ)
 
 	case typ == types.Typ[types.UnsafePointer]:
 		llvmtyp := c.types.ToLLVM(typ)
-		signed := !isUnsigned(typ)
-		llvmvalue := llvm.ConstInt(llvmtyp, uint64(v.(int64)), signed)
+		v, _ := exact.Uint64Val(v)
+		llvmvalue := llvm.ConstInt(llvmtyp, v, false)
 		return c.NewValue(llvmvalue, typ)
 
 	case isComplex(typ):
@@ -153,32 +131,20 @@ func (c *compiler) NewConstValue(v interface{}, typ types.Type) *LLVMValue {
 		llvmtyp := c.types.ToLLVM(typ)
 		floattyp := llvmtyp.StructElementTypes()[0]
 		llvmvalue := llvm.ConstNull(llvmtyp)
-		switch v := v.(type) {
-		case float64:
-			llvmre := llvm.ConstFloat(floattyp, v)
-			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
-		case int64:
-			llvmre := llvm.ConstFloat(floattyp, float64(v))
-			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
-		//case *big.Rat:
-		//	floatv := float64(v.Num().Int64()) / float64(v.Denom().Int64())
-		//	llvmvalue := llvm.ConstFloat(llvmtyp, floatv)
-		//	return c.NewValue(llvmvalue, typ)
-		case *types.Complex:
-			re := float64(v.Re.Num().Int64()) / float64(v.Re.Denom().Int64())
-			im := float64(v.Im.Num().Int64()) / float64(v.Im.Denom().Int64())
-			llvmre := llvm.ConstFloat(floattyp, re)
-			llvmim := llvm.ConstFloat(floattyp, im)
-			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
-			llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmim, []uint32{1})
-		}
+		realv := exact.Real(v)
+		imagv := exact.Imag(v)
+		realfloatval, _ := exact.Float64Val(realv)
+		imagfloatval, _ := exact.Float64Val(imagv)
+		llvmre := llvm.ConstFloat(floattyp, realfloatval)
+		llvmim := llvm.ConstFloat(floattyp, imagfloatval)
+		llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
+		llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmim, []uint32{1})
 		return c.NewValue(llvmvalue, typ)
 	}
 
 	// Special case for string -> []byte
 	if isIdentical(underlyingType(typ), &types.Slice{Elt: types.Typ[types.Byte]}) {
-		switch v := v.(type) {
-		case string:
+		if v.Kind() == exact.String {
 			strval := c.NewConstValue(v, types.Typ[types.String])
 			return strval.Convert(typ).(*LLVMValue)
 		}

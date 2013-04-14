@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
@@ -202,18 +203,17 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	switch underlyingType(typ).(type) {
 	case *types.Array, *types.Slice:
 		if len(valuemap) > 0 {
-			maxi := int64(-1)
+			var maxkey uint64
 			for key, _ := range valuemap {
-				i := key.(int64)
-				if i < 0 {
-					panic("array index must be non-negative integer constant")
-				} else if i > maxi {
-					maxi = i
+				key, _ := exact.Uint64Val(key.(exact.Value))
+				if key > maxkey {
+					maxkey = key
 				}
 			}
-			valuelist = make([]Value, maxi+1)
+			valuelist = make([]Value, maxkey+1)
 			for key, value := range valuemap {
-				valuelist[key.(int64)] = value
+				key, _ := exact.Uint64Val(key.(exact.Value))
+				valuelist[key] = value
 			}
 		}
 	}

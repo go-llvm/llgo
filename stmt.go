@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
@@ -34,7 +35,7 @@ func (c *compiler) maybeImplicitBranch(dest llvm.BasicBlock) {
 
 func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 	lhs := c.VisitExpr(stmt.X).(*LLVMValue)
-	rhs := c.NewConstValue(int64(1), lhs.Type())
+	rhs := c.NewConstValue(exact.MakeUint64(1), lhs.Type())
 	op := token.ADD
 	if stmt.Tok == token.DEC {
 		op = token.SUB
@@ -484,7 +485,7 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	if stmt.Tag != nil {
 		tag = c.VisitExpr(stmt.Tag)
 	} else {
-		tag = c.NewConstValue(true, types.Typ[types.Bool])
+		tag = c.NewConstValue(exact.MakeBool(true), types.Typ[types.Bool])
 	}
 	if len(stmt.Body.List) == 0 {
 		return

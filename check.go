@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"go/ast"
 	"go/token"
@@ -28,16 +29,10 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 	exprtypes := make(ExprTypeMap)
 	objectdata := make(map[types.Object]*ObjectData)
 	ctx := &types.Context{
-		Sizeof: func(t types.Type) int64 {
-			return c.llvmtypes.Sizeof(t)
-		},
-		Alignof: func(t types.Type) int64 {
-			return c.llvmtypes.Alignof(t)
-		},
-		Offsetsof: func(fields []*types.Field) []int64 {
-			return c.llvmtypes.Offsetsof(fields)
-		},
-		Expr: func(x ast.Expr, typ types.Type, val interface{}) {
+		Sizeof:   c.llvmtypes.Sizeof,
+		Alignof:  c.llvmtypes.Alignof,
+		Offsetsof: c.llvmtypes.Offsetsof,
+		Expr: func(x ast.Expr, typ types.Type, val exact.Value) {
 			exprtypes[x] = ExprTypeInfo{Type: typ, Value: val}
 		},
 		Ident: func(id *ast.Ident, obj types.Object) {

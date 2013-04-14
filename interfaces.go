@@ -5,12 +5,12 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/token"
 	"sort"
-	"strconv"
 )
 
 // convertV2I converts a value to an interface.
@@ -163,7 +163,7 @@ func (v *LLVMValue) mustConvertI2I(iface *types.Interface) Value {
 	builder.SetInsertPointAtEnd(failed)
 
 	s := fmt.Sprintf("convertI2I(%s, %s) failed", v.typ, iface)
-	c.visitPanic(c.NewConstValue(strconv.Quote(s), types.Typ[types.String]))
+	c.visitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }
@@ -215,7 +215,7 @@ func (v *LLVMValue) mustConvertI2V(typ types.Type) Value {
 	builder.SetInsertPointAtEnd(failed)
 
 	s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
-	c.visitPanic(c.NewConstValue(strconv.Quote(s), types.Typ[types.String]))
+	c.visitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }

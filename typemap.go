@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"code.google.com/p/go.exp/go/exact"
 	"code.google.com/p/go.exp/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
@@ -16,7 +17,7 @@ type ExprTypeInfo struct {
 	types.Type
 
 	// Constant value if non-nil.
-	Value interface{}
+	Value exact.Value
 }
 
 type ExprTypeMap map[ast.Expr]ExprTypeInfo
