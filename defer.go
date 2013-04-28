@@ -76,10 +76,14 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	//
 	// TODO consider having stack space for one (or few)
 	// defer statements, to avoid heap allocation.
-	f.deferptr = c.createTypeMalloc(c.target.IntPtrType())
-	f.deferblock = llvm.AddBasicBlock(currblock.Parent(), "")
+	//
+	// TODO delay this until just before the first "invoke"
+	// instruction is emitted.
+	f.deferptr = c.builder.CreateAlloca(c.target.IntPtrType(), "deferptr")
+	c.builder.CreateStore(llvm.ConstNull(c.target.IntPtrType()), f.deferptr)
+	f.deferblock = llvm.AddBasicBlock(currblock.Parent(), "defer")
 	if hasCallExpr(body) {
-		f.unwindblock = llvm.AddBasicBlock(currblock.Parent(), "")
+		f.unwindblock = llvm.AddBasicBlock(currblock.Parent(), "unwind")
 		f.unwindblock.MoveAfter(currblock)
 		f.deferblock.MoveAfter(f.unwindblock)
 	} else {

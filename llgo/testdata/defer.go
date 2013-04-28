@@ -4,6 +4,10 @@ type T struct {
 	value int
 }
 
+type T1 struct {
+	T
+}
+
 func (t T) abc() {
 	println(t.value)
 }
@@ -16,6 +20,12 @@ func (t *T) ghi(v int) {
 	println(v)
 }
 
+func f5() {
+	var t1 T1
+	t1.T.value = 888
+	defer t1.abc()
+}
+
 func f4() {
 	var a T = T{999}
 	var b *T = &a
@@ -25,8 +35,7 @@ func f4() {
 	defer b.abc()
 	defer b.def()
 	defer b.ghi(456)
-	_ = a
-	_ = b
+	f5()
 }
 
 func f3() (a int) {

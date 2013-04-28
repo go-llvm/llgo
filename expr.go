@@ -267,6 +267,10 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 		// of the receiver), then we must conditionally call the
 		// function with the additional receiver/closure.
 		if !context.IsNull() || fn_type.Recv != nil {
+			// Store the blocks for referencing in the Phi below;
+			// note that we update the block after each createCall,
+			// since createCall may create new blocks and we want
+			// the predecessors to the Phi.
 			var nullctxblock llvm.BasicBlock
 			var nonnullctxblock llvm.BasicBlock
 			var endblock llvm.BasicBlock
@@ -285,6 +289,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 				// null context case.
 				c.builder.SetInsertPointAtEnd(nullctxblock)
 				nullctxresult = createCall(fnptr, args, "")
+				nullctxblock = c.builder.GetInsertBlock()
 				c.builder.CreateBr(endblock)
 				c.builder.SetInsertPointAtEnd(nonnullctxblock)
 			}
@@ -306,6 +311,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 			// If the return type is not void, create a
 			// PHI node to select which value to return.
 			if !nullctxresult.IsNil() {
+				nonnullctxblock = c.builder.GetInsertBlock()
 				c.builder.CreateBr(endblock)
 				c.builder.SetInsertPointAtEnd(endblock)
 				if result.Type().TypeKind() != llvm.VoidTypeKind {
