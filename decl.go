@@ -138,9 +138,18 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 		}
 	}
 
+	funcstate := &function{LLVMValue: f, results: results}
+	c.functions.push(funcstate)
+	hasdefer := hasDefer(funcstate, body)
+
 	// Allocate space on the stack for named results.
 	for _, v := range results {
-		if v.Name != "" {
+		allocstack := v.Name != ""
+		if !allocstack && hasdefer {
+			c.objectdata[v] = &ObjectData{}
+			allocstack = true
+		}
+		if allocstack {
 			typ := v.Type
 			llvmtyp := c.types.ToLLVM(typ)
 			stackptr := c.builder.CreateAlloca(llvmtyp, v.Name)
@@ -152,9 +161,12 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 		}
 	}
 
-	c.functions.push(&function{LLVMValue: f, results: results})
+	// Create the function body.
+	if hasdefer {
+		c.makeDeferBlock(funcstate, body)
+	}
 	c.VisitBlockStmt(body, false)
-	funcstate := c.functions.pop()
+	c.functions.pop()
 
 	// If there are no results, then "return" is optional.
 	if len(results) == 0 {

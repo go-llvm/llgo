@@ -80,6 +80,32 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 	return value.UnaryOp(expr.Op)
 }
 
+func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr) []Value {
+	var argValues []Value
+	if len(args) == 0 {
+		return argValues
+	}
+	arg0 := args[0]
+	if _, ok := c.types.expr[arg0].Type.(*types.Result); ok {
+		// f(g(...)), where g is multi-value return
+		argValues = c.destructureExpr(args[0])
+	} else {
+		argValues = make([]Value, len(args))
+		for i, x := range args {
+			var paramtyp types.Type
+			if ftype.IsVariadic && i >= len(ftype.Params)-1 {
+				last := ftype.Params[len(ftype.Params)-1]
+				paramtyp = last.Type.(*types.Slice).Elt
+			} else {
+				paramtyp = ftype.Params[i].Type
+			}
+			c.convertUntyped(x, paramtyp)
+			argValues[i] = c.VisitExpr(x)
+		}
+	}
+	return argValues
+}
+
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Is it a type conversion?
 	if len(expr.Args) == 1 && c.isType(expr.Fun) {
@@ -152,29 +178,27 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	fn_type := underlyingType(fn.Type()).(*types.Signature)
 
 	// Evaluate arguments.
-	var argValues []Value
-	if len(expr.Args) > 0 {
-		arg0 := expr.Args[0]
-		if _, ok := c.types.expr[arg0].Type.(*types.Result); ok {
-			// f(g(...)), where g is multi-value return
-			argValues = c.destructureExpr(expr.Args[0])
-		} else {
-			argValues = make([]Value, len(expr.Args))
-			for i, x := range expr.Args {
-				var paramtyp types.Type
-				if fn_type.IsVariadic && i >= len(fn_type.Params)-1 {
-					last := fn_type.Params[len(fn_type.Params)-1]
-					paramtyp = last.Type.(*types.Slice).Elt
-				} else {
-					paramtyp = fn_type.Params[i].Type
-				}
-				c.convertUntyped(x, paramtyp)
-				argValues[i] = c.VisitExpr(x)
-			}
-		}
-	}
+	argValues := c.evalCallArgs(fn_type, expr.Args)
 
+	// Depending on whether the function contains defer statements or not,
+	// we'll generate either a "call" or an "invoke" instruction.
+	var invoke bool
+	if f := c.functions.top(); f != nil && !f.deferblock.IsNil() {
+		invoke = true
+	}
+	dotdotdot := expr.Ellipsis.IsValid()
+	return c.createCall(fn, argValues, dotdotdot, invoke)
+}
+
+// createCall emits the code for a function call, taking into account
+// variadic functions, receivers, and panic/defer.
+//
+// dotdotdot is true if the last argument is followed with "...".
+func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invoke bool) *LLVMValue {
+	fn_type := underlyingType(fn.Type()).(*types.Signature)
 	var args []llvm.Value
+
+	// TODO Move all of this to evalCallArgs?
 	if nparams := len(fn_type.Params); nparams > 0 {
 		if fn_type.IsVariadic {
 			nparams--
@@ -185,7 +209,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			args = append(args, value.Convert(param_type).LLVMValue())
 		}
 		if fn_type.IsVariadic {
-			if expr.Ellipsis.IsValid() {
+			if dotdotdot {
 				// Calling f(x...). Just pass the slice directly.
 				slice_value := argValues[nparams].LLVMValue()
 				args = append(args, slice_value)
@@ -210,6 +234,22 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		result_type = fn_type.Results[0].Type.(types.Type)
 	default:
 		result_type = &types.Result{Values: fn_type.Results}
+	}
+
+	// Depending on whether the function contains defer statements or not,
+	// we'll generate either a "call" or an "invoke" instruction.
+	var createCall = c.builder.CreateCall
+	if invoke {
+		f := c.functions.top()
+		// TODO Create a method on compiler (avoid creating closures).
+		createCall = func(fn llvm.Value, args []llvm.Value, name string) llvm.Value {
+			currblock := c.builder.GetInsertBlock()
+			returnblock := llvm.AddBasicBlock(currblock.Parent(), "")
+			returnblock.MoveAfter(currblock)
+			value := c.builder.CreateInvoke(fn, args, returnblock, f.unwindblock, "")
+			c.builder.SetInsertPointAtEnd(returnblock)
+			return value
+		}
 	}
 
 	var fnptr llvm.Value
@@ -244,7 +284,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 
 				// null context case.
 				c.builder.SetInsertPointAtEnd(nullctxblock)
-				nullctxresult = c.builder.CreateCall(fnptr, args, "")
+				nullctxresult = createCall(fnptr, args, "")
 				c.builder.CreateBr(endblock)
 				c.builder.SetInsertPointAtEnd(nonnullctxblock)
 			}
@@ -261,7 +301,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 				fnptrtyp := llvm.PointerType(fntyp, 0)
 				fnptr = c.builder.CreateBitCast(fnptr, fnptrtyp, "")
 			}
-			result = c.builder.CreateCall(fnptr, args, "")
+			result = createCall(fnptr, args, "")
 
 			// If the return type is not void, create a
 			// PHI node to select which value to return.
@@ -279,7 +319,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 			return c.NewValue(result, result_type)
 		}
 	}
-	result := c.builder.CreateCall(fnptr, args, "")
+	result := createCall(fnptr, args, "")
 	return c.NewValue(result, result_type)
 }
 

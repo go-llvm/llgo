@@ -18,6 +18,7 @@ func TestTypeSwitch(t *testing.T)               { checkOutputEqual(t, "switch/ty
 func TestIfLazy(t *testing.T)                   { checkOutputEqual(t, "if/lazy.go") }
 func TestGoto(t *testing.T)                     { checkOutputEqual(t, "branching/goto.go") }
 func TestRecover(t *testing.T)                  { checkOutputEqual(t, "errors/recover.go") }
-func TestLabeledBranching(t *testing.T)             { checkOutputEqual(t, "branching/labeled.go") }
+func TestLabeledBranching(t *testing.T)         { checkOutputEqual(t, "branching/labeled.go") }
+func TestDefer(t *testing.T)                    { checkOutputEqual(t, "defer.go") }
 
 // vim: set ft=go:

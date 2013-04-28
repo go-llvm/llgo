@@ -88,7 +88,11 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	f := c.functions.top()
 	ftyp := f.Type().(*types.Signature)
 	if len(ftyp.Results) == 0 {
-		c.builder.CreateRetVoid()
+		if !f.deferblock.IsNil() {
+			c.builder.CreateBr(f.deferblock)
+		} else {
+			c.builder.CreateRetVoid()
+		}
 		return
 	}
 
@@ -150,10 +154,14 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		}
 	}
 
-	if len(values) == 1 {
-		c.builder.CreateRet(values[0])
+	if !f.deferblock.IsNil() {
+		c.builder.CreateBr(f.deferblock)
 	} else {
-		c.builder.CreateAggregateRet(values)
+		if len(values) == 1 {
+			c.builder.CreateRet(values[0])
+		} else {
+			c.builder.CreateAggregateRet(values)
+		}
 	}
 }
 
@@ -932,10 +940,6 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		}
 		c.maybeImplicitBranch(endBlock)
 	}
-}
-
-func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
-	// TODO
 }
 
 func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
