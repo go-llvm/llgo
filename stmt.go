@@ -784,7 +784,6 @@ arrayrange:
 }
 
 func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
-	// TODO handle labeled continue, break.
 	switch stmt.Tok {
 	case token.BREAK:
 		var block llvm.BasicBlock
@@ -806,7 +805,6 @@ func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
 		labelData := c.labelData(stmt.Label)
 		c.builder.CreateBr(labelData.Goto)
 	default:
-		// TODO implement goto, fallthrough
 		panic("unimplemented: " + stmt.Tok.String())
 	}
 }

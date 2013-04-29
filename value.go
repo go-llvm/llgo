@@ -174,7 +174,6 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 
 	switch typ := underlyingType(lhs.typ).(type) {
 	case *types.Struct:
-		// TODO check types are the same.
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		struct_fields := typ.Fields
 		if element_types_count > 0 {
