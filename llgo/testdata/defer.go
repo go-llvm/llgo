@@ -20,10 +20,21 @@ func (t *T) ghi(v int) {
 	println(v)
 }
 
-func f5() {
+func f5(panic_ bool) {
 	var t1 T1
 	t1.T.value = 888
 	defer t1.abc()
+	defer func() {
+		println("f5")
+		if err := recover(); err != nil {
+			println("recovered:", err.(string))
+		} else {
+			println("recovered no error")
+		}
+	}()
+	if panic_ {
+		panic("meep meep")
+	}
 }
 
 func f4() {
@@ -35,7 +46,8 @@ func f4() {
 	defer b.abc()
 	defer b.def()
 	defer b.ghi(456)
-	f5()
+	f5(true)
+	f5(false) // verify the recover in f5 works
 }
 
 func f3() (a int) {

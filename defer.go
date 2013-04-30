@@ -71,6 +71,11 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	currblock := c.builder.GetInsertBlock()
 	defer c.builder.SetInsertPointAtEnd(currblock)
 
+	// If we create an unwind block, "err" will be stack space
+	// for the interface{} value passed through the caught
+	// exception. A recover() should zero the stack space.
+	var err llvm.Value
+
 	// Create space for a pointer on the stack, which
 	// we'll store the first panic structure in.
 	//
@@ -83,6 +88,7 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	c.builder.CreateStore(llvm.ConstNull(c.target.IntPtrType()), f.deferptr)
 	f.deferblock = llvm.AddBasicBlock(currblock.Parent(), "defer")
 	if hasCallExpr(body) {
+		err = c.builder.CreateAlloca(c.types.ToLLVM(&types.Interface{}), "err")
 		f.unwindblock = llvm.AddBasicBlock(currblock.Parent(), "unwind")
 		f.unwindblock.MoveAfter(currblock)
 		f.deferblock.MoveAfter(f.unwindblock)
@@ -100,8 +106,16 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 			persftyp := llvm.FunctionType(llvm.Int32Type(), nil, true)
 			pers = llvm.AddFunction(c.module.Module, "__gxx_personality_v0", persftyp)
 		}
+		// FIXME use the exception typeid defined in pkg/runtime/panic.ll
 		lp := c.builder.CreateLandingPad(restyp, pers, 1, "")
 		lp.AddClause(llvm.ConstNull(i8ptr))
+
+		// Call "runtime.before_defers"
+		beforedefers := c.NamedFunction("runtime.before_defers", "func f(*int8, int32, *interface{})")
+		exception := c.builder.CreateExtractValue(llvm.Value(lp), 0, "")
+		typeid := c.builder.CreateExtractValue(llvm.Value(lp), 1, "")
+		c.builder.CreateCall(beforedefers, []llvm.Value{exception, typeid, err}, "")
+
 		c.builder.CreateBr(f.deferblock)
 	}
 
@@ -110,6 +124,14 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	ptrval := c.builder.CreateLoad(f.deferptr, "")
 	rundefers := c.NamedFunction("runtime.rundefers", "func f(uintptr)")
 	c.builder.CreateCall(rundefers, []llvm.Value{ptrval}, "")
+
+	// Call "runtime.after_defers"
+	if !err.IsNil() {
+		err := c.builder.CreateLoad(err, "")
+		afterdefers := c.NamedFunction("runtime.after_defers", "func f(interface{})")
+		c.builder.CreateCall(afterdefers, []llvm.Value{err}, "")
+	}
+
 	if len(f.results) == 0 {
 		c.builder.CreateRetVoid()
 	} else {

@@ -9,12 +9,9 @@ type deferred struct {
 	next *deferred
 }
 
-func panic_(e interface{}) {
-	print("panic(")
-	printany(e)
-	println(")")
-	llvm_trap()
-}
+func panic_(e interface{})
+func before_defers(exc *int8, id int32)
+func after_defers(exc *int8)
 
 func rundefers(d *deferred) {
 	for ; d != nil; d = d.next {
