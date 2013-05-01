@@ -71,11 +71,6 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	currblock := c.builder.GetInsertBlock()
 	defer c.builder.SetInsertPointAtEnd(currblock)
 
-	// If we create an unwind block, "err" will be stack space
-	// for the interface{} value passed through the caught
-	// exception. A recover() should zero the stack space.
-	var err llvm.Value
-
 	// Create space for a pointer on the stack, which
 	// we'll store the first panic structure in.
 	//
@@ -88,7 +83,6 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	c.builder.CreateStore(llvm.ConstNull(c.target.IntPtrType()), f.deferptr)
 	f.deferblock = llvm.AddBasicBlock(currblock.Parent(), "defer")
 	if hasCallExpr(body) {
-		err = c.builder.CreateAlloca(c.types.ToLLVM(&types.Interface{}), "err")
 		f.unwindblock = llvm.AddBasicBlock(currblock.Parent(), "unwind")
 		f.unwindblock.MoveAfter(currblock)
 		f.deferblock.MoveAfter(f.unwindblock)
@@ -111,10 +105,17 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 		lp.AddClause(llvm.ConstNull(i8ptr))
 
 		// Call "runtime.before_defers"
-		beforedefers := c.NamedFunction("runtime.before_defers", "func f(*int8, int32, *interface{})")
+		//
+		// TODO we can optimise for a common case where all deferred
+		// functions are function literals, and the function literals
+		// contain no calls to the recover() builtin; in this case
+		// there is no need to call runtime.before_defers or
+		// runtime.after_defers; instead, just unconditionally resume
+		// in place of runtime.after_defers.
+		beforedefers := c.NamedFunction("runtime.before_defers", "func f(*int8, int32)")
 		exception := c.builder.CreateExtractValue(llvm.Value(lp), 0, "")
 		typeid := c.builder.CreateExtractValue(llvm.Value(lp), 1, "")
-		c.builder.CreateCall(beforedefers, []llvm.Value{exception, typeid, err}, "")
+		c.builder.CreateCall(beforedefers, []llvm.Value{exception, typeid}, "")
 
 		c.builder.CreateBr(f.deferblock)
 	}
@@ -126,10 +127,9 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	c.builder.CreateCall(rundefers, []llvm.Value{ptrval}, "")
 
 	// Call "runtime.after_defers"
-	if !err.IsNil() {
-		err := c.builder.CreateLoad(err, "")
-		afterdefers := c.NamedFunction("runtime.after_defers", "func f(interface{})")
-		c.builder.CreateCall(afterdefers, []llvm.Value{err}, "")
+	if !f.unwindblock.IsNil() {
+		afterdefers := c.NamedFunction("runtime.after_defers", "func f()")
+		c.builder.CreateCall(afterdefers, nil, "")
 	}
 
 	if len(f.results) == 0 {

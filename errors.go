@@ -10,10 +10,11 @@ import (
 )
 
 func (c *compiler) visitRecover() *LLVMValue {
-	// TODO
-	emptyInterface := &types.Interface{}
-	errval := llvm.ConstNull(c.types.ToLLVM(emptyInterface))
-	return c.NewValue(errval, emptyInterface)
+	eface := &types.Interface{}
+	err := c.builder.CreateAlloca(c.types.ToLLVM(eface), "")
+	f := c.NamedFunction("runtime.recover", "func f(*interface{})")
+	c.builder.CreateCall(f, []llvm.Value{err}, "")
+	return c.NewValue(c.builder.CreateLoad(err, ""), eface)
 }
 
 func (c *compiler) visitPanic(arg Value) {
