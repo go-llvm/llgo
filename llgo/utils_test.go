@@ -8,11 +8,13 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -46,9 +48,19 @@ func init() {
 		cmd := exec.Command(os.Args[0], os.Args[1:]...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		go func() {
+			c := make(chan os.Signal, 1)
+			signal.Notify(c, os.Interrupt)
+			signal.Notify(c, syscall.SIGTERM)
+			signal.Notify(c, syscall.SIGQUIT)
+			<-c
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		}()
 		err = cmd.Run()
 		os.RemoveAll(tempdir)
-		if err != nil {
+		if err != nil && err.Error() != "signal: killed" {
 			panic(err)
 		}
 		os.Exit(0)
