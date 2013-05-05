@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -45,7 +46,18 @@ func init() {
 		cmd := exec.Command(os.Args[0], os.Args[1:]...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+
+		// Some operating systems won't kill the child on Ctrl-C.
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		go func() {
+			err = cmd.Run()
+			c <- nil
+		}()
+		if sig := <-c; sig != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+
 		os.RemoveAll(tempdir)
 		if err != nil {
 			panic(err)
