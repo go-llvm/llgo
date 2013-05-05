@@ -24,14 +24,21 @@ func f5(panic_ bool) {
 	var t1 T1
 	t1.T.value = 888
 	defer t1.abc()
-	defer func() {
+	var f func(int)
+	f = func(recursion int) {
+		if recursion > 0 {
+			f(recursion - 1)
+			return
+		}
 		println("f5")
 		if err := recover(); err != nil {
 			println("recovered:", err.(string))
 		} else {
 			println("recovered no error")
 		}
-	}()
+	}
+	defer f(0) // will recover (after f(1))
+	defer f(1) // won't recover
 	if panic_ {
 		panic("meep meep")
 	}

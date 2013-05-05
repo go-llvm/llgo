@@ -10,10 +10,25 @@ import (
 )
 
 func (c *compiler) visitRecover() *LLVMValue {
+	// Functions that call recover must not be inlined, or we
+	// can't tell whether the recover call is valid.
+	fn := c.functions.top()
+	fnptr := c.builder.CreateExtractValue(fn.value, 0, "")
+	fnptr.AddFunctionAttr(llvm.NoInlineAttribute)
+
+	// We need to tell runtime.recover if it's being called from
+	// an indirectly invoked deferred function or not.
+	var indirect llvm.Value
+	sig := fn.Type().(*types.Signature)
+	if len(sig.Params) == 0 {
+		indirect = llvm.ConstInt(llvm.Int32Type(), 0, false)
+	} else {
+		indirect = llvm.ConstInt(llvm.Int32Type(), 1, false)
+	}
 	eface := &types.Interface{}
 	err := c.builder.CreateAlloca(c.types.ToLLVM(eface), "")
-	f := c.NamedFunction("runtime.recover", "func f(*interface{})")
-	c.builder.CreateCall(f, []llvm.Value{err}, "")
+	r := c.NamedFunction("runtime.recover", "func f(int32, *interface{})")
+	c.builder.CreateCall(r, []llvm.Value{indirect, err}, "")
 	return c.NewValue(c.builder.CreateLoad(err, ""), eface)
 }
 

@@ -10,8 +10,8 @@ type deferred struct {
 }
 
 func panic_(e interface{})
-func before_defers(exc *int8, id int32)
-func after_defers(exc *int8)
+func before_defers(exc *int8, id int32) (ctx *int8)
+func after_defers(ctx *int8)
 
 func rundefers(d *deferred) {
 	for ; d != nil; d = d.next {

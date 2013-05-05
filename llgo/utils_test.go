@@ -32,7 +32,6 @@ func testdata(files ...string) []string {
 func init() {
 	tempdir = os.Getenv("LLGO_TESTDIR")
 	if tempdir != "" {
-		llvm.LinkInJIT()
 		llvm.InitializeNativeTarget()
 	} else {
 		// Set LLGO_TESTDIR to a new temporary directory,
@@ -55,7 +54,7 @@ func init() {
 	}
 }
 
-func getRuntimeFiles() (gofiles []string, llfiles []string, err error) {
+func getRuntimeFiles() (gofiles []string, llfiles []string, cfiles []string, err error) {
 	var pkg *build.Package
 	pkgpath := "github.com/axw/llgo/pkg/runtime"
 	pkg, err = build.Import(pkgpath, "", 0)
@@ -71,6 +70,10 @@ func getRuntimeFiles() (gofiles []string, llfiles []string, err error) {
 		gofiles = nil
 		return
 	}
+	cfiles = make([]string, len(pkg.CFiles))
+	for i, filename := range pkg.CFiles {
+		cfiles[i] = path.Join(pkg.Dir, filename)
+	}
 	return
 }
 
@@ -79,7 +82,7 @@ func getRuntimeModuleFile() (string, error) {
 		return runtimemodulefile, nil
 	}
 
-	gofiles, llfiles, err := getRuntimeFiles()
+	gofiles, llfiles, cfiles, err := getRuntimeFiles()
 	if err != nil {
 		return "", err
 	}
@@ -102,6 +105,15 @@ func getRuntimeModuleFile() (string, error) {
 		return "", err
 	}
 	f.Close()
+
+	for i, cfile := range cfiles {
+		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
+		cmd := exec.Command("clang", "-g", "-c", "-emit-llvm", "-o", bcfile, cfile)
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("clang failed: %s", err)
+		}
+		llfiles = append(llfiles, bcfile)
+	}
 
 	if llfiles != nil {
 		args := append([]string{"-o", outfile, outfile}, llfiles...)
@@ -145,7 +157,7 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 	}
 
 	exepath := filepath.Join(tempdir, "test")
-	cmd = exec.Command("clang++", "-o", exepath, bcpath)
+	cmd = exec.Command("clang++", "-g", "-o", exepath, bcpath)
 	err = cmd.Run()
 	if err != nil {
 		return
