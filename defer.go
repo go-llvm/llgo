@@ -79,8 +79,6 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	//
 	// TODO delay this until just before the first "invoke"
 	// instruction is emitted.
-	f.deferptr = c.builder.CreateAlloca(c.target.IntPtrType(), "deferptr")
-	c.builder.CreateStore(llvm.ConstNull(c.target.IntPtrType()), f.deferptr)
 	f.deferblock = llvm.AddBasicBlock(currblock.Parent(), "defer")
 	if hasCallExpr(body) {
 		f.unwindblock = llvm.AddBasicBlock(currblock.Parent(), "unwind")
@@ -100,37 +98,23 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 			persftyp := llvm.FunctionType(llvm.Int32Type(), nil, true)
 			pers = llvm.AddFunction(c.module.Module, "__gxx_personality_v0", persftyp)
 		}
-		// FIXME use the exception typeid defined in pkg/runtime/panic.ll
 		lp := c.builder.CreateLandingPad(restyp, pers, 1, "")
 		lp.AddClause(llvm.ConstNull(i8ptr))
 
-		// Call "runtime.before_defers"
-		//
-		// TODO we can optimise for a common case where all deferred
-		// functions are function literals, and the function literals
-		// contain no calls to the recover() builtin; in this case
-		// there is no need to call runtime.before_defers or
-		// runtime.after_defers; instead, just unconditionally resume
-		// in place of runtime.after_defers.
-		beforedefers := c.NamedFunction("runtime.before_defers", "func f(*int8, int32)")
+		// Catch the exception.
+		begin_catch := c.NamedFunction("__cxa_begin_catch", "func f(*int8) *int8")
 		exception := c.builder.CreateExtractValue(llvm.Value(lp), 0, "")
-		typeid := c.builder.CreateExtractValue(llvm.Value(lp), 1, "")
-		c.builder.CreateCall(beforedefers, []llvm.Value{exception, typeid}, "")
+		c.builder.CreateCall(begin_catch, []llvm.Value{exception}, "")
+		end_catch := c.NamedFunction("__cxa_end_catch", "func f()")
+		c.builder.CreateCall(end_catch, nil, "")
 
 		c.builder.CreateBr(f.deferblock)
 	}
 
 	// Create a real return instruction.
 	c.builder.SetInsertPointAtEnd(f.deferblock)
-	ptrval := c.builder.CreateLoad(f.deferptr, "")
-	rundefers := c.NamedFunction("runtime.rundefers", "func f(uintptr)")
-	c.builder.CreateCall(rundefers, []llvm.Value{ptrval}, "")
-
-	// Call "runtime.after_defers"
-	if !f.unwindblock.IsNil() {
-		afterdefers := c.NamedFunction("runtime.after_defers", "func f()")
-		c.builder.CreateCall(afterdefers, nil, "")
-	}
+	rundefers := c.NamedFunction("runtime.rundefers", "func f()")
+	c.builder.CreateCall(rundefers, nil, "")
 
 	if len(f.results) == 0 {
 		c.builder.CreateRetVoid()
@@ -156,8 +140,7 @@ func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
 	args := c.evalCallArgs(fntype, stmt.Call.Args)
 
 	// Call "runtime.pushdefer" to add fn+argValues to the defer stack
-	f := c.functions.top()
-	pushdefer := c.NamedFunction("runtime.pushdefer", "func f(f_ func(), top *uintptr)")
+	pushdefer := c.NamedFunction("runtime.pushdefer", "func f(f_ func())")
 	funcval := c.indirectFunction(fn, args, stmt.Call.Ellipsis.IsValid())
-	c.builder.CreateCall(pushdefer, []llvm.Value{funcval.LLVMValue(), f.deferptr}, "")
+	c.builder.CreateCall(pushdefer, []llvm.Value{funcval.LLVMValue()}, "")
 }

@@ -15,7 +15,6 @@ type function struct {
 	*LLVMValue
 	results []*types.Var
 
-	deferptr    llvm.Value
 	unwindblock llvm.BasicBlock
 	deferblock  llvm.BasicBlock
 }

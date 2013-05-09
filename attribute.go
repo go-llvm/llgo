@@ -133,6 +133,10 @@ func parseLLVMAttribute(value string) llvmAttribute {
 			result |= llvmAttribute(llvm.NoReturnAttribute)
 		case "nounwind":
 			result |= llvmAttribute(llvm.NoUnwindAttribute)
+		case "noinline":
+			result |= llvmAttribute(llvm.NoInlineAttribute)
+		case "alwaysinline":
+			result |= llvmAttribute(llvm.AlwaysInlineAttribute)
 		}
 	}
 	return result
@@ -142,7 +146,9 @@ type llvmAttribute llvm.Attribute
 
 func (a llvmAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Signature); isfunc {
-		v.LLVMValue().AddFunctionAttr(llvm.Attribute(a))
+		fn := v.LLVMValue()
+		fn = llvm.ConstExtractValue(fn, []uint32{0})
+		fn.AddFunctionAttr(llvm.Attribute(a))
 	} else {
 		v.LLVMValue().AddAttribute(llvm.Attribute(a))
 	}

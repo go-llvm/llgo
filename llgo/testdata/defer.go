@@ -20,6 +20,20 @@ func (t *T) ghi(v int) {
 	println(v)
 }
 
+func printerr(err interface{}) {
+	if err != nil {
+		println("recovered:", err.(string))
+	} else {
+		println("recovered no error")
+	}
+}
+
+func f6() {
+	defer func() { printerr(recover()) }()
+	defer func() { panic("second") }()
+	panic("first")
+}
+
 func f5(panic_ bool) {
 	var t1 T1
 	t1.T.value = 888
@@ -31,11 +45,7 @@ func f5(panic_ bool) {
 			return
 		}
 		println("f5")
-		if err := recover(); err != nil {
-			println("recovered:", err.(string))
-		} else {
-			println("recovered no error")
-		}
+		printerr(recover())
 	}
 	defer f(0) // will recover (after f(1))
 	defer f(1) // won't recover
@@ -78,4 +88,5 @@ func f1() {
 
 func main() {
 	f1()
+	f6()
 }

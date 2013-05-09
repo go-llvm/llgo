@@ -1,35 +1,41 @@
+// Copyright 2013 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 #include "panic.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 // typeinfo
 extern void* _ZTI5Eface;
 
 // thread-local
 __thread struct Panic *tlspanic = NULL;
+__thread struct Defer *tlsdefer = NULL;
 
 // extern functions
 void* __cxa_allocate_exception(size_t);
 void __cxa_throw(void *exc, void *typeinfo, void (*dest)(void*)) __attribute__((noreturn));
-void* __cxa_begin_catch(void* exceptionObject);
-void __cxa_end_catch(void);
-void __cxa_rethrow(void);
-int32_t typeid_for(void*) __asm__("llvm.eh.typeid.for");
 
 // runtime functions
 void panic(struct Eface error)
 		__asm__("runtime.panic_") __attribute__((noreturn));
 void recover(int32_t indirect, struct Eface *error)
-		__asm__("runtime.recover") __attribute__((noinline));
-void* before_defers(void *exc, int32_t id)
-		__asm__("runtime.before_defers") __attribute__((noinline));
-void after_defers(struct Panic*)
-		__asm__("runtime.after_defers") __attribute__((noinline));
+	__asm__("runtime.recover") __attribute__((noinline));
+void pushdefer(struct Func)
+	__asm__("runtime.pushdefer") __attribute__((noinline));
+void rundefers(void)
+	__asm__("runtime.rundefers") __attribute__((noinline));
+void guardedcall(struct Func f)
+	__asm__("runtime.guardedcall");
 
 void panic(struct Eface error) {
-	void *e = __cxa_allocate_exception(sizeof(struct Eface));
-	memcpy(e, &error, sizeof(struct Eface));
-	__cxa_throw(e, &_ZTI5Eface, NULL);
+	struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));
+	p->next = tlspanic;
+	memcpy(&p->value, &error, sizeof(struct Eface));
+	tlspanic = p;
+	__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);
 }
 
 void recover(int32_t indirect, struct Eface *error) {
@@ -37,48 +43,43 @@ void recover(int32_t indirect, struct Eface *error) {
 	//     recover
 	//     deferred function
 	//     <deferred function wrapper>
+	//     callniladic
+	//     guardedcall
 	//     run_defers
 	//     catch-site
-	int depth = indirect ? 4 : 3;
-	if (tlspanic && tlspanic->caught == runtime_caller_region(depth)) {
+	int depth = 5 + (indirect ? 1 : 0);
+	if (tlspanic && tlsdefer && tlsdefer->caller == runtime_caller_region(depth)) {
 		struct Panic *p = tlspanic;
-		tlspanic = p->next;
 		memcpy(error, &p->value, sizeof(struct Eface));
+	    while (tlspanic) {
+	        p = tlspanic->next;
+	        free(tlspanic);
+	        tlspanic = p;
+	    }
 		return;
 	}
 	memset(error, 0, sizeof(struct Eface));
 }
 
-static void *non_go_exception = (void*)0xFFFFFFFF;
-
-void* before_defers(void *exc, int32_t typeid) {
-	if (typeid == typeid_for(&_ZTI5Eface)) {
-		struct Eface *e = (struct Eface*)__cxa_begin_catch(exc);
-		struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));
-		p->next = tlspanic;
-		p->caught = runtime_caller_region(1);
-		p->recovered = 0;
-		memcpy(&p->value, e, sizeof(struct Eface));
-		tlspanic = p;
-		return p;
-	} else {
-		return non_go_exception;
-	}
-	return NULL;
+void pushdefer(struct Func f) {
+	struct Defer *d = (struct Defer*)malloc(sizeof(struct Defer));
+	d->f = f;
+	d->caller = runtime_caller_region(1);
+	d->next = tlsdefer;
+	tlsdefer = d;
 }
 
-void after_defers(struct Panic *p) {
-	if (p == non_go_exception) {
-		__cxa_end_catch();
-	} else if (p) {
-		if (p->recovered) {
-			free(p);
-			__cxa_end_catch();
-		} else if (p == tlspanic && p->caught == runtime_caller_region(1)) {
-			tlspanic = p->next;
-			free(p);
-			__cxa_rethrow();
-		}
+void rundefers(void) {
+	// FIXME cater for recursive calls.
+	const uintptr_t caller = runtime_caller_region(1);
+	for (; tlsdefer && tlsdefer->caller == caller;) {
+	    struct Defer *d = tlsdefer;
+	    guardedcall(d->f);
+	    tlsdefer = tlsdefer->next;
+	    free(d);
+	}
+	if (tlspanic) {
+		__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);
 	}
 }
 

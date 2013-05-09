@@ -3,6 +3,24 @@
 
 #include "inttypes.h"
 
+struct Func {
+    void (*f)(void);
+    void *data;
+};
+
+struct Defer {
+    // f represents the deferred function.
+    struct Func f;
+
+	// caller identifies the function which generated
+    // the deferred function; the value is obtained from
+	// _Unwind_GetRegionStart.
+    uintptr_t caller;
+
+    // next points to the next deferred function in the chain.
+    struct Defer *next;
+};
+
 struct Eface {
 	void *data;
 	void *type;
@@ -11,15 +29,6 @@ struct Eface {
 struct Panic {
 	struct Panic *next;
 	struct Eface value;
-
-	// caught identifies the function which most recently caught
-	// the panic/exception; the value is obtained from
-	// _Unwind_GetRegionStart.
-	uintptr_t caught;
-
-	// recovered is a boolean flag indicating whether or not
-	// the panic was recovered.
-	int recovered;
 };
 
 uintptr_t runtime_caller_region(int skip)

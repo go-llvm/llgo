@@ -121,6 +121,7 @@ func getRuntimeModuleFile() (string, error) {
 	for i, cfile := range cfiles {
 		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
 		cmd := exec.Command("clang", "-g", "-c", "-emit-llvm", "-o", bcfile, cfile)
+		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("clang failed: %s", err)
 		}

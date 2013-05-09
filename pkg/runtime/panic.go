@@ -5,23 +5,19 @@
 package runtime
 
 type deferred struct {
-	f    func()
-	next *deferred
+	f      func()
+	caller uintptr
+	next   *deferred
 }
 
 func panic_(e interface{})
-func before_defers(exc *int8, id int32) (ctx *int8)
-func after_defers(ctx *int8)
+func caller_region(skip int32) uintptr
+func pushdefer(f func())
+func rundefers()
 
-func rundefers(d *deferred) {
-	for ; d != nil; d = d.next {
-		d.f()
-	}
-}
-
-func pushdefer(f func(), top **deferred) {
-	d := new(deferred)
-	d.f = f
-	d.next = *top
-	*top = d
+// #llgo attr: noinline
+func callniladic(f func()) {
+	// This exists just to avoid reproducing the
+	// Go function calling logic in the C code.
+	f()
 }
