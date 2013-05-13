@@ -29,8 +29,8 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 	exprtypes := make(ExprTypeMap)
 	objectdata := make(map[types.Object]*ObjectData)
 	ctx := &types.Context{
-		Sizeof:   c.llvmtypes.Sizeof,
-		Alignof:  c.llvmtypes.Alignof,
+		Sizeof:    c.llvmtypes.Sizeof,
+		Alignof:   c.llvmtypes.Alignof,
 		Offsetsof: c.llvmtypes.Offsetsof,
 		Expr: func(x ast.Expr, typ types.Type, val exact.Value) {
 			exprtypes[x] = ExprTypeInfo{Type: typ, Value: val}

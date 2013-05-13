@@ -5,4 +5,3 @@
 package runtime
 
 func llvm_trap()
-
