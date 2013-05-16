@@ -9,7 +9,6 @@ import (
 	"code.google.com/p/go.exp/go/types"
 	"go/ast"
 	"go/token"
-	"sort"
 )
 
 // ObjectData stores information for a types.Object
@@ -19,13 +18,7 @@ type ObjectData struct {
 	Value   *LLVMValue
 }
 
-type methodList []*types.Method
-
-func (l methodList) Len() int           { return len(l) }
-func (l methodList) Less(i, j int) bool { return l[i].Name < l[j].Name }
-func (l methodList) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
-
-func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Package, ExprTypeMap, error) {
+func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.File) (*types.Package, ExprTypeMap, error) {
 	exprtypes := make(ExprTypeMap)
 	objectdata := make(map[types.Object]*ObjectData)
 	ctx := &types.Context{
@@ -42,20 +35,9 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 				data = &ObjectData{Ident: id}
 				objectdata[obj] = data
 			}
-
-			switch obj := obj.(type) {
-			case *types.TypeName:
-				// Sort methods by name.
-				switch typ := obj.Type.(type) {
-				case *types.NamedType:
-					sort.Sort(methodList(typ.Methods))
-				case *types.Interface:
-					sort.Sort(methodList(typ.Methods))
-				}
-			}
 		},
 	}
-	pkg, err := ctx.Check(fset, files)
+	pkg, err := ctx.Check(pkgpath, fset, files...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,20 +52,20 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 		data.Package = pkg
 		c.objectdata[obj] = data
 	}
-	for importpath, pkg := range pkg.Imports {
+	for _, pkg := range pkg.Imports() {
 		// Methods of types in imported packages won't be
 		// seen by ctx.Ident, so we need to handle them here.
-		for _, obj := range pkg.Scope.Entries {
+		for _, obj := range pkg.Scope().Entries {
 			switch obj := obj.(type) {
 			case *types.Func:
-				if sig, ok := obj.Type.(*types.Signature); ok {
+				if sig, ok := obj.Type().(*types.Signature); ok {
 					fixVariadicSignature(sig)
 				}
 			case *types.TypeName:
-				if typ, ok := obj.Type.(*types.NamedType); ok {
-					for _, m := range typ.Methods {
-						fixVariadicSignature(m.Type)
-					}
+				if typ, ok := obj.Type().(*types.Named); ok {
+					typ.ForEachMethod(func(m *types.Func) {
+						fixVariadicSignature(m.Type().(*types.Signature))
+					})
 				}
 			}
 		}
@@ -91,7 +73,6 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 		// Associate objects from imported packages
 		// with the corresponding *types.Package.
 		assocObjectPackages(pkg, c.objectdata)
-		pkg.Path = importpath
 	}
 
 	// Add TypeNames to the LLVMTypeMap's TypeStringer.
@@ -112,16 +93,15 @@ func (c *compiler) typecheck(fset *token.FileSet, files []*ast.File) (*types.Pac
 }
 
 func assocObjectPackages(pkg *types.Package, objectdata map[types.Object]*ObjectData) {
-	for _, obj := range pkg.Scope.Entries {
+	for _, obj := range pkg.Scope().Entries {
 		if data, ok := objectdata[obj]; ok {
 			data.Package = pkg
 		} else {
 			objectdata[obj] = &ObjectData{Package: pkg}
 		}
 	}
-	for importpath, pkg := range pkg.Imports {
+	for _, pkg := range pkg.Imports() {
 		assocObjectPackages(pkg, objectdata)
-		pkg.Path = importpath
 	}
 }
 
@@ -134,14 +114,12 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 	var sig *types.Signature
 	var noderecv *ast.FieldList
 	var astfunc *ast.FuncType
-	var name *ast.Ident
 
 	switch node := node.(type) {
 	case *ast.FuncDecl:
-		sig = v.objects[node.Name].GetType().(*types.Signature)
+		sig = v.objects[node.Name].Type().(*types.Signature)
 		astfunc = node.Type
 		noderecv = node.Recv
-		name = node.Name
 	case *ast.FuncLit:
 		sig = v.exprtypes[node].Type.(*types.Signature)
 		astfunc = node.Type
@@ -153,38 +131,25 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 	// parameter's type to a slice of its recorded type.
 	fixVariadicSignature(sig)
 
-	// Record Method-to-Func mapping.
-	if sig.Recv != nil {
-		methodfunc := v.objects[name].(*types.Func)
-		recvtyp := derefType(sig.Recv.Type)
-		named := recvtyp.(*types.NamedType)
-		for _, m := range named.Methods {
-			if m.Name == name.Name {
-				v.methodfuncs[m] = methodfunc
-				break
-			}
-		}
-	}
-
 	// go/types creates a separate types.Var for
 	// internal and external usage. We need to
 	// associate them at the object data level.
 	paramIdents := fieldlistIdents(astfunc.Params)
 	resultIdents := fieldlistIdents(astfunc.Results)
-	if sig.Recv != nil {
+	if recv := sig.Recv(); recv != nil {
 		id := fieldlistIdents(noderecv)[0]
 		if obj, ok := v.objects[id]; ok {
-			v.objectdata[sig.Recv] = v.objectdata[obj]
+			v.objectdata[recv] = v.objectdata[obj]
 		}
 	}
 	for i, id := range paramIdents {
 		if obj, ok := v.objects[id]; ok {
-			v.objectdata[sig.Params[i]] = v.objectdata[obj]
+			v.objectdata[sig.Params().At(i)] = v.objectdata[obj]
 		}
 	}
 	for i, id := range resultIdents {
 		if obj, ok := v.objects[id]; ok {
-			v.objectdata[sig.Results[i]] = v.objectdata[obj]
+			v.objectdata[sig.Results().At(i)] = v.objectdata[obj]
 		}
 	}
 	return v
@@ -194,10 +159,12 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 // of a variadic function signature such that it is a slice
 // of the type reported by go/types.
 func fixVariadicSignature(sig *types.Signature) {
-	if sig.IsVariadic {
-		last := sig.Params[len(sig.Params)-1]
-		last.Type = &types.Slice{Elt: last.Type}
-	}
+	// FIXME
+	//if sig.IsVariadic() {
+	//	params := sig.Params()
+	//	last := params.At(int(params.Len()) - 1)
+	//	last.Type = &types.Slice{Elt: last.Type}
+	//}
 }
 
 func fieldlistIdents(l *ast.FieldList) (idents []*ast.Ident) {

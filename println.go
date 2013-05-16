@@ -54,8 +54,8 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 			llvm_value := value.LLVMValue()
 
 			typ := underlyingType(value.Type())
-			if name, isname := typ.(*types.NamedType); isname {
-				typ = name.Underlying
+			if name, isname := typ.(*types.Named); isname {
+				typ = name.Underlying()
 			}
 
 			if println_ && i > 0 {
@@ -63,7 +63,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 			}
 			switch typ := typ.(type) {
 			case *types.Basic:
-				switch typ.Kind {
+				switch typ.Kind() {
 				case types.Uint8:
 					format += "%hhu"
 				case types.Uint16:

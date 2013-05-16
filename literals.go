@@ -52,8 +52,8 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	// (First, set a dummy "stack" value for the params and results.)
 	var dummyfunc LLVMValue
 	dummyfunc.stack = &dummyfunc
-	paramVars := ftyp.Params[:]
-	resultVars := ftyp.Results[:]
+	paramVars := ftyp.Params()
+	resultVars := ftyp.Results()
 	c.functions.push(&function{
 		LLVMValue: &dummyfunc,
 		results:   resultVars,
@@ -73,10 +73,12 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 		ctxfields := make([]*types.Field, len(v.captures))
 		for i, capturevar := range v.captures {
 			ctxfields[i] = &types.Field{
-				Type: &types.Pointer{Base: capturevar.Type},
+				Type: types.NewPointer(capturevar.Type()),
 			}
 		}
-		ctxtyp := &types.Pointer{Base: &types.Struct{Fields: ctxfields}}
+		panic("missing types.NewStruct")
+		var ctxtyp types.Type
+		//ctxtyp := types.NewPointer(&types.Struct{Fields: ctxfields})
 		llvmctxtyp := c.types.ToLLVM(ctxtyp)
 		rettyp := fntyp.ReturnType()
 		paramtyps := append([]llvm.Type{llvmctxtyp}, fntyp.ParamTypes()...)
@@ -93,7 +95,8 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	currBlock := c.builder.GetInsertBlock()
 
 	f := c.NewValue(fnvalue, ftyp)
-	c.buildFunction(f, v.captures, paramVars, resultVars, lit.Body)
+	captureVars := types.NewTuple(v.captures...)
+	c.buildFunction(f, captureVars, paramVars, resultVars, lit.Body)
 
 	// Closure? Bind values to a context block.
 	if v.captures != nil {
@@ -129,7 +132,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	var valuelist []Value
 
 	if ptr, ok := typ.(*types.Pointer); ok {
-		typ = ptr.Base
+		typ = ptr.Elt()
 		defer func() {
 			v = v.pointer
 		}()
@@ -162,19 +165,19 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 					name := kv.Key.(*ast.Ident).Name
 					key = name
 					typ := underlyingType(typ).(*types.Struct)
-					elttyp = typ.Fields[fieldIndex(typ, name)].Type
+					elttyp = typ.Field(fieldIndex(typ, name)).Type
 				case isarray:
 					key = c.types.expr[kv.Key].Value
 					typ := underlyingType(typ).(*types.Array)
-					elttyp = typ.Elt
+					elttyp = typ.Elt()
 				case isslice:
 					key = c.types.expr[kv.Key].Value
 					typ := underlyingType(typ).(*types.Slice)
-					elttyp = typ.Elt
+					elttyp = typ.Elt()
 				case ismap:
 					key = c.VisitExpr(kv.Key)
 					typ := underlyingType(typ).(*types.Map)
-					elttyp = typ.Elt
+					elttyp = typ.Elt()
 				default:
 					panic("unreachable")
 				}
@@ -184,13 +187,13 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 				switch {
 				case isstruct:
 					typ := underlyingType(typ).(*types.Struct)
-					c.convertUntyped(elt, typ.Fields[i].Type)
+					c.convertUntyped(elt, typ.Field(i).Type)
 				case isarray:
 					typ := underlyingType(typ).(*types.Array)
-					c.convertUntyped(elt, typ.Elt)
+					c.convertUntyped(elt, typ.Elt())
 				case isslice:
 					typ := underlyingType(typ).(*types.Slice)
-					c.convertUntyped(elt, typ.Elt)
+					c.convertUntyped(elt, typ.Elt())
 				}
 				value := c.VisitExpr(elt)
 				valuelist = append(valuelist, value)
@@ -221,9 +224,9 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	origtyp := typ
 	switch typ := underlyingType(typ).(type) {
 	case *types.Array:
-		elttype := typ.Elt
+		elttype := typ.Elt()
 		llvmelttype := c.types.ToLLVM(elttype)
-		llvmvalues := make([]llvm.Value, typ.Len)
+		llvmvalues := make([]llvm.Value, typ.Len())
 		for i := range llvmvalues {
 			var value Value
 			if i < len(valuelist) {
@@ -249,7 +252,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	case *types.Slice:
 		ptr := c.createTypeMalloc(c.types.ToLLVM(typ))
 
-		eltType := c.types.ToLLVM(typ.Elt)
+		eltType := c.types.ToLLVM(typ.Elt())
 		arrayType := llvm.ArrayType(eltType, len(valuelist))
 		valuesPtr := c.createMalloc(llvm.SizeOf(arrayType))
 		valuesPtr = c.builder.CreateIntToPtr(valuesPtr, llvm.PointerType(eltType, 0), "")
@@ -259,17 +262,17 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 		c.builder.CreateStore(valuesPtr, c.builder.CreateStructGEP(ptr, 0, "")) // data
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 1, ""))    // len
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 2, ""))    // cap
-		null := llvm.ConstNull(c.types.ToLLVM(typ.Elt))
+		null := llvm.ConstNull(c.types.ToLLVM(typ.Elt()))
 		for i, value := range valuelist {
 			index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
 			valuePtr := c.builder.CreateGEP(valuesPtr, []llvm.Value{index}, "")
 			if value == nil {
 				c.builder.CreateStore(null, valuePtr)
 			} else {
-				c.builder.CreateStore(value.Convert(typ.Elt).LLVMValue(), valuePtr)
+				c.builder.CreateStore(value.Convert(typ.Elt()).LLVMValue(), valuePtr)
 			}
 		}
-		m := c.NewValue(ptr, &types.Pointer{Base: origtyp})
+		m := c.NewValue(ptr, types.NewPointer(origtyp))
 		return m.makePointee()
 
 	case *types.Struct:
@@ -288,13 +291,13 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 		}
 		for i, value := range values {
 			if value != nil {
-				elttype := typ.Fields[i].Type.(types.Type)
+				elttype := typ.Field(i).Type
 				llvm_value := value.Convert(elttype).LLVMValue()
 				ptr := c.builder.CreateStructGEP(ptr, i, "")
 				c.builder.CreateStore(llvm_value, ptr)
 			}
 		}
-		m := c.NewValue(ptr, &types.Pointer{Base: origtyp})
+		m := c.NewValue(ptr, types.NewPointer(origtyp))
 		return m.makePointee()
 
 	case *types.Map:

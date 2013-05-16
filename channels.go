@@ -21,7 +21,7 @@ func (v *LLVMValue) chanSend(value Value) {
 	if value, ok := value.(*LLVMValue); ok && value.pointer != nil {
 		ptr = value.pointer.LLVMValue()
 	}
-	elttyp := underlyingType(v.typ).(*types.Chan).Elt
+	elttyp := underlyingType(v.typ).(*types.Chan).Elt()
 	c := v.compiler
 	if ptr.IsNil() {
 		ptr = c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
@@ -35,7 +35,7 @@ func (v *LLVMValue) chanSend(value Value) {
 
 func (v *LLVMValue) chanRecv() *LLVMValue {
 	c := v.compiler
-	elttyp := underlyingType(v.typ).(*types.Chan).Elt
+	elttyp := underlyingType(v.typ).(*types.Chan).Elt()
 	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	f := c.NamedFunction("runtime.chanrecv", "func f(c, ptr uintptr)")

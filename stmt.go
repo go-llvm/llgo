@@ -87,7 +87,7 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	f := c.functions.top()
 	ftyp := f.Type().(*types.Signature)
-	if len(ftyp.Results) == 0 {
+	if ftyp.Results().Arity() == 0 {
 		if !f.deferblock.IsNil() {
 			c.builder.CreateBr(f.deferblock)
 		} else {
@@ -100,41 +100,40 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	for i, expr := range stmt.Results {
 		info := c.types.expr[expr]
 		if isUntyped(info.Type) {
-			info.Type = ftyp.Results[i].Type.(types.Type)
+			info.Type = ftyp.Results().At(i).Type()
 			c.types.expr[expr] = info
 		}
 	}
 
-	values := make([]llvm.Value, len(ftyp.Results))
+	values := make([]llvm.Value, int(ftyp.Results().Arity()))
 	if stmt.Results == nil {
 		// Bare return. No need to update named results, so just
 		// prepare return values.
-		for i, resultvar := range f.results {
-			if resultvar.Name != "" {
+		for i := 0; i < int(f.results.Arity()); i++ {
+			resultvar := f.results.At(i)
+			if resultvar.Name() != "" {
 				values[i] = c.objectdata[resultvar].Value.LLVMValue()
 			} else {
-				// Should this be permitted by the spec?
-				// Seems pretty useless.
-				typ := c.types.ToLLVM(ftyp.Results[i].Type)
+				typ := c.types.ToLLVM(ftyp.Results().At(i).Type())
 				values[i] = llvm.ConstNull(typ)
 			}
 		}
 	} else {
-		results := make([]Value, len(ftyp.Results))
-		if len(stmt.Results) == 1 && len(ftyp.Results) > 1 {
+		results := make([]Value, int(ftyp.Results().Arity()))
+		if len(stmt.Results) == 1 && len(results) > 1 {
 			aggresult := c.VisitExpr(stmt.Results[0])
-			aggtyp := aggresult.Type().(*types.Result)
+			aggtyp := aggresult.Type().(*types.Tuple)
 			aggval := aggresult.LLVMValue()
 			for i := 0; i < len(results); i++ {
-				elemtyp := aggtyp.Values[i].Type.(types.Type)
+				elemtyp := aggtyp.At(i).Type()
 				elemval := c.builder.CreateExtractValue(aggval, i, "")
 				result := c.NewValue(elemval, elemtyp)
-				results[i] = result.Convert(ftyp.Results[i].Type)
+				results[i] = result.Convert(ftyp.Results().At(i).Type())
 			}
 		} else {
 			for i, expr := range stmt.Results {
 				result := c.VisitExpr(expr)
-				results[i] = result.Convert(ftyp.Results[i].Type)
+				results[i] = result.Convert(ftyp.Results().At(i).Type())
 			}
 		}
 
@@ -145,8 +144,9 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 		// Store values in named results.
 		if f.results != nil {
-			for i, resultvar := range f.results {
-				if resultvar.Name != "" {
+			for i := 0; i < int(f.results.Arity()); i++ {
+				resultvar := f.results.At(i)
+				if resultvar.Name() != "" {
 					resultptr := c.objectdata[resultvar].Value.pointer
 					c.builder.CreateStore(values[i], resultptr.LLVMValue())
 				}
@@ -199,10 +199,11 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 	case *ast.CallExpr:
 		value := c.VisitExpr(x)
 		aggregate := value.LLVMValue()
-		struct_type := value.Type().(*types.Result)
-		values = make([]Value, len(struct_type.Values))
-		for i, f := range struct_type.Values {
-			t := f.Type.(types.Type)
+		struct_type := value.Type().(*types.Tuple)
+		values = make([]Value, int(struct_type.Arity()))
+		for i := range values {
+			f := struct_type.At(i)
+			t := f.Type()
 			value_ := c.builder.CreateExtractValue(aggregate, i, "")
 			values[i] = c.NewValue(value_, t)
 		}
@@ -257,10 +258,10 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			}
 			obj := c.objects[x]
 			if stmt.Tok == token.DEFINE {
-				typ := obj.GetType()
+				typ := obj.Type()
 				llvmtyp := c.types.ToLLVM(typ)
 				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
-				ptrtyp := &types.Pointer{Base: typ}
+				ptrtyp := types.NewPointer(typ)
 				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
 				stackvar.stack = c.functions.top().LLVMValue
 				c.objectdata[obj].Value = stackvar
@@ -631,18 +632,18 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
 			keyobj := c.objects[key]
-			keyType = keyobj.GetType()
+			keyType = keyobj.Type()
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
-			stackvar := c.NewValue(keyPtr, &types.Pointer{Base: keyType}).makePointee()
+			stackvar := c.NewValue(keyPtr, types.NewPointer(keyType)).makePointee()
 			stackvar.stack = c.functions.top().LLVMValue
 			c.objectdata[keyobj].Value = stackvar
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
 				valueobj := c.objects[value]
-				valueType = valueobj.GetType()
+				valueType = valueobj.Type()
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
-				stackvar := c.NewValue(valuePtr, &types.Pointer{Base: valueType}).makePointee()
+				stackvar := c.NewValue(valuePtr, types.NewPointer(valueType)).makePointee()
 				stackvar.stack = c.functions.top().LLVMValue
 				c.objectdata[valueobj].Value = stackvar
 			}
@@ -667,7 +668,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	var base, length llvm.Value
 	_, isptr := typ.(*types.Pointer)
 	if isptr {
-		typ = typ.(*types.Pointer).Base
+		typ = typ.(*types.Pointer).Elt()
 	}
 	switch typ := underlyingType(typ).(type) {
 	case *types.Map:
@@ -687,7 +688,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			}
 		}
 		base = x.LLVMValue()
-		length = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
+		length = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
 		goto arrayrange
 	case *types.Slice:
 		slicevalue := x.LLVMValue()

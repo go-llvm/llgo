@@ -9,11 +9,12 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
+	"go/token"
 )
 
 type function struct {
 	*LLVMValue
-	results []*types.Var
+	results *types.Tuple
 
 	unwindblock llvm.BasicBlock
 	deferblock  llvm.BasicBlock
@@ -39,43 +40,36 @@ func (s *functionStack) top() *function {
 }
 
 type methodset struct {
-	ptr    []*types.Func
-	nonptr []*types.Func
+	ptr    []types.Object
+	nonptr []types.Object
 }
 
 // lookup looks up a method by name, and whether it may or may
 // not have a pointer receiver.
-func (m *methodset) lookup(name string, ptr bool) *types.Func {
+func (m *methodset) lookup(name string, ptr bool) types.Object {
 	funcs := m.nonptr
 	if ptr {
 		funcs = m.ptr
 	}
 	for _, f := range funcs {
-		if f.Name == name {
+		if f.Name() == name {
 			return f
 		}
 	}
 	return nil
 }
 
-func (c *compiler) methodfunc(m *types.Method) *types.Func {
-	f := c.methodfuncs[m]
+func (c *compiler) methodfunc(m *types.Func) *types.Func {
 	// We're not privy to *Func objects for methods in
 	// imported packages, so we must synthesise them.
-	if f == nil {
-		f = &types.Func{
-			Name: m.Name,
-			Type: m.Type,
-		}
-		ident := ast.NewIdent(f.Name)
-		c.methodfuncs[m] = f
-		c.objects[ident] = f
-		c.objectdata[f] = &ObjectData{
-			Ident:   ident,
-			Package: m.Pkg,
-		}
+	data := c.objectdata[m]
+	if data == nil {
+		ident := ast.NewIdent(m.Name())
+		data = &ObjectData{Ident: ident, Package: m.Pkg()}
+		c.objects[ident] = m
+		c.objectdata[m] = data
 	}
-	return f
+	return m
 }
 
 // methods constructs and returns the method set for
@@ -89,12 +83,12 @@ func (c *compiler) methods(t types.Type) *methodset {
 	c.methodsets[t] = methods
 
 	switch t := t.(type) {
-	case *types.NamedType:
-		for _, m := range t.Methods {
-			f := c.methodfunc(m)
-			if m.Type.Recv.Type == t {
+	case *types.Named:
+		for i := 0; i < t.NumMethods(); i++ {
+			f := c.methodfunc(t.Method(i))
+			if f.Type().(*types.Signature).Recv().Type() == t {
 				methods.nonptr = append(methods.nonptr, f)
-				f := c.promoteMethod(m, &types.Pointer{t}, []int{-1})
+				f := c.promoteMethod(f, types.NewPointer(t), []int{-1})
 				methods.ptr = append(methods.ptr, f)
 			} else {
 				methods.ptr = append(methods.ptr, f)
@@ -103,7 +97,7 @@ func (c *compiler) methods(t types.Type) *methodset {
 	case *types.Struct:
 		// No-op, handled in loop below.
 	default:
-		panic(fmt.Errorf("non NamedType/Struct: %#v", t))
+		panic(fmt.Errorf("non Named/Struct: %#v", t))
 	}
 
 	// Traverse embedded types, build forwarding methods if
@@ -120,43 +114,46 @@ func (c *compiler) methods(t types.Type) *methodset {
 			var isptr bool
 			if ptr, ok := typ.(*types.Pointer); ok {
 				isptr = true
-				typ = ptr.Base
+				typ = ptr.Elt()
 			}
 
-			if named, ok := typ.(*types.NamedType); ok {
-				for _, m := range named.Methods {
-					if methods.lookup(m.Name, true) != nil {
-						continue
+			if named, ok := typ.(*types.Named); ok {
+				named.ForEachMethod(func(m *types.Func) {
+					m = c.methodfunc(m)
+					if methods.lookup(m.Name(), true) != nil {
+						return
 					}
+					sig := m.Type().(*types.Signature)
 					indices := candidate.Indices[:]
-					if isptr || m.Type.Recv.Type == named {
+					if isptr || sig.Recv().Type() == named {
 						indices = append(indices, -1)
-						if isptr && m.Type.Recv.Type == named {
+						if isptr && sig.Recv().Type() == named {
 							indices = append(indices, -1)
 						}
 						f := c.promoteMethod(m, t, indices)
 						methods.nonptr = append(methods.nonptr, f)
-						f = c.promoteMethod(m, &types.Pointer{Base: t}, indices)
+						f = c.promoteMethod(m, types.NewPointer(t), indices)
 						methods.ptr = append(methods.ptr, f)
 					} else {
 						// The method set of *S also includes
 						// promoted methods with receiver *T.
-						f := c.promoteMethod(m, &types.Pointer{Base: t}, indices)
+						f := c.promoteMethod(m, types.NewPointer(t), indices)
 						methods.ptr = append(methods.ptr, f)
 					}
-				}
-				typ = named.Underlying
+				})
+				typ = named.Underlying()
 			}
 
 			switch typ := typ.(type) {
 			case *types.Interface:
-				for i, m := range typ.Methods {
-					if methods.lookup(m.Name, true) == nil {
+				for i := 0; i < typ.NumMethods(); i++ {
+					m := typ.Method(i)
+					if methods.lookup(m.Name(), true) == nil {
 						indices := candidate.Indices[:]
 						indices = append(indices, -1) // always load
 						f := c.promoteInterfaceMethod(typ, i, t, indices)
 						methods.nonptr = append(methods.nonptr, f)
-						f = c.promoteInterfaceMethod(typ, i, &types.Pointer{Base: t}, indices)
+						f = c.promoteInterfaceMethod(typ, i, types.NewPointer(t), indices)
 						methods.ptr = append(methods.ptr, f)
 					}
 				}
@@ -166,7 +163,8 @@ func (c *compiler) methods(t types.Type) *methodset {
 				if isptr {
 					indices = append(indices, -1)
 				}
-				for i, field := range typ.Fields {
+				for i := 0; i < typ.NumFields(); i++ {
+					field := typ.Field(i)
 					if field.IsAnonymous {
 						indices := append(indices[:], i)
 						ftype := field.Type
@@ -182,27 +180,54 @@ func (c *compiler) methods(t types.Type) *methodset {
 	return methods
 }
 
+type synthFunc struct {
+	pkg  *types.Package
+	name string
+	typ  types.Type
+}
+
+func (f *synthFunc) Pkg() *types.Package {
+	return f.pkg
+}
+
+func (f *synthFunc) Scope() *types.Scope {
+	return nil
+}
+
+func (f *synthFunc) Name() string {
+	return f.name
+}
+
+func (f *synthFunc) Type() types.Type {
+	return f.typ
+}
+
+func (*synthFunc) Pos() token.Pos {
+	return token.NoPos
+}
+
 // promoteInterfaceMethod promotes an interface method to a type
 // which has embedded the interface.
 //
 // TODO consolidate this and promoteMethod.
-func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex int, recv types.Type, indices []int) *types.Func {
-	m := iface.Methods[methodIndex]
-	sig := *m.Type
-	sig.Recv = &types.Var{Type: recv}
-	f := &types.Func{Name: m.Name, Type: &sig}
-	ident := ast.NewIdent(f.Name)
+func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex int, recv types.Type, indices []int) types.Object {
+	m := iface.Method(methodIndex)
+	var pkg *types.Package
+	if recv, ok := recv.(*types.Named); ok {
+		pkg = c.objectdata[recv.Obj()].Package
+	}
+	recvvar := types.NewVar(pkg, "", recv)
+	sig := m.Type().(*types.Signature)
+	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
+	f := &synthFunc{pkg: pkg, name: m.Name(), typ: sig}
+	ident := ast.NewIdent(f.Name())
 
 	var isptr bool
 	if ptr, ok := recv.(*types.Pointer); ok {
 		isptr = true
-		recv = ptr.Base
+		recv = ptr.Elt()
 	}
 
-	var pkg *types.Package
-	if recv, ok := recv.(*types.NamedType); ok {
-		pkg = c.objectdata[recv.Obj].Package
-	}
 	c.objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
@@ -243,7 +268,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 
 		args[0] = recvarg
 		result := c.builder.CreateCall(ifn, args, "")
-		if len(m.Type.Results) == 0 {
+		if sig.Results().Arity() == 0 {
 			c.builder.CreateRetVoid()
 		} else {
 			c.builder.CreateRet(result)
@@ -255,22 +280,23 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 
 // promoteMethod promotes a named type's method to another type
 // which has embedded the named type.
-func (c *compiler) promoteMethod(m *types.Method, recv types.Type, indices []int) *types.Func {
-	sig := *m.Type
-	sig.Recv = &types.Var{Type: recv}
-	f := &types.Func{Name: m.Name, Type: &sig}
-	ident := ast.NewIdent(f.Name)
+func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) types.Object {
+	var pkg *types.Package
+	if recv, ok := recv.(*types.Named); ok {
+		pkg = c.objectdata[recv.Obj()].Package
+	}
+	recvvar := types.NewVar(pkg, "", recv)
+	sig := m.Type().(*types.Signature)
+	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
+	f := &synthFunc{pkg: pkg, name: m.Name(), typ: sig}
+	ident := ast.NewIdent(f.Name())
 
 	var isptr bool
 	if ptr, ok := recv.(*types.Pointer); ok {
 		isptr = true
-		recv = ptr.Base
+		recv = ptr.Elt()
 	}
 
-	var pkg *types.Package
-	if recv, ok := recv.(*types.NamedType); ok {
-		pkg = c.objectdata[recv.Obj].Package
-	}
 	c.objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
@@ -281,8 +307,7 @@ func (c *compiler) promoteMethod(m *types.Method, recv types.Type, indices []int
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
 		c.builder.SetInsertPointAtEnd(entry)
 
-		methodfunc := c.methodfunc(m)
-		realfn := c.Resolve(c.objectdata[methodfunc].Ident).LLVMValue()
+		realfn := c.Resolve(c.objectdata[m].Ident).LLVMValue()
 		realfn = c.builder.CreateExtractValue(realfn, 0, "")
 
 		args := llvmfn.Params()
@@ -302,7 +327,7 @@ func (c *compiler) promoteMethod(m *types.Method, recv types.Type, indices []int
 
 		args[0] = recvarg
 		result := c.builder.CreateCall(realfn, args, "")
-		if len(m.Type.Results) == 0 {
+		if sig.Results().Arity() == 0 {
 			c.builder.CreateRetVoid()
 		} else {
 			c.builder.CreateRet(result)
@@ -373,7 +398,7 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []Value, dotdotdot bool)
 		argptr := c.builder.CreateGEP(argstruct, []llvm.Value{
 			llvm.ConstInt(llvm.Int32Type(), 0, false),
 			llvm.ConstInt(llvm.Int32Type(), uint64(i+nctx), false)}, "")
-		ptrtyp := &types.Pointer{Base: args[i].Type()}
+		ptrtyp := types.NewPointer(args[i].Type())
 		args[i] = c.NewValue(argptr, ptrtyp).makePointee()
 	}
 

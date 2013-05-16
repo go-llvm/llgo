@@ -116,13 +116,14 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	rundefers := c.NamedFunction("runtime.rundefers", "func f()")
 	c.builder.CreateCall(rundefers, nil, "")
 
-	if len(f.results) == 0 {
+	if f.results.Arity() == 0 {
 		c.builder.CreateRetVoid()
 	} else {
-		values := make([]llvm.Value, len(f.results))
-		for i, v := range f.results {
-			values[i] = c.objectdata[v].Value.LLVMValue()
-		}
+		values := make([]llvm.Value, 0, f.results.Arity())
+		f.results.ForEach(func(v *types.Var) {
+			value := c.objectdata[v].Value.LLVMValue()
+			values = append(values, value)
+		})
 		if len(values) == 1 {
 			c.builder.CreateRet(values[0])
 		} else {

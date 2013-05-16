@@ -30,7 +30,7 @@ func (c *compiler) isType(x ast.Expr) bool {
 		if ident, ok := t.X.(*ast.Ident); ok {
 			if obj, ok := c.objects[ident]; ok {
 				if pkg, ok := obj.(*types.Package); ok {
-					obj := pkg.Scope.Lookup(t.Sel.Name)
+					obj := pkg.Scope().Lookup(t.Sel.Name)
 					_, ok = obj.(*types.TypeName)
 					return ok
 				}
@@ -52,15 +52,15 @@ func (c *compiler) isType(x ast.Expr) bool {
 }
 
 func underlyingType(typ types.Type) types.Type {
-	if typ, ok := typ.(*types.NamedType); ok {
-		return typ.Underlying
+	if typ, ok := typ.(*types.Named); ok {
+		return typ.Underlying()
 	}
 	return typ
 }
 
 func derefType(typ types.Type) types.Type {
 	if typ, ok := underlyingType(typ).(*types.Pointer); ok {
-		return typ.Base
+		return typ.Elt()
 	}
 	return typ
 }
@@ -74,7 +74,7 @@ func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 			newtype = to
 		case *ast.Ident:
 			obj := c.objects[to]
-			newtype = obj.GetType()
+			newtype = obj.Type()
 		case ast.Expr:
 			toinfo := c.types.expr[to]
 			newtype = toinfo.Type
@@ -126,11 +126,12 @@ func (c *compiler) exportBuiltinRuntimeTypes() {
 
 	// error
 	errorObj := types.Universe.Lookup("error")
-	c.types.ToRuntime(errorObj.GetType())
+	c.types.ToRuntime(errorObj.Type())
 }
 
 func fieldIndex(s *types.Struct, name string) int {
-	for i, f := range s.Fields {
+	for i := 0; i < s.NumFields(); i++ {
+		f := s.Field(i)
 		if f.Name == name {
 			return i
 		}
@@ -150,41 +151,42 @@ func (ts *TypeStringer) TypeString(typ types.Type) string {
 	return buf.String()
 }
 
-func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params []*types.Var, isVariadic bool) {
+func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVariadic bool) {
 	buf.WriteByte('(')
-	for i, par := range params {
+	for i := 0; i < int(params.Arity()); i++ {
+		par := params.At(i)
 		if i > 0 {
 			buf.WriteString(", ")
 		}
-		if isVariadic && i == len(params)-1 {
+		if isVariadic && i == int(params.Arity()-1) {
 			buf.WriteString("...")
 		}
-		ts.writeType(buf, par.Type)
+		ts.writeType(buf, par.Type())
 	}
 	buf.WriteByte(')')
 }
 
 func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) {
-	if sig.Recv != nil {
-		ts.writeType(buf, sig.Recv.Type)
+	if recv := sig.Recv(); recv != nil {
+		ts.writeType(buf, recv.Type())
 		buf.WriteByte(' ')
 	}
 
-	ts.writeParams(buf, sig.Params, sig.IsVariadic)
-	if len(sig.Results) == 0 {
+	ts.writeParams(buf, sig.Params(), sig.IsVariadic())
+	if sig.Results().Arity() == 0 {
 		// no result
 		return
 	}
 
 	buf.WriteByte(' ')
-	if len(sig.Results) == 1 {
+	if sig.Results().Arity() == 1 {
 		// single unnamed result
-		ts.writeType(buf, sig.Results[0].Type)
+		ts.writeType(buf, sig.Results().At(0).Type())
 		return
 	}
 
 	// multiple or named result(s)
-	ts.writeParams(buf, sig.Results, false)
+	ts.writeParams(buf, sig.Results(), false)
 }
 
 func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
@@ -194,20 +196,21 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Basic:
 		// De-alias.
-		t = types.Typ[t.Kind]
-		buf.WriteString(t.Name)
+		t = types.Typ[t.Kind()]
+		buf.WriteString(t.Name())
 
 	case *types.Array:
-		fmt.Fprintf(buf, "[%d]", t.Len)
-		ts.writeType(buf, t.Elt)
+		fmt.Fprintf(buf, "[%d]", t.Len())
+		ts.writeType(buf, t.Elt())
 
 	case *types.Slice:
 		buf.WriteString("[]")
-		ts.writeType(buf, t.Elt)
+		ts.writeType(buf, t.Elt())
 
 	case *types.Struct:
 		buf.WriteString("struct{")
-		for i, f := range t.Fields {
+		for i := 0; i < t.NumFields(); i++ {
+			f := t.Field(i)
 			if i > 0 {
 				buf.WriteString("; ")
 			}
@@ -216,18 +219,18 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 				buf.WriteByte(' ')
 			}
 			ts.writeType(buf, f.Type)
-			if f.Tag != "" {
-				fmt.Fprintf(buf, " %q", f.Tag)
+			if tag := t.Tag(i); tag != "" {
+				fmt.Fprintf(buf, " %q", tag)
 			}
 		}
 		buf.WriteByte('}')
 
 	case *types.Pointer:
 		buf.WriteByte('*')
-		ts.writeType(buf, t.Base)
+		ts.writeType(buf, t.Elt())
 
-	case *types.Result:
-		ts.writeParams(buf, t.Values, false)
+	case *types.Tuple:
+		ts.writeParams(buf, t, false)
 
 	case *types.Signature:
 		buf.WriteString("func")
@@ -235,24 +238,25 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Interface:
 		buf.WriteString("interface{")
-		for i, m := range t.Methods {
+		for i := 0; i < t.NumMethods(); i++ {
+			m := t.Method(i)
 			if i > 0 {
 				buf.WriteString("; ")
 			}
-			buf.WriteString(m.Name)
-			ts.writeSignature(buf, m.Type)
+			buf.WriteString(m.Name())
+			ts.writeSignature(buf, m.Type().(*types.Signature))
 		}
 		buf.WriteByte('}')
 
 	case *types.Map:
 		buf.WriteString("map[")
-		ts.writeType(buf, t.Key)
+		ts.writeType(buf, t.Key())
 		buf.WriteByte(']')
-		ts.writeType(buf, t.Elt)
+		ts.writeType(buf, t.Elt())
 
 	case *types.Chan:
 		var s string
-		switch t.Dir {
+		switch t.Dir() {
 		case ast.SEND:
 			s = "chan<- "
 		case ast.RECV:
@@ -261,14 +265,14 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 			s = "chan "
 		}
 		buf.WriteString(s)
-		ts.writeType(buf, t.Elt)
+		ts.writeType(buf, t.Elt())
 
-	case *types.NamedType:
-		if pkg := ts.pkgmap[t.Obj]; pkg != nil && pkg.Path != "" {
-			buf.WriteString(pkg.Path)
+	case *types.Named:
+		if pkg := ts.pkgmap[t.Obj()]; pkg != nil && pkgpath(pkg) != "" {
+			buf.WriteString(pkgpath(pkg))
 			buf.WriteByte('.')
 		}
-		buf.WriteString(t.Obj.GetName())
+		buf.WriteString(t.Obj().Name())
 
 	default:
 		fmt.Fprintf(buf, "<type %T>", t)

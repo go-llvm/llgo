@@ -13,16 +13,16 @@ import (
 func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := underlyingType(typ).(*types.NamedType); ok {
-		typ = name.Underlying
+	if name, ok := underlyingType(typ).(*types.Named); ok {
+		typ = name.Underlying()
 	}
 	var capvalue llvm.Value
 	switch typ := underlyingType(typ).(type) {
 	case *types.Pointer:
-		atyp := underlyingType(typ.Base).(*types.Array)
-		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len), false)
+		atyp := underlyingType(typ.Elt()).(*types.Array)
+		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Array:
-		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
+		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
 	case *types.Slice:
 		sliceval := value.LLVMValue()
 		capvalue = c.builder.CreateExtractValue(sliceval, 2, "")
@@ -35,14 +35,14 @@ func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
 func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := underlyingType(typ).(*types.NamedType); ok {
-		typ = name.Underlying
+	if name, ok := underlyingType(typ).(*types.Named); ok {
+		typ = name.Underlying()
 	}
 	var lenvalue llvm.Value
 	switch typ := underlyingType(typ).(type) {
 	case *types.Pointer:
-		atyp := underlyingType(typ.Base).(*types.Array)
-		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len), false)
+		atyp := underlyingType(typ.Elt()).(*types.Array)
+		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
 		sliceval := value.LLVMValue()
 		lenvalue = c.builder.CreateExtractValue(sliceval, 1, "")
@@ -51,7 +51,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		f := c.NamedFunction("runtime.maplen", "func f(m uintptr) int")
 		lenvalue = c.builder.CreateCall(f, []llvm.Value{mapval}, "")
 	case *types.Array:
-		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
+		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
 	case *types.Basic:
 		if isString(typ) {
 			value := value.(*LLVMValue)

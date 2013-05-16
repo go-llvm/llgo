@@ -14,7 +14,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 		panic("Expecting only one argument to new")
 	}
 	ptrtyp := c.types.expr[expr].Type.(*types.Pointer)
-	typ := ptrtyp.Base
+	typ := ptrtyp.Elt()
 	llvmtyp := c.types.ToLLVM(typ)
 	mem := c.createTypeMalloc(llvmtyp)
 	return c.NewValue(mem, ptrtyp)

@@ -20,7 +20,7 @@ func (c *compiler) visitRecover() *LLVMValue {
 	// an indirectly invoked deferred function or not.
 	var indirect llvm.Value
 	sig := fn.Type().(*types.Signature)
-	if len(sig.Params) == 0 {
+	if sig.Params().Arity() == 0 {
 		indirect = llvm.ConstInt(llvm.Int32Type(), 0, false)
 	} else {
 		indirect = llvm.ConstInt(llvm.Int32Type(), 1, false)

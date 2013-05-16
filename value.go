@@ -143,7 +143,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	}
 
 	// Special case for string -> []byte
-	if isIdentical(underlyingType(typ), &types.Slice{Elt: types.Typ[types.Byte]}) {
+	if types.IsIdentical(underlyingType(typ), types.NewSlice(types.Typ[types.Byte])) {
 		if v.Kind() == exact.String {
 			strval := c.NewConstValue(v, types.Typ[types.String])
 			return strval.Convert(typ).(*LLVMValue)
@@ -175,9 +175,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	switch typ := underlyingType(lhs.typ).(type) {
 	case *types.Struct:
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
-		struct_fields := typ.Fields
 		if element_types_count > 0 {
-			t := struct_fields[0].Type.(types.Type)
+			t := typ.Field(0).Type
 			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
 			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
@@ -190,7 +189,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result := first
 			for i := 1; i < element_types_count; i++ {
 				result = c.compileLogicalOp(logicalop, result, func() Value {
-					t := struct_fields[i].Type.(types.Type)
+					t := typ.Field(i).Type
 					lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 					rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
 					return lhs.BinaryOp(op, rhs)
@@ -385,7 +384,7 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		return v // No-op
 	case token.AND:
 		if typ, ok := underlyingType(v.typ).(*types.Pointer); ok {
-			if underlyingType(typ.Base) == typ {
+			if underlyingType(typ.Elt()) == typ {
 				// Taking the address of a recursive pointer
 				// yields a value with the same type.
 				value := v.pointer.value
@@ -424,7 +423,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	srctyp = underlyingType(srctyp)
 
 	// Identical (underlying) types? Just swap in the destination type.
-	if isIdentical(srctyp, dsttyp) {
+	if types.IsIdentical(srctyp, dsttyp) {
 		// TODO avoid load here by reusing pointer value, if exists.
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
@@ -432,9 +431,9 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// Both pointer types with identical underlying types? Same as above.
 	if srctyp, ok := srctyp.(*types.Pointer); ok {
 		if dsttyp, ok := dsttyp.(*types.Pointer); ok {
-			srctyp := underlyingType(srctyp.Base)
-			dsttyp := underlyingType(dsttyp.Base)
-			if isIdentical(srctyp, dsttyp) {
+			srctyp := underlyingType(srctyp.Elt())
+			dsttyp := underlyingType(dsttyp.Elt())
+			if types.IsIdentical(srctyp, dsttyp) {
 				return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 			}
 		}
@@ -454,8 +453,8 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		return v.convertV2I(interface_)
 	}
 
-	byteslice := &types.Slice{Elt: types.Typ[types.Byte]}
-	runeslice := &types.Slice{Elt: types.Typ[types.Rune]}
+	byteslice := types.NewSlice(types.Typ[types.Byte])
+	runeslice := types.NewSlice(types.Typ[types.Rune])
 
 	// string ->
 	if isString(srctyp) {
@@ -466,7 +465,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		}
 
 		// string -> []byte
-		if isIdentical(dsttyp, byteslice) {
+		if types.IsIdentical(dsttyp, byteslice) {
 			c := v.compiler
 			value := v.LLVMValue()
 			strdata := c.builder.CreateExtractValue(value, 0, "")
@@ -479,13 +478,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		}
 
 		// string -> []rune
-		if isIdentical(dsttyp, runeslice) {
+		if types.IsIdentical(dsttyp, runeslice) {
 			return v.stringToRuneSlice()
 		}
 	}
 
 	// []byte -> string
-	if isIdentical(srctyp, byteslice) && isString(dsttyp) {
+	if types.IsIdentical(srctyp, byteslice) && isString(dsttyp) {
 		c := v.compiler
 		value := v.LLVMValue()
 		data := c.builder.CreateExtractValue(value, 0, "")
@@ -497,7 +496,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	}
 
 	// []rune -> string
-	if isIdentical(srctyp, runeslice) && isString(dsttyp) {
+	if types.IsIdentical(srctyp, runeslice) && isString(dsttyp) {
 		return v.runeSliceToString()
 	}
 

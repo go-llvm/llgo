@@ -85,7 +85,7 @@ func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
 	_string := strtorunes.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
 	result := c.builder.CreateCall(strtorunes, args, "")
-	runeslice := &types.Slice{Elt: types.Typ[types.Rune]}
+	runeslice := types.NewSlice(types.Typ[types.Rune])
 	result = c.coerceSlice(result, c.types.ToLLVM(runeslice))
 	return c.NewValue(result, runeslice)
 }

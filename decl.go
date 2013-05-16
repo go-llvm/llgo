@@ -21,18 +21,20 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 		fname = ""
 	} else {
 		var pkgname string
-		if ftyp.Recv != nil {
+		if recv := ftyp.Recv(); recv != nil {
 			var recvname string
-			switch recvtyp := ftyp.Recv.Type.(type) {
+			switch recvtyp := recv.Type().(type) {
 			case *types.Pointer:
-				if named, ok := recvtyp.Base.(*types.NamedType); ok {
-					recvname = "*" + named.Obj.Name
-					pkgname = c.objectdata[named.Obj].Package.Path
+				if named, ok := recvtyp.Elt().(*types.Named); ok {
+					obj := named.Obj()
+					recvname = "*" + obj.Name()
+					pkgname = pkgpath(c.objectdata[obj].Package)
 				}
-			case *types.NamedType:
+			case *types.Named:
 				named := recvtyp
-				recvname = named.Obj.Name
-				pkgname = c.objectdata[named.Obj].Package.Path
+				obj := named.Obj()
+				recvname = obj.Name()
+				pkgname = pkgpath(c.objectdata[obj].Package)
 			}
 
 			if recvname != "" {
@@ -46,7 +48,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 			}
 		} else {
 			obj := c.objects[ident]
-			pkgname = c.objectdata[obj].Package.Path
+			pkgname = pkgpath(c.objectdata[obj].Package)
 		}
 		if fname != "" {
 			fname = pkgname + "." + fname
@@ -87,7 +89,7 @@ func (stackvar *LLVMValue) promoteStackVar() {
 
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
-func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types.Var, body *ast.BlockStmt) {
+func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt) {
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 	llvm_fn := llvm.ConstExtractValue(f.LLVMValue(), []uint32{0})
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
@@ -100,12 +102,14 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 
 		// Store the existing values. We're going to temporarily
 		// replace the values with offsets into the context param.
-		oldvalues := make([]*LLVMValue, len(context))
-		for i, v := range context {
+		oldvalues := make([]*LLVMValue, context.Arity())
+		for i := range oldvalues {
+			v := context.At(i)
 			oldvalues[i] = c.objectdata[v].Value
 		}
 		defer func() {
-			for i, v := range context {
+			for i := range oldvalues {
+				v := context.At(i)
 				c.objectdata[v].Value = oldvalues[i]
 			}
 		}()
@@ -113,7 +117,8 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 		// The context parameter is a pointer to a struct
 		// whose elements are pointers to captured values.
 		arg0 := llvm_fn.Param(0)
-		for i, v := range context {
+		for i := range oldvalues {
+			v := context.At(i)
 			argptr := c.builder.CreateStructGEP(arg0, i, "")
 			argptr = c.builder.CreateLoad(argptr, "")
 			ptrtyp := oldvalues[i].pointer.Type()
@@ -125,13 +130,15 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 	// Bind receiver, arguments and return values to their
 	// identifiers/objects. We'll store each parameter on the stack so
 	// they're addressable.
-	for i, v := range params {
-		if v.Name != "" {
+	for i := 0; i < int(params.Arity()); i++ {
+		v := params.At(i)
+		name := v.Name()
+		if name != "" {
 			value := llvm_fn.Param(i + paramoffset)
-			typ := v.Type
-			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), v.Name)
+			typ := v.Type()
+			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), name)
 			c.builder.CreateStore(value, stackvalue)
-			ptrvalue := c.NewValue(stackvalue, &types.Pointer{Base: typ})
+			ptrvalue := c.NewValue(stackvalue, types.NewPointer(typ))
 			stackvar := ptrvalue.makePointee()
 			stackvar.stack = f
 			c.objectdata[v].Value = stackvar
@@ -143,23 +150,24 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 	hasdefer := hasDefer(funcstate, body)
 
 	// Allocate space on the stack for named results.
-	for _, v := range results {
-		allocstack := v.Name != ""
+	results.ForEach(func(v *types.Var) {
+		name := v.Name()
+		allocstack := name != ""
 		if !allocstack && hasdefer {
 			c.objectdata[v] = &ObjectData{}
 			allocstack = true
 		}
 		if allocstack {
-			typ := v.Type
+			typ := v.Type()
 			llvmtyp := c.types.ToLLVM(typ)
-			stackptr := c.builder.CreateAlloca(llvmtyp, v.Name)
+			stackptr := c.builder.CreateAlloca(llvmtyp, name)
 			c.builder.CreateStore(llvm.ConstNull(llvmtyp), stackptr)
-			ptrvalue := c.NewValue(stackptr, &types.Pointer{Base: typ})
+			ptrvalue := c.NewValue(stackptr, types.NewPointer(typ))
 			stackvar := ptrvalue.makePointee()
 			stackvar.stack = f
 			c.objectdata[v].Value = stackvar
 		}
-	}
+	})
 
 	// Create the function body.
 	if hasdefer {
@@ -169,7 +177,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results []*types
 	c.functions.pop()
 
 	// If there are no results, then "return" is optional.
-	if len(results) == 0 {
+	if results.Arity() == 0 {
 		// Use GetInsertBlock rather than LastBasicBlock, since the
 		// last basic block might actually be a "defer" block.
 		last := c.builder.GetInsertBlock()
@@ -196,13 +204,16 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 
 	var paramVars []*types.Var
 	ftyp := fn.Type().(*types.Signature)
-	if ftyp.Recv != nil {
-		paramVars = append(paramVars, ftyp.Recv)
+	if recv := ftyp.Recv(); recv != nil {
+		paramVars = append(paramVars, recv)
 	}
 	if ftyp.Params != nil {
-		paramVars = append(paramVars, ftyp.Params...)
+		ftyp.Params().ForEach(func(p *types.Var) {
+			paramVars = append(paramVars, p)
+		})
 	}
-	c.buildFunction(fn, nil, paramVars, ftyp.Results[:], f.Body)
+	paramVarsTuple := types.NewTuple(paramVars...)
+	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body)
 
 	if f.Recv == nil && f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.
@@ -218,10 +229,10 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 	globals := make([]*LLVMValue, len(idents))
 	for i, ident := range idents {
 		if ident.Name != "_" {
-			t := c.objects[ident].GetType()
+			t := c.objects[ident].Type()
 			llvmtyp := c.types.ToLLVM(t)
 			gv := llvm.AddGlobal(c.module.Module, llvmtyp, pkg+"."+ident.Name)
-			g := c.NewValue(gv, &types.Pointer{Base: t}).makePointee()
+			g := c.NewValue(gv, types.NewPointer(t)).makePointee()
 			globals[i] = g
 			c.objectdata[c.objects[ident]].Value = g
 		}
@@ -317,15 +328,15 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 			if name.Name == "" {
 				continue
 			}
-			typ := c.objects[name].GetType()
+			typ := c.objects[name].Type()
 			c.convertUntyped(valspec.Values[i], typ)
 		}
 	}
 
 	// If the ValueSpec exists at the package level, create globals.
 	if obj, ok := c.objects[valspec.Names[0]]; ok {
-		if c.pkg.Scope.Lookup(valspec.Names[0].Name) == obj {
-			c.createGlobals(valspec.Names, valspec.Values, c.pkg.Path)
+		if c.pkg.Scope().Lookup(valspec.Names[0].Name) == obj {
+			c.createGlobals(valspec.Names, valspec.Values, pkgpath(c.pkg))
 			return
 		}
 	}
@@ -353,7 +364,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 		// escape analysis to determine whether to promote.
 
 		obj := c.objects[name]
-		typ := obj.GetType()
+		typ := obj.Type()
 		llvmtyp := c.types.ToLLVM(typ)
 		ptr := c.createTypeMalloc(llvmtyp)
 		if values != nil && values[i] != nil {
@@ -364,7 +375,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 			llvmInit := values[i].Convert(typ).LLVMValue()
 			c.builder.CreateStore(llvmInit, ptr)
 		}
-		stackvar := c.NewValue(ptr, &types.Pointer{Base: typ}).makePointee()
+		stackvar := c.NewValue(ptr, types.NewPointer(typ)).makePointee()
 		stackvar.stack = c.functions.top().LLVMValue
 		c.objectdata[c.objects[name]].Value = stackvar
 	}
@@ -379,7 +390,7 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 		// Export runtime type information.
 		for _, spec := range decl.Specs {
 			typspec := spec.(*ast.TypeSpec)
-			typ := c.objects[typspec.Name].GetType()
+			typ := c.objects[typspec.Name].Type()
 			c.types.ToRuntime(typ)
 		}
 	case token.CONST:

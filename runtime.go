@@ -31,7 +31,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 	}
 
 	if strings.HasPrefix(name, c.module.Name+".") {
-		obj := c.pkg.Scope.Lookup(name[len(c.module.Name)+1:])
+		obj := c.pkg.Scope().Lookup(name[len(c.module.Name)+1:])
 		if obj == nil {
 			panic("Missing function: " + name)
 		}
@@ -61,14 +61,13 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 			panic(err)
 		}
 		files = append(files, file)
-		pkg, _, err := c.typecheck(fset, files)
+		_, _, err = c.typecheck("runtime", fset, files)
 		if err != nil {
 			panic(err)
 		}
-		pkg.Path = "runtime"
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
-		ftype := c.objects[fdecl.Name].GetType().(*types.Signature)
+		ftype := c.objects[fdecl.Name].Type().(*types.Signature)
 		llvmfntyp := c.types.ToLLVM(ftype).StructElementTypes()[0].ElementType()
 		f = llvm.AddFunction(c.module.Module, name, llvmfntyp)
 	}
@@ -111,11 +110,10 @@ func (c *compiler) parseReflect() (*types.Package, error) {
 		return nil, err
 	}
 
-	pkg, _, err := c.typecheck(fset, files)
+	pkg, _, err := c.typecheck("reflect", fset, files)
 	if err != nil {
 		return nil, err
 	}
-	pkg.Path = "reflect"
 
 	return pkg, nil
 }

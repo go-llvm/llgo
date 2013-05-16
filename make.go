@@ -23,7 +23,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		case 2:
 			length = c.VisitExpr(expr.Args[1])
 		}
-		slice := c.makeSlice(utyp.Elt, length, capacity)
+		slice := c.makeSlice(utyp.Elt(), length, capacity)
 		return c.NewValue(slice, typ)
 	case *types.Chan:
 		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap int) uintptr")

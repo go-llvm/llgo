@@ -11,7 +11,6 @@ import (
 	"go/ast"
 	"go/token"
 	"log"
-	"strconv"
 	"strings"
 )
 
@@ -49,10 +48,9 @@ type compiler struct {
 	pkg            *types.Package
 	fileset        *token.FileSet
 
-	objects     map[*ast.Ident]types.Object
-	objectdata  map[types.Object]*ObjectData
-	methodfuncs map[*types.Method]*types.Func
-	methodsets  map[types.Type]*methodset
+	objects    map[*ast.Ident]types.Object
+	objectdata map[types.Object]*ObjectData
+	methodsets map[types.Type]*methodset
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -91,7 +89,9 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 	var value *LLVMValue
 	switch obj := obj.(type) {
 	case *types.Func:
-		value = c.makeFunc(ident, obj.Type.(*types.Signature))
+		value = c.makeFunc(ident, obj.Type().(*types.Signature))
+	case *synthFunc:
+		value = c.makeFunc(ident, obj.Type().(*types.Signature))
 
 	case *types.Var:
 		if data.Ident.Obj != nil {
@@ -114,17 +114,17 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 		value = data.Value
 		if value == nil {
 			module := c.module.Module
-			t := obj.GetType()
-			name := data.Package.Path + "." + obj.GetName()
+			t := obj.Type()
+			name := pkgpath(data.Package) + "." + obj.Name()
 			g := module.NamedGlobal(name)
 			if g.IsNil() {
 				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
 			}
-			value = c.NewValue(g, &types.Pointer{Base: t}).makePointee()
+			value = c.NewValue(g, types.NewPointer(t)).makePointee()
 		}
 
 	case *types.Const:
-		value = c.NewConstValue(obj.Val, obj.Type)
+		value = c.NewConstValue(obj.Val(), obj.Type())
 
 	default:
 		panic(fmt.Sprintf("unreachable (%T)", obj))
@@ -235,25 +235,19 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	// Type-check, and store object data.
 	compiler.objects = make(map[*ast.Ident]types.Object)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
-	compiler.methodfuncs = make(map[*types.Method]*types.Func)
 	compiler.methodsets = make(map[types.Type]*methodset)
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
-	pkg, exprtypes, err := compiler.typecheck(fset, files)
+	pkg, exprtypes, err := compiler.typecheck(importpath, fset, files)
 	if err != nil {
 		return nil, err
 	}
 	compiler.pkg = pkg
-	switch {
-	case pkg.Name == "main", importpath == "":
-		pkg.Path = pkg.Name
-	default:
-		pkg.Path = importpath
-	}
+	importpath = pkgpath(pkg)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
 	// Dispose manually, which will render the finalizer a no-op.
-	modulename := pkg.Name
+	modulename := importpath
 	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
 	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.target.String())
@@ -261,7 +255,6 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		if e := recover(); e != nil {
 			compiler.module.Dispose()
 			panic(e)
-			//err = e.(error)
 		}
 	}()
 
@@ -269,7 +262,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	// and to runtime/dynamic type values.
 	var resolver Resolver = compiler
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, pkg.Path, exprtypes, compiler.FunctionCache, resolver)
+	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, importpath, exprtypes, compiler.FunctionCache, resolver)
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = newBuilder(compiler.types)
@@ -284,17 +277,17 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 
 	// Define intrinsics for use by the runtime: malloc, free, memcpy, etc.
 	// These could be defined in LLVM IR, and may be moved there later.
-	if pkg.Name == "runtime" {
+	if importpath == "runtime" {
 		compiler.defineRuntimeIntrinsics()
 	}
 
 	// Export runtime type information.
-	if pkg.Name == "runtime" {
+	if importpath == "runtime" {
 		compiler.exportBuiltinRuntimeTypes()
 	}
 
 	// Wrap "main.main" in a call to runtime.main.
-	if pkg.Name == "main" {
+	if importpath == "main" {
 		err = compiler.createMainFunction()
 		if err != nil {
 			return nil, err
@@ -326,7 +319,8 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		var index int = 0
 		for _, initfuncs := range initfuncs {
 			for _, fnptr := range initfuncs {
-				fnptr.SetName("__llgo.ctor." + pkg.Path + strconv.Itoa(index))
+				name := fmt.Sprintf("__llgo.ctor.%s.%d", importpath, index)
+				fnptr.SetName(name)
 				fnptr = llvm.ConstBitCast(fnptr, ctortype)
 				ctors = append(ctors, fnptr)
 				index++

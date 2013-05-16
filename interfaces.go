@@ -10,25 +10,24 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/token"
-	"sort"
 )
 
 // convertV2I converts a value to an interface.
 func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
-	var srcname *types.NamedType
+	var srcname *types.Named
 	srctyp := v.Type()
-	if name, isname := srctyp.(*types.NamedType); isname {
+	if name, isname := srctyp.(*types.Named); isname {
 		srcname = name
-		srctyp = name.Underlying
+		srctyp = name.Underlying()
 	}
 
 	var isptr bool
 	if p, fromptr := srctyp.(*types.Pointer); fromptr {
 		isptr = true
-		srctyp = p.Base
-		if name, isname := srctyp.(*types.NamedType); isname {
+		srctyp = p.Elt()
+		if name, isname := srctyp.(*types.Named); isname {
 			srcname = name
-			srctyp = name.Underlying
+			srctyp = name.Underlying()
 		}
 	}
 
@@ -75,8 +74,9 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 
 	if srcname != nil {
 		// Look up the method by name.
-		for i, m := range iface.Methods {
-			method := v.compiler.methods(srcname).lookup(m.Name, isptr)
+		for i := 0; i < iface.NumMethods(); i++ {
+			m := iface.Method(i)
+			method := v.compiler.methods(srcname).lookup(m.Name(), isptr)
 			methodident := v.compiler.objectdata[method].Ident
 			llvm_value := v.compiler.Resolve(methodident).LLVMValue()
 			llvm_value = builder.CreateExtractValue(llvm_value, 0, "")
@@ -104,15 +104,19 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, succe
 	// value or pointer receivers.
 
 	// TODO handle dynamic interface conversion (non-subset).
-	methods := src_typ.(*types.Interface).Methods
-	for i, m := range iface.Methods {
-		// TODO make this loop linear by iterating through the
-		// interface methods and type methods together.
-		mi := sort.Search(len(methods), func(i int) bool {
-			return methods[i].Name >= m.Name
-		})
-		if mi >= len(methods) || methods[mi].Name != m.Name {
-			//panic("Failed to locate method: " + m.Name)
+	srciface := src_typ.(*types.Interface)
+	for i := 0; i < iface.NumMethods(); i++ {
+		m := iface.Method(i)
+
+		// FIXME sort methods somewhere, make loop linear.
+		var mi int
+		for ; mi < srciface.NumMethods(); mi++ {
+			if srciface.Method(i).Name() == m.Name() {
+				break
+			}
+		}
+
+		if mi >= srciface.NumMethods() {
 			goto check_dynamic
 		} else {
 			fptr := builder.CreateExtractValue(val, mi+2, "")
@@ -252,7 +256,7 @@ func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	c := v.compiler
 	if c.types.Sizeof(typ) > int64(c.target.PointerSize()) {
 		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
-		typ = &types.Pointer{Base: typ}
+		typ = types.NewPointer(typ)
 		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")
 		return c.NewValue(ptr, typ).makePointee()
 	}

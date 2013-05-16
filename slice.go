@@ -22,8 +22,8 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 		ep := c.builder.CreateGEP(mem, indices, "")
 		c.builder.CreateStore(value, ep)
 	}
-	slicetyp := types.Slice{Elt: elttyp}
-	struct_ := llvm.Undef(c.types.ToLLVM(&slicetyp))
+	slicetyp := types.NewSlice(elttyp)
+	struct_ := llvm.Undef(c.types.ToLLVM(slicetyp))
 	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
 	struct_ = c.builder.CreateInsertValue(struct_, n, 1, "")
 	struct_ = c.builder.CreateInsertValue(struct_, n, 2, "")
@@ -53,8 +53,8 @@ func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Val
 	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
 	c.memsetZero(mem, size)
 
-	slicetyp := types.Slice{Elt: elttyp}
-	struct_ := llvm.Undef(c.types.ToLLVM(&slicetyp))
+	slicetyp := types.NewSlice(elttyp)
+	struct_ := llvm.Undef(c.types.ToLLVM(slicetyp))
 	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
 	struct_ = c.builder.CreateInsertValue(struct_, lengthValue, 1, "")
 	struct_ = c.builder.CreateInsertValue(struct_, capacityValue, 2, "")
@@ -87,7 +87,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 
 	sliceappend := c.NamedFunction("runtime.sliceappend", "func f(t uintptr, dst, src slice) slice")
 	i8slice := sliceappend.Type().ElementType().ReturnType()
-	i8ptr := c.types.ToLLVM(&types.Pointer{Base: types.Typ[types.Int8]})
+	i8ptr := c.types.ToLLVM(types.NewPointer(types.Typ[types.Int8]))
 
 	// Coerce first argument into an []int8.
 	a_ := s.LLVMValue()
@@ -172,11 +172,11 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		sliceValue := llvm.Undef(i8slice) // temporary slice
 		arrayptr := value.(*LLVMValue).pointer.LLVMValue()
 		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
-		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len), false)
+		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
-		sliceTyp := &types.Slice{Elt: typ.Elt}
+		sliceTyp := types.NewSlice(typ.Elt())
 		runtimeTyp := c.types.ToRuntime(sliceTyp)
 		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}

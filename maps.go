@@ -34,7 +34,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 		args[2] = c.builder.CreatePtrToInt(stackval, ptrType, "")
 	}
 
-	eltPtrType := &types.Pointer{Base: mapType.Elt}
+	eltPtrType := types.NewPointer(mapType.Elt())
 	llvmtyp := c.types.ToLLVM(eltPtrType)
 	zeroglobal := llvm.AddGlobal(c.module.Module, llvmtyp.ElementType(), "")
 	zeroglobal.SetInitializer(llvm.ConstNull(llvmtyp.ElementType()))
@@ -80,8 +80,8 @@ func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llv
 	pk = c.builder.CreateExtractValue(results, 1, "")
 	pv = c.builder.CreateExtractValue(results, 2, "")
 
-	keyptrtype := &types.Pointer{Base: mapType.Key}
-	valptrtype := &types.Pointer{Base: mapType.Elt}
+	keyptrtype := types.NewPointer(mapType.Key())
+	valptrtype := types.NewPointer(mapType.Elt())
 	pk = c.builder.CreateIntToPtr(pk, c.types.ToLLVM(keyptrtype), "")
 	pv = c.builder.CreateIntToPtr(pv, c.types.ToLLVM(valptrtype), "")
 
