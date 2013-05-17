@@ -94,8 +94,7 @@ func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr) []Value
 			var paramtyp types.Type
 			params := ftype.Params()
 			if ftype.IsVariadic() && i >= int(params.Arity()-1) {
-				last := params.At(int(params.Arity() - 1))
-				paramtyp = last.Type().(*types.Slice).Elt()
+				paramtyp = params.At(int(params.Arity() - 1)).Type()
 			} else {
 				paramtyp = params.At(i).Type()
 			}
@@ -216,7 +215,6 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 				args = append(args, slice_value)
 			} else {
 				param_type := params.At(nparams).Type()
-				param_type = param_type.(*types.Slice).Elt()
 				varargs := make([]llvm.Value, 0)
 				for _, value := range argValues[nparams:] {
 					value = value.Convert(param_type)
@@ -267,7 +265,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 		// dealing with a method (where we don't care about the value
 		// of the receiver), then we must conditionally call the
 		// function with the additional receiver/closure.
-		if !context.IsNull() || fn_type.Recv != nil {
+		if !context.IsNull() || fn_type.Recv() != nil {
 			// Store the blocks for referencing in the Phi below;
 			// note that we update the block after each createCall,
 			// since createCall may create new blocks and we want
@@ -440,7 +438,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method.
-	if typ, ok := c.types.expr[expr].Type.(*types.Signature); ok && typ.Recv != nil {
+	if typ, ok := c.types.expr[expr].Type.(*types.Signature); ok && typ.Recv() != nil {
 		var isptr bool
 		typ := lhs.Type()
 		if ptr, ok := typ.(*types.Pointer); ok {
@@ -456,8 +454,10 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				recv = recv.pointer
 			}
 
-			data := c.objectdata[c.methodfunc(method.(*types.Func))]
-			methodValue := c.Resolve(data.Ident).LLVMValue()
+			if f, ok := method.(*types.Func); ok {
+				method = c.methodfunc(f)
+			}
+			methodValue := c.Resolve(c.objectdata[method].Ident).LLVMValue()
 			methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
 			recvValue := recv.LLVMValue()
 			types := []llvm.Type{methodValue.Type(), recvValue.Type()}

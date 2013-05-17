@@ -16,7 +16,7 @@ import (
 
 func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue {
 	fname := ident.String()
-	if ftyp.Recv == nil && fname == "init" {
+	if ftyp.Recv() == nil && fname == "init" {
 		// Make "init" functions anonymous.
 		fname = ""
 	} else {
@@ -89,7 +89,7 @@ func (stackvar *LLVMValue) promoteStackVar() {
 
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
-func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt) {
+func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt, isvariadic bool) {
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 	llvm_fn := llvm.ConstExtractValue(f.LLVMValue(), []uint32{0})
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
@@ -130,12 +130,16 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	// Bind receiver, arguments and return values to their
 	// identifiers/objects. We'll store each parameter on the stack so
 	// they're addressable.
-	for i := 0; i < int(params.Arity()); i++ {
+	nparams := int(params.Arity())
+	for i := 0; i < nparams; i++ {
 		v := params.At(i)
 		name := v.Name()
 		if name != "" {
 			value := llvm_fn.Param(i + paramoffset)
 			typ := v.Type()
+			if isvariadic && i == nparams-1 {
+				typ = types.NewSlice(typ)
+			}
 			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), name)
 			c.builder.CreateStore(value, stackvalue)
 			ptrvalue := c.NewValue(stackvalue, types.NewPointer(typ))
@@ -213,7 +217,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		})
 	}
 	paramVarsTuple := types.NewTuple(paramVars...)
-	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body)
+	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body, ftyp.IsVariadic())
 
 	if f.Recv == nil && f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.

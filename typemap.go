@@ -315,9 +315,14 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		tm.types[tstr] = typ
 
 		params := f.Params()
-		for i := 0; i < int(params.Arity()); i++ {
-			param := params.At(i)
-			param_types = append(param_types, tm.ToLLVM(param.Type()))
+		nparams := int(params.Arity())
+		for i := 0; i < nparams; i++ {
+			typ := params.At(i).Type()
+			if f.IsVariadic() && i == nparams-1 {
+				typ = types.NewSlice(typ)
+			}
+			llvmtyp := tm.ToLLVM(typ)
+			param_types = append(param_types, llvmtyp)
 		}
 
 		var return_type llvm.Type

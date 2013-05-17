@@ -81,7 +81,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	if expr.Ellipsis.IsValid() {
 		c.convertUntyped(expr.Args[1], s.Type())
 	} else {
-		c.convertUntyped(expr.Args[1], underlyingType(s.Type()).(*types.Slice).Elt)
+		c.convertUntyped(expr.Args[1], underlyingType(s.Type()).(*types.Slice).Elt())
 	}
 	elem := c.VisitExpr(expr.Args[1])
 

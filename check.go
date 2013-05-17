@@ -53,23 +53,6 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 		c.objectdata[obj] = data
 	}
 	for _, pkg := range pkg.Imports() {
-		// Methods of types in imported packages won't be
-		// seen by ctx.Ident, so we need to handle them here.
-		for _, obj := range pkg.Scope().Entries {
-			switch obj := obj.(type) {
-			case *types.Func:
-				if sig, ok := obj.Type().(*types.Signature); ok {
-					fixVariadicSignature(sig)
-				}
-			case *types.TypeName:
-				if typ, ok := obj.Type().(*types.Named); ok {
-					typ.ForEachMethod(func(m *types.Func) {
-						fixVariadicSignature(m.Type().(*types.Signature))
-					})
-				}
-			}
-		}
-
 		// Associate objects from imported packages
 		// with the corresponding *types.Package.
 		assocObjectPackages(pkg, c.objectdata)
@@ -127,10 +110,6 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 		return v
 	}
 
-	// If we have a variadic function, change its last
-	// parameter's type to a slice of its recorded type.
-	fixVariadicSignature(sig)
-
 	// go/types creates a separate types.Var for
 	// internal and external usage. We need to
 	// associate them at the object data level.
@@ -153,18 +132,6 @@ func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
 		}
 	}
 	return v
-}
-
-// fixVariadicSignature will change the last parameter type
-// of a variadic function signature such that it is a slice
-// of the type reported by go/types.
-func fixVariadicSignature(sig *types.Signature) {
-	// FIXME
-	//if sig.IsVariadic() {
-	//	params := sig.Params()
-	//	last := params.At(int(params.Len()) - 1)
-	//	last.Type = &types.Slice{Elt: last.Type}
-	//}
 }
 
 func fieldlistIdents(l *ast.FieldList) (idents []*ast.Ident) {

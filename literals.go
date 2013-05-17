@@ -76,9 +76,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 				Type: types.NewPointer(capturevar.Type()),
 			}
 		}
-		panic("missing types.NewStruct")
-		var ctxtyp types.Type
-		//ctxtyp := types.NewPointer(&types.Struct{Fields: ctxfields})
+		ctxtyp := types.NewPointer(types.NewStruct(ctxfields, nil))
 		llvmctxtyp := c.types.ToLLVM(ctxtyp)
 		rettyp := fntyp.ReturnType()
 		paramtyps := append([]llvm.Type{llvmctxtyp}, fntyp.ParamTypes()...)
@@ -96,7 +94,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 
 	f := c.NewValue(fnvalue, ftyp)
 	captureVars := types.NewTuple(v.captures...)
-	c.buildFunction(f, captureVars, paramVars, resultVars, lit.Body)
+	c.buildFunction(f, captureVars, paramVars, resultVars, lit.Body, ftyp.IsVariadic())
 
 	// Closure? Bind values to a context block.
 	if v.captures != nil {

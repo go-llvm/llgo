@@ -130,7 +130,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				format += "%s"
 
 			case *types.Pointer:
-				format += "0x%x"
+				format += "0x%lx"
 
 			default:
 				panic(fmt.Sprintf("Unhandled type kind: %s (%T)", typ, typ))
