@@ -25,6 +25,12 @@ var (
 func buildLlgo() error {
 	log.Println("Building llgo")
 
+	cmd := exec.Command("go", "get", "-d", gollvmpkgpath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", string(output))
+		return err
+	}
 	pkg, err := build.Import(gollvmpkgpath, "", build.FindOnly)
 	if err != nil {
 		return err
@@ -41,21 +47,18 @@ func buildLlgo() error {
 	}
 	cgoLdflags += " " + llvmldflags
 
-	var output []byte
 	args := []string{"get", "-ldflags", ldflags}
-
 	llvmtag := "llvm" + llvmversion
 	if strings.HasSuffix(llvmversion, "svn") {
 		llvmtag = "llvmsvn"
 	}
 	args = append(args, []string{"-tags", llvmtag}...)
-
 	args = append(args, llgopkgpath)
-	cmd := exec.Command("go", args...)
+
+	cmd = exec.Command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CGO_CFLAGS="+cgoCflags)
 	cmd.Env = append(cmd.Env, "CGO_LDFLAGS="+cgoLdflags)
-
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
@@ -82,7 +85,6 @@ func buildLlgo() error {
 		return err
 	}
 	log.Printf("GOARCH = %s, GOOS = %s", GOARCH, GOOS)
-
 	log.Printf("Built %s", llgobin)
 	return nil
 }
