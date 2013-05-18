@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 )
@@ -13,13 +13,13 @@ import (
 func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := underlyingType(typ).(*types.Named); ok {
+	if name, ok := typ.Underlying().(*types.Named); ok {
 		typ = name.Underlying()
 	}
 	var capvalue llvm.Value
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Pointer:
-		atyp := underlyingType(typ.Elt()).(*types.Array)
+		atyp := typ.Elem().Underlying().(*types.Array)
 		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Array:
 		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
@@ -35,13 +35,13 @@ func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
 func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 	value := c.VisitExpr(expr.Args[0])
 	typ := value.Type()
-	if name, ok := underlyingType(typ).(*types.Named); ok {
+	if name, ok := typ.Underlying().(*types.Named); ok {
 		typ = name.Underlying()
 	}
 	var lenvalue llvm.Value
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Pointer:
-		atyp := underlyingType(typ.Elt()).(*types.Array)
+		atyp := typ.Elem().Underlying().(*types.Array)
 		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
 		sliceval := value.LLVMValue()

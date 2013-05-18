@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -13,7 +13,7 @@ import (
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 	typ := c.types.expr[expr].Type
-	switch utyp := underlyingType(typ).(type) {
+	switch utyp := typ.Underlying().(type) {
 	case *types.Slice:
 		var length, capacity Value
 		switch len(expr.Args) {
@@ -23,7 +23,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		case 2:
 			length = c.VisitExpr(expr.Args[1])
 		}
-		slice := c.makeSlice(utyp.Elt(), length, capacity)
+		slice := c.makeSlice(utyp.Elem(), length, capacity)
 		return c.NewValue(slice, typ)
 	case *types.Chan:
 		f := c.NamedFunction("runtime.makechan", "func f(t uintptr, cap int) uintptr")

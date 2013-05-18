@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/exact"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -130,14 +130,14 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	var valuelist []Value
 
 	if ptr, ok := typ.(*types.Pointer); ok {
-		typ = ptr.Elt()
+		typ = ptr.Elem()
 		defer func() {
 			v = v.pointer
 		}()
 	}
 
 	var isstruct, isarray, isslice, ismap bool
-	switch underlyingType(typ).(type) {
+	switch typ.Underlying().(type) {
 	case *types.Struct:
 		isstruct = true
 	case *types.Array:
@@ -162,20 +162,20 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 				case isstruct:
 					name := kv.Key.(*ast.Ident).Name
 					key = name
-					typ := underlyingType(typ).(*types.Struct)
+					typ := typ.Underlying().(*types.Struct)
 					elttyp = typ.Field(fieldIndex(typ, name)).Type
 				case isarray:
 					key = c.types.expr[kv.Key].Value
-					typ := underlyingType(typ).(*types.Array)
-					elttyp = typ.Elt()
+					typ := typ.Underlying().(*types.Array)
+					elttyp = typ.Elem()
 				case isslice:
 					key = c.types.expr[kv.Key].Value
-					typ := underlyingType(typ).(*types.Slice)
-					elttyp = typ.Elt()
+					typ := typ.Underlying().(*types.Slice)
+					elttyp = typ.Elem()
 				case ismap:
 					key = c.VisitExpr(kv.Key)
-					typ := underlyingType(typ).(*types.Map)
-					elttyp = typ.Elt()
+					typ := typ.Underlying().(*types.Map)
+					elttyp = typ.Elem()
 				default:
 					panic("unreachable")
 				}
@@ -184,14 +184,14 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 			} else {
 				switch {
 				case isstruct:
-					typ := underlyingType(typ).(*types.Struct)
+					typ := typ.Underlying().(*types.Struct)
 					c.convertUntyped(elt, typ.Field(i).Type)
 				case isarray:
-					typ := underlyingType(typ).(*types.Array)
-					c.convertUntyped(elt, typ.Elt())
+					typ := typ.Underlying().(*types.Array)
+					c.convertUntyped(elt, typ.Elem())
 				case isslice:
-					typ := underlyingType(typ).(*types.Slice)
-					c.convertUntyped(elt, typ.Elt())
+					typ := typ.Underlying().(*types.Slice)
+					c.convertUntyped(elt, typ.Elem())
 				}
 				value := c.VisitExpr(elt)
 				valuelist = append(valuelist, value)
@@ -201,7 +201,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 
 	// For array/slice types, convert key:value to contiguous
 	// values initialiser.
-	switch underlyingType(typ).(type) {
+	switch typ.Underlying().(type) {
 	case *types.Array, *types.Slice:
 		if len(valuemap) > 0 {
 			var maxkey uint64
@@ -220,9 +220,9 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	}
 
 	origtyp := typ
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Array:
-		elttype := typ.Elt()
+		elttype := typ.Elem()
 		llvmelttype := c.types.ToLLVM(elttype)
 		llvmvalues := make([]llvm.Value, typ.Len())
 		for i := range llvmvalues {
@@ -250,7 +250,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 	case *types.Slice:
 		ptr := c.createTypeMalloc(c.types.ToLLVM(typ))
 
-		eltType := c.types.ToLLVM(typ.Elt())
+		eltType := c.types.ToLLVM(typ.Elem())
 		arrayType := llvm.ArrayType(eltType, len(valuelist))
 		valuesPtr := c.createMalloc(llvm.SizeOf(arrayType))
 		valuesPtr = c.builder.CreateIntToPtr(valuesPtr, llvm.PointerType(eltType, 0), "")
@@ -260,14 +260,14 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 		c.builder.CreateStore(valuesPtr, c.builder.CreateStructGEP(ptr, 0, "")) // data
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 1, ""))    // len
 		c.builder.CreateStore(length, c.builder.CreateStructGEP(ptr, 2, ""))    // cap
-		null := llvm.ConstNull(c.types.ToLLVM(typ.Elt()))
+		null := llvm.ConstNull(c.types.ToLLVM(typ.Elem()))
 		for i, value := range valuelist {
 			index := llvm.ConstInt(llvm.Int32Type(), uint64(i), false)
 			valuePtr := c.builder.CreateGEP(valuesPtr, []llvm.Value{index}, "")
 			if value == nil {
 				c.builder.CreateStore(null, valuePtr)
 			} else {
-				c.builder.CreateStore(value.Convert(typ.Elt()).LLVMValue(), valuePtr)
+				c.builder.CreateStore(value.Convert(typ.Elem()).LLVMValue(), valuePtr)
 			}
 		}
 		m := c.NewValue(ptr, types.NewPointer(origtyp))

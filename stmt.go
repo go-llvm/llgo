@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/exact"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -87,7 +87,7 @@ func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
 func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 	f := c.functions.top()
 	ftyp := f.Type().(*types.Signature)
-	if ftyp.Results().Arity() == 0 {
+	if ftyp.Results().Len() == 0 {
 		if !f.deferblock.IsNil() {
 			c.builder.CreateBr(f.deferblock)
 		} else {
@@ -105,11 +105,11 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		}
 	}
 
-	values := make([]llvm.Value, int(ftyp.Results().Arity()))
+	values := make([]llvm.Value, int(ftyp.Results().Len()))
 	if stmt.Results == nil {
 		// Bare return. No need to update named results, so just
 		// prepare return values.
-		for i := 0; i < int(f.results.Arity()); i++ {
+		for i := 0; i < int(f.results.Len()); i++ {
 			resultvar := f.results.At(i)
 			if resultvar.Name() != "" {
 				values[i] = c.objectdata[resultvar].Value.LLVMValue()
@@ -119,7 +119,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 			}
 		}
 	} else {
-		results := make([]Value, int(ftyp.Results().Arity()))
+		results := make([]Value, int(ftyp.Results().Len()))
 		if len(stmt.Results) == 1 && len(results) > 1 {
 			aggresult := c.VisitExpr(stmt.Results[0])
 			aggtyp := aggresult.Type().(*types.Tuple)
@@ -144,7 +144,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 		// Store values in named results.
 		if f.results != nil {
-			for i := 0; i < int(f.results.Arity()); i++ {
+			for i := 0; i < int(f.results.Len()); i++ {
 				resultvar := f.results.At(i)
 				if resultvar.Name() != "" {
 					resultptr := c.objectdata[resultvar].Value.pointer
@@ -200,7 +200,7 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 		value := c.VisitExpr(x)
 		aggregate := value.LLVMValue()
 		struct_type := value.Type().(*types.Tuple)
-		values = make([]Value, int(struct_type.Arity()))
+		values = make([]Value, int(struct_type.Len()))
 		for i := range values {
 			f := struct_type.At(i)
 			t := f.Type()
@@ -210,7 +210,7 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 	case *ast.TypeAssertExpr:
 		lhs := c.VisitExpr(x.X).(*LLVMValue)
 		typ := c.types.expr[x.Type].Type
-		switch typ := underlyingType(typ).(type) {
+		switch typ := typ.Underlying().(type) {
 		case *types.Interface:
 			value, ok := lhs.convertI2I(typ)
 			values = []Value{value, ok}
@@ -279,7 +279,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			}
 		case *ast.IndexExpr:
 			t := c.types.expr[x.X].Type
-			if _, ok := underlyingType(t).(*types.Map); ok {
+			if _, ok := t.Underlying().(*types.Map); ok {
 				m := c.VisitExpr(x.X).(*LLVMValue)
 				index := c.VisitExpr(x.Index)
 				elem, _ := c.mapLookup(m, index, true)
@@ -618,7 +618,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	x := c.VisitExpr(stmt.X)
 
 	// If it's a pointer type, we'll first check that it's non-nil.
-	typ := underlyingType(x.Type())
+	typ := x.Type().Underlying()
 	if _, ok := typ.(*types.Pointer); ok {
 		ifBlock := llvm.InsertBasicBlock(doneBlock, "if")
 		isnotnull := c.builder.CreateIsNotNull(x.LLVMValue(), "")
@@ -668,9 +668,9 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	var base, length llvm.Value
 	_, isptr := typ.(*types.Pointer)
 	if isptr {
-		typ = typ.(*types.Pointer).Elt()
+		typ = typ.(*types.Pointer).Elem()
 	}
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Map:
 		goto maprange
 	case *types.Basic:
@@ -885,7 +885,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					return c.NewValue(isnil, types.Typ[types.Bool])
 				}
 				typ := c.types.expr[caseClause.List[j]].Type
-				switch typ := underlyingType(typ).(type) {
+				switch typ := typ.Underlying().(type) {
 				case *types.Interface:
 					_, ok := iface.convertI2I(typ)
 					return ok
@@ -922,7 +922,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		if assignIdent != nil {
 			obj := c.objects[assignIdent]
 			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
-				switch utyp := underlyingType(typ).(type) {
+				switch utyp := typ.Underlying().(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
 					// clause condition test.

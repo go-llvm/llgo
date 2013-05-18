@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/exact"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/token"
@@ -24,7 +24,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 	var isptr bool
 	if p, fromptr := srctyp.(*types.Pointer); fromptr {
 		isptr = true
-		srctyp = p.Elt()
+		srctyp = p.Elem()
 		if name, isname := srctyp.(*types.Named); isname {
 			srcname = name
 			srctyp = name.Underlying()
@@ -92,7 +92,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, success *LLVMValue) {
 	c := v.compiler
 	builder := v.compiler.builder
-	src_typ := underlyingType(v.Type())
+	src_typ := v.Type().Underlying()
 	val := v.LLVMValue()
 
 	zero_iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
@@ -262,7 +262,7 @@ func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	}
 
 	value := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
-	if _, ok := underlyingType(typ).(*types.Pointer); ok {
+	if _, ok := typ.Underlying().(*types.Pointer); ok {
 		value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
 		return c.NewValue(value, typ)
 	}

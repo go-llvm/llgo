@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 )
@@ -81,7 +81,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	if expr.Ellipsis.IsValid() {
 		c.convertUntyped(expr.Args[1], s.Type())
 	} else {
-		c.convertUntyped(expr.Args[1], underlyingType(s.Type()).(*types.Slice).Elt())
+		c.convertUntyped(expr.Args[1], s.Type().Underlying().(*types.Slice).Elem())
 	}
 	elem := c.VisitExpr(expr.Args[1])
 
@@ -161,11 +161,11 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		high = llvm.ConstAllOnes(c.types.inttype) // -1
 	}
 
-	if _, ok := underlyingType(value.Type()).(*types.Pointer); ok {
+	if _, ok := value.Type().Underlying().(*types.Pointer); ok {
 		value = value.(*LLVMValue).makePointee()
 	}
 
-	switch typ := underlyingType(value.Type()).(type) {
+	switch typ := value.Type().Underlying().(type) {
 	case *types.Array:
 		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
@@ -176,7 +176,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
-		sliceTyp := types.NewSlice(typ.Elt())
+		sliceTyp := types.NewSlice(typ.Elem())
 		runtimeTyp := c.types.ToRuntime(sliceTyp)
 		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
 		args := []llvm.Value{runtimeTyp, sliceValue, low, high}

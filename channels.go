@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 )
@@ -21,7 +21,7 @@ func (v *LLVMValue) chanSend(value Value) {
 	if value, ok := value.(*LLVMValue); ok && value.pointer != nil {
 		ptr = value.pointer.LLVMValue()
 	}
-	elttyp := underlyingType(v.typ).(*types.Chan).Elt()
+	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	c := v.compiler
 	if ptr.IsNil() {
 		ptr = c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
@@ -35,7 +35,7 @@ func (v *LLVMValue) chanSend(value Value) {
 
 func (v *LLVMValue) chanRecv() *LLVMValue {
 	c := v.compiler
-	elttyp := underlyingType(v.typ).(*types.Chan).Elt()
+	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	f := c.NamedFunction("runtime.chanrecv", "func f(c, ptr uintptr)")

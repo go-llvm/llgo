@@ -4,7 +4,7 @@
 
 package llgo
 
-import "code.google.com/p/go.exp/go/types"
+import "code.google.com/p/go.tools/go/types"
 
 // pkgpath returns a package path suitable for naming symbols.
 func pkgpath(p *types.Package) string {

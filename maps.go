@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -13,7 +13,7 @@ import (
 // memory location for the value. If insert is given as true, and the key
 // does not exist in the map, it will be added with an uninitialised value.
 func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMValue, notnull *LLVMValue) {
-	mapType := underlyingType(m.Type()).(*types.Map)
+	mapType := m.Type().Underlying().(*types.Map)
 	maplookup := c.NamedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 4)
@@ -34,7 +34,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 		args[2] = c.builder.CreatePtrToInt(stackval, ptrType, "")
 	}
 
-	eltPtrType := types.NewPointer(mapType.Elt())
+	eltPtrType := types.NewPointer(mapType.Elem())
 	llvmtyp := c.types.ToLLVM(eltPtrType)
 	zeroglobal := llvm.AddGlobal(c.module.Module, llvmtyp.ElementType(), "")
 	zeroglobal.SetInitializer(llvm.ConstNull(llvmtyp.ElementType()))
@@ -48,7 +48,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 	mapdelete := c.NamedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
-	mapType := underlyingType(m.Type()).(*types.Map)
+	mapType := m.Type().Underlying().(*types.Map)
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(mapType), ptrType)
@@ -68,7 +68,7 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 // and returning a new state value, key pointer, and value pointer.
 func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llvm.Value) {
 	mapnext := c.NamedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
-	mapType := underlyingType(m.Type()).(*types.Map)
+	mapType := m.Type().Underlying().(*types.Map)
 	ptrType := c.target.IntPtrType()
 
 	args := make([]llvm.Value, 3)
@@ -81,7 +81,7 @@ func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llv
 	pv = c.builder.CreateExtractValue(results, 2, "")
 
 	keyptrtype := types.NewPointer(mapType.Key())
-	valptrtype := types.NewPointer(mapType.Elt())
+	valptrtype := types.NewPointer(mapType.Elem())
 	pk = c.builder.CreateIntToPtr(pk, c.types.ToLLVM(keyptrtype), "")
 	pv = c.builder.CreateIntToPtr(pv, c.types.ToLLVM(valptrtype), "")
 

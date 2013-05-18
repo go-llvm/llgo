@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/exact"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -143,7 +143,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	}
 
 	// Special case for string -> []byte
-	if types.IsIdentical(underlyingType(typ), types.NewSlice(types.Typ[types.Byte])) {
+	if types.IsIdentical(typ.Underlying(), types.NewSlice(types.Typ[types.Byte])) {
 		if v.Kind() == exact.String {
 			strval := c.NewConstValue(v, types.Typ[types.String])
 			return strval.Convert(typ).(*LLVMValue)
@@ -172,7 +172,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	rhs := rhs_.(*LLVMValue)
 	rhsisnil := rhs.pointer == nil && rhs.LLVMValue().IsNull()
 
-	switch typ := underlyingType(lhs.typ).(type) {
+	switch typ := lhs.typ.Underlying().(type) {
 	case *types.Struct:
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		if element_types_count > 0 {
@@ -205,7 +205,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result := b.CreateAnd(typeNull, valueNull, "")
 			return c.NewValue(result, types.Typ[types.Bool])
 		}
-		if _, ok := underlyingType(rhs.typ).(*types.Interface); ok {
+		if _, ok := rhs.typ.Underlying().(*types.Interface); ok {
 			return lhs.compareI2I(rhs)
 		}
 		return lhs.compareI2V(rhs)
@@ -383,8 +383,8 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	case token.ADD:
 		return v // No-op
 	case token.AND:
-		if typ, ok := underlyingType(v.typ).(*types.Pointer); ok {
-			if underlyingType(typ.Elt()) == typ {
+		if typ, ok := v.typ.Underlying().(*types.Pointer); ok {
+			if typ.Elem().Underlying() == typ {
 				// Taking the address of a recursive pointer
 				// yields a value with the same type.
 				value := v.pointer.value
@@ -419,8 +419,8 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// Get the underlying type, if any.
 	origdsttyp := dsttyp
-	dsttyp = underlyingType(dsttyp)
-	srctyp = underlyingType(srctyp)
+	dsttyp = dsttyp.Underlying()
+	srctyp = srctyp.Underlying()
 
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.IsIdentical(srctyp, dsttyp) {
@@ -431,8 +431,8 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// Both pointer types with identical underlying types? Same as above.
 	if srctyp, ok := srctyp.(*types.Pointer); ok {
 		if dsttyp, ok := dsttyp.(*types.Pointer); ok {
-			srctyp := underlyingType(srctyp.Elt())
-			dsttyp := underlyingType(dsttyp.Elt())
+			srctyp := srctyp.Elem().Underlying()
+			dsttyp := dsttyp.Elem().Underlying()
 			if types.IsIdentical(srctyp, dsttyp) {
 				return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 			}
@@ -622,7 +622,7 @@ func (v *LLVMValue) Type() types.Type {
 }
 
 func (v *LLVMValue) makePointee() *LLVMValue {
-	t := v.compiler.NewValue(llvm.Value{}, derefType(v.typ))
+	t := v.compiler.NewValue(llvm.Value{}, v.typ.Deref())
 	t.pointer = v
 	return t
 }

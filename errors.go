@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -20,7 +20,7 @@ func (c *compiler) visitRecover() *LLVMValue {
 	// an indirectly invoked deferred function or not.
 	var indirect llvm.Value
 	sig := fn.Type().(*types.Signature)
-	if sig.Params().Arity() == 0 {
+	if sig.Params().Len() == 0 {
 		indirect = llvm.ConstInt(llvm.Int32Type(), 0, false)
 	} else {
 		indirect = llvm.ConstInt(llvm.Int32Type(), 1, false)

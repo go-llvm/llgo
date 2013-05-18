@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -93,8 +93,8 @@ func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr) []Value
 		for i, x := range args {
 			var paramtyp types.Type
 			params := ftype.Params()
-			if ftype.IsVariadic() && i >= int(params.Arity()-1) {
-				paramtyp = params.At(int(params.Arity() - 1)).Type()
+			if ftype.IsVariadic() && i >= int(params.Len()-1) {
+				paramtyp = params.At(int(params.Len() - 1)).Type()
 			} else {
 				paramtyp = params.At(i).Type()
 			}
@@ -174,7 +174,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Not a type conversion, so must be a function call.
 	lhs := c.VisitExpr(expr.Fun)
 	fn := lhs.(*LLVMValue)
-	fn_type := underlyingType(fn.Type()).(*types.Signature)
+	fn_type := fn.Type().Underlying().(*types.Signature)
 
 	// Evaluate arguments.
 	argValues := c.evalCallArgs(fn_type, expr.Args)
@@ -194,12 +194,12 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 //
 // dotdotdot is true if the last argument is followed with "...".
 func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invoke bool) *LLVMValue {
-	fn_type := underlyingType(fn.Type()).(*types.Signature)
+	fn_type := fn.Type().Underlying().(*types.Signature)
 	var args []llvm.Value
 
 	// TODO Move all of this to evalCallArgs?
 	params := fn_type.Params()
-	if nparams := int(params.Arity()); nparams > 0 {
+	if nparams := int(params.Len()); nparams > 0 {
 		if fn_type.IsVariadic() {
 			nparams--
 		}
@@ -227,7 +227,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 	}
 
 	var result_type types.Type
-	switch results := fn_type.Results(); results.Arity() {
+	switch results := fn_type.Results(); results.Len() {
 	case 0: // no-op
 	case 1:
 		result_type = results.At(0).Type()
@@ -332,7 +332,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	value := c.VisitExpr(expr.X)
 	index := c.VisitExpr(expr.Index)
 
-	typ := underlyingType(value.Type())
+	typ := value.Type().Underlying()
 	if isString(typ) {
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		gepindices := []llvm.Value{index.LLVMValue()}
@@ -345,7 +345,7 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	// We can index a pointer to an array.
 	if _, ok := typ.(*types.Pointer); ok {
 		value = value.(*LLVMValue).makePointee()
-		typ = underlyingType(value.Type())
+		typ = value.Type().Underlying()
 	}
 
 	switch typ := typ.(type) {
@@ -362,14 +362,14 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 		}
 		zero := llvm.ConstNull(llvm.Int32Type())
 		element := c.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
-		result := c.NewValue(element, types.NewPointer(typ.Elt()))
+		result := c.NewValue(element, types.NewPointer(typ.Elem()))
 		return result.makePointee()
 
 	case *types.Slice:
 		index := index.Convert(types.Typ[types.Int]).LLVMValue()
 		ptr := c.builder.CreateExtractValue(value.LLVMValue(), 0, "")
 		element := c.builder.CreateGEP(ptr, []llvm.Value{index}, "")
-		result := c.NewValue(element, types.NewPointer(typ.Elt()))
+		result := c.NewValue(element, types.NewPointer(typ.Elem()))
 		return result.makePointee()
 
 	case *types.Map:
@@ -400,7 +400,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		var isptr bool
 		if ptrtyp, ok := recvtyp.(*types.Pointer); ok {
 			isptr = true
-			name = ptrtyp.Elt().(*types.Named)
+			name = ptrtyp.Elem().(*types.Named)
 		} else {
 			name = recvtyp.(*types.Named)
 		}
@@ -412,7 +412,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// Interface: search for method by name.
 	lhs := c.VisitExpr(expr.X)
 	name := expr.Sel.Name
-	if iface, ok := underlyingType(lhs.Type()).(*types.Interface); ok {
+	if iface, ok := lhs.Type().Underlying().(*types.Interface); ok {
 		// FIXME
 		//i := sort.Search(len(iface.Methods), func(i int) bool {
 		//	return iface.Methods[i].Name >= name
@@ -442,7 +442,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		var isptr bool
 		typ := lhs.Type()
 		if ptr, ok := typ.(*types.Pointer); ok {
-			typ = ptr.Elt()
+			typ = ptr.Elem()
 			isptr = true
 		} else {
 			isptr = lhs.(*LLVMValue).pointer != nil
@@ -479,9 +479,9 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			t := candidate.Type
 			if ptr, ok := t.(*types.Pointer); ok {
 				indices = append(indices, -1)
-				t = ptr.Elt()
+				t = ptr.Elem()
 			}
-			if t, ok := underlyingType(t).(*types.Struct); ok {
+			if t, ok := t.Underlying().(*types.Struct); ok {
 				if i := fieldIndex(t, name); i != -1 {
 					result.Indices = append(indices, i)
 					result.Type = t.Field(i).Type
@@ -521,7 +521,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				fieldValue = fieldValue.makePointee()
 			} else {
 				ptr := fieldValue.pointer.LLVMValue()
-				structTyp := underlyingType(derefType(fieldValue.typ)).(*types.Struct)
+				structTyp := fieldValue.typ.Deref().Underlying().(*types.Struct)
 				field := structTyp.Field(i)
 				fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
 				fieldPtrTyp := types.NewPointer(field.Type.(types.Type))

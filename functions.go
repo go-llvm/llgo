@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -104,7 +104,7 @@ func (c *compiler) methods(t types.Type) *methodset {
 	// original type is in the main package (otherwise just
 	// declaring them).
 	var curr []selectorCandidate
-	if typ, ok := derefType(underlyingType(t)).(*types.Struct); ok {
+	if typ, ok := t.Underlying().Deref().(*types.Struct); ok {
 		curr = append(curr, selectorCandidate{nil, typ})
 	}
 	for len(curr) > 0 {
@@ -114,7 +114,7 @@ func (c *compiler) methods(t types.Type) *methodset {
 			var isptr bool
 			if ptr, ok := typ.(*types.Pointer); ok {
 				isptr = true
-				typ = ptr.Elt()
+				typ = ptr.Elem()
 			}
 
 			if named, ok := typ.(*types.Named); ok {
@@ -225,7 +225,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 	var isptr bool
 	if ptr, ok := recv.(*types.Pointer); ok {
 		isptr = true
-		recv = ptr.Elt()
+		recv = ptr.Elem()
 	}
 
 	c.objects[ident] = f
@@ -268,7 +268,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 
 		args[0] = recvarg
 		result := c.builder.CreateCall(ifn, args, "")
-		if sig.Results().Arity() == 0 {
+		if sig.Results().Len() == 0 {
 			c.builder.CreateRetVoid()
 		} else {
 			c.builder.CreateRet(result)
@@ -294,7 +294,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	var isptr bool
 	if ptr, ok := recv.(*types.Pointer); ok {
 		isptr = true
-		recv = ptr.Elt()
+		recv = ptr.Elem()
 	}
 
 	c.objects[ident] = f
@@ -327,7 +327,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 
 		args[0] = recvarg
 		result := c.builder.CreateCall(realfn, args, "")
-		if sig.Results().Arity() == 0 {
+		if sig.Results().Len() == 0 {
 			c.builder.CreateRetVoid()
 		} else {
 			c.builder.CreateRet(result)

@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -25,7 +25,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 			var recvname string
 			switch recvtyp := recv.Type().(type) {
 			case *types.Pointer:
-				if named, ok := recvtyp.Elt().(*types.Named); ok {
+				if named, ok := recvtyp.Elem().(*types.Named); ok {
 					obj := named.Obj()
 					recvname = "*" + obj.Name()
 					pkgname = pkgpath(c.objectdata[obj].Package)
@@ -102,7 +102,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 
 		// Store the existing values. We're going to temporarily
 		// replace the values with offsets into the context param.
-		oldvalues := make([]*LLVMValue, context.Arity())
+		oldvalues := make([]*LLVMValue, context.Len())
 		for i := range oldvalues {
 			v := context.At(i)
 			oldvalues[i] = c.objectdata[v].Value
@@ -130,7 +130,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	// Bind receiver, arguments and return values to their
 	// identifiers/objects. We'll store each parameter on the stack so
 	// they're addressable.
-	nparams := int(params.Arity())
+	nparams := int(params.Len())
 	for i := 0; i < nparams; i++ {
 		v := params.At(i)
 		name := v.Name()
@@ -181,7 +181,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	c.functions.pop()
 
 	// If there are no results, then "return" is optional.
-	if results.Arity() == 0 {
+	if results.Len() == 0 {
 		// Use GetInsertBlock rather than LastBasicBlock, since the
 		// last basic block might actually be a "defer" block.
 		last := c.builder.GetInsertBlock()

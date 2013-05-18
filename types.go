@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"bytes"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"go/ast"
 )
@@ -49,20 +49,6 @@ func (c *compiler) isType(x ast.Expr) bool {
 		return true
 	}
 	return false
-}
-
-func underlyingType(typ types.Type) types.Type {
-	if typ, ok := typ.(*types.Named); ok {
-		return typ.Underlying()
-	}
-	return typ
-}
-
-func derefType(typ types.Type) types.Type {
-	if typ, ok := underlyingType(typ).(*types.Pointer); ok {
-		return typ.Elt()
-	}
-	return typ
 }
 
 func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
@@ -153,12 +139,12 @@ func (ts *TypeStringer) TypeString(typ types.Type) string {
 
 func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVariadic bool) {
 	buf.WriteByte('(')
-	for i := 0; i < int(params.Arity()); i++ {
+	for i := 0; i < int(params.Len()); i++ {
 		par := params.At(i)
 		if i > 0 {
 			buf.WriteString(", ")
 		}
-		if isVariadic && i == int(params.Arity()-1) {
+		if isVariadic && i == int(params.Len()-1) {
 			buf.WriteString("...")
 		}
 		ts.writeType(buf, par.Type())
@@ -173,13 +159,13 @@ func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) 
 	}
 
 	ts.writeParams(buf, sig.Params(), sig.IsVariadic())
-	if sig.Results().Arity() == 0 {
+	if sig.Results().Len() == 0 {
 		// no result
 		return
 	}
 
 	buf.WriteByte(' ')
-	if sig.Results().Arity() == 1 {
+	if sig.Results().Len() == 1 {
 		// single unnamed result
 		ts.writeType(buf, sig.Results().At(0).Type())
 		return
@@ -201,11 +187,11 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Array:
 		fmt.Fprintf(buf, "[%d]", t.Len())
-		ts.writeType(buf, t.Elt())
+		ts.writeType(buf, t.Elem())
 
 	case *types.Slice:
 		buf.WriteString("[]")
-		ts.writeType(buf, t.Elt())
+		ts.writeType(buf, t.Elem())
 
 	case *types.Struct:
 		buf.WriteString("struct{")
@@ -227,7 +213,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Pointer:
 		buf.WriteByte('*')
-		ts.writeType(buf, t.Elt())
+		ts.writeType(buf, t.Elem())
 
 	case *types.Tuple:
 		ts.writeParams(buf, t, false)
@@ -252,7 +238,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 		buf.WriteString("map[")
 		ts.writeType(buf, t.Key())
 		buf.WriteByte(']')
-		ts.writeType(buf, t.Elt())
+		ts.writeType(buf, t.Elem())
 
 	case *types.Chan:
 		var s string
@@ -265,7 +251,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 			s = "chan "
 		}
 		buf.WriteString(s)
-		ts.writeType(buf, t.Elt())
+		ts.writeType(buf, t.Elem())
 
 	case *types.Named:
 		if pkg := ts.pkgmap[t.Obj()]; pkg != nil && pkgpath(pkg) != "" {

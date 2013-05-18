@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 )
@@ -116,10 +116,10 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 	rundefers := c.NamedFunction("runtime.rundefers", "func f()")
 	c.builder.CreateCall(rundefers, nil, "")
 
-	if f.results.Arity() == 0 {
+	if f.results.Len() == 0 {
 		c.builder.CreateRetVoid()
 	} else {
-		values := make([]llvm.Value, 0, f.results.Arity())
+		values := make([]llvm.Value, 0, f.results.Len())
 		f.results.ForEach(func(v *types.Var) {
 			value := c.objectdata[v].Value.LLVMValue()
 			values = append(values, value)
@@ -135,7 +135,7 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
 	// Evaluate function, store on the stack.
 	fn := c.VisitExpr(stmt.Call.Fun).(*LLVMValue)
-	fntype := underlyingType(fn.Type()).(*types.Signature)
+	fntype := fn.Type().Underlying().(*types.Signature)
 
 	// Evaluate args.
 	args := c.evalCallArgs(fntype, stmt.Call.Args)

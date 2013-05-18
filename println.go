@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -53,7 +53,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		for i, value := range values {
 			llvm_value := value.LLVMValue()
 
-			typ := underlyingType(value.Type())
+			typ := value.Type().Underlying()
 			if name, isname := typ.(*types.Named); isname {
 				typ = name.Underlying()
 			}

@@ -5,8 +5,8 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/exact"
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -243,7 +243,7 @@ func (tm *LLVMTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
-	return llvm.ArrayType(tm.ToLLVM(a.Elt()), int(a.Len()))
+	return llvm.ArrayType(tm.ToLLVM(a.Elem()), int(a.Len()))
 }
 
 func (tm *LLVMTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
@@ -252,7 +252,7 @@ func (tm *LLVMTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
 		typ = llvm.GlobalContext().StructCreateNamed("")
 		tm.types[tstr] = typ
 		elements := []llvm.Type{
-			llvm.PointerType(tm.ToLLVM(s.Elt()), 0),
+			llvm.PointerType(tm.ToLLVM(s.Elem()), 0),
 			tm.inttype,
 			tm.inttype,
 		}
@@ -278,7 +278,7 @@ func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
-	if underlyingType(p.Elt()) == p {
+	if p.Elem().Underlying() == p {
 		// Recursive pointers must be handled specially, as
 		// LLVM does not permit recursive types except via
 		// named structs.
@@ -289,7 +289,7 @@ func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 		}
 		return llvm.PointerType(tm.ptrstandin, 0)
 	}
-	return llvm.PointerType(tm.ToLLVM(p.Elt()), 0)
+	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
 }
 
 func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
@@ -301,9 +301,9 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		var param_types []llvm.Type
 		if recv := f.Recv(); recv != nil {
 			params := f.Params()
-			paramvars := make([]*types.Var, int(params.Arity()+1))
+			paramvars := make([]*types.Var, int(params.Len()+1))
 			paramvars[0] = recv
-			for i := 0; i < int(params.Arity()); i++ {
+			for i := 0; i < int(params.Len()); i++ {
 				paramvars[i+1] = params.At(i)
 			}
 			params = types.NewTuple(paramvars...)
@@ -315,7 +315,7 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		tm.types[tstr] = typ
 
 		params := f.Params()
-		nparams := int(params.Arity())
+		nparams := int(params.Len())
 		for i := 0; i < nparams; i++ {
 			typ := params.At(i).Type()
 			if f.IsVariadic() && i == nparams-1 {
@@ -327,7 +327,7 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 
 		var return_type llvm.Type
 		results := f.Results()
-		switch nresults := int(results.Arity()); nresults {
+		switch nresults := int(results.Len()); nresults {
 		case 0:
 			return_type = llvm.VoidType()
 		case 1:
@@ -390,9 +390,9 @@ func (tm *LLVMTypeMap) nameLLVMType(n *types.Named) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Array:
-		return tm.Alignof(typ.Elt())
+		return tm.Alignof(typ.Elem())
 	case *types.Basic:
 		switch typ.Kind() {
 		case types.Int, types.Uint, types.Int64, types.Uint64,
@@ -417,7 +417,7 @@ func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
 }
 
 func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
-	switch typ := underlyingType(typ).(type) {
+	switch typ := typ.Underlying().(type) {
 	case *types.Basic:
 		switch typ.Kind() {
 		case types.Int, types.Uint:
@@ -429,8 +429,8 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 		}
 		return types.DefaultSizeof(typ)
 	case *types.Array:
-		eltsize := tm.Sizeof(typ.Elt())
-		eltalign := tm.Alignof(typ.Elt())
+		eltsize := tm.Sizeof(typ.Elem())
+		eltalign := tm.Alignof(typ.Elem())
 		var eltpad int64
 		if eltsize%eltalign != 0 {
 			eltpad = eltalign - (eltsize % eltalign)
@@ -586,8 +586,8 @@ func (tm *TypeMap) basicRuntimeType(b *types.Basic) (global, ptr llvm.Value) {
 
 func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
 	rtype := tm.makeRtype(a, reflect.Array)
-	elemRuntimeType := tm.ToRuntime(a.Elt())
-	sliceRuntimeType := tm.ToRuntime(types.NewSlice(a.Elt()))
+	elemRuntimeType := tm.ToRuntime(a.Elem())
+	sliceRuntimeType := tm.ToRuntime(types.NewSlice(a.Elem()))
 	uintptrlen := llvm.ConstInt(tm.target.IntPtrType(), uint64(a.Len()), false)
 	arrayType := llvm.ConstNull(tm.runtimeArrayType)
 	arrayType = llvm.ConstInsertValue(arrayType, rtype, []uint32{0})
@@ -599,7 +599,7 @@ func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
 
 func (tm *TypeMap) sliceRuntimeType(s *types.Slice) (global, ptr llvm.Value) {
 	rtype := tm.makeRtype(s, reflect.Slice)
-	elemRuntimeType := tm.ToRuntime(s.Elt())
+	elemRuntimeType := tm.ToRuntime(s.Elem())
 	sliceType := llvm.ConstNull(tm.runtimeSliceType)
 	sliceType = llvm.ConstInsertValue(sliceType, rtype, []uint32{0})
 	sliceType = llvm.ConstInsertValue(sliceType, elemRuntimeType, []uint32{1})
@@ -619,7 +619,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	// Is the base type a named type from another package? If so, we'll
 	// create a reference to the externally defined symbol.
 	var globalname string
-	if n, ok := p.Elt().(*types.Named); ok {
+	if n, ok := p.Elem().(*types.Named); ok {
 		// FIXME horrible circular relationship
 		var path string
 		if data, ok := tm.functions.objectdata[n.Obj()]; ok {
@@ -638,7 +638,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	}
 
 	rtype := tm.makeRtype(p, reflect.Ptr)
-	if n, ok := p.Elt().(*types.Named); ok {
+	if n, ok := p.Elem().(*types.Named); ok {
 		uncommonTypeInit := tm.uncommonType(n, true)
 		uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
 		uncommonType.SetInitializer(uncommonTypeInit)
@@ -647,7 +647,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 
 	ptrType := llvm.ConstNull(tm.runtimePtrType)
 	var baseTypeGlobal llvm.Value
-	if underlyingType(p.Elt()) == p {
+	if p.Elem().Underlying() == p {
 		// Recursive pointer.
 		ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
 		global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
@@ -659,7 +659,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 		global.SetInitializer(ptrType)
 	} else {
 		var baseTypePtr llvm.Value
-		baseTypeGlobal, baseTypePtr = tm.toRuntime(p.Elt())
+		baseTypeGlobal, baseTypePtr = tm.toRuntime(p.Elem())
 		ptrType = llvm.ConstInsertValue(ptrType, rtype, []uint32{0})
 		ptrType = llvm.ConstInsertValue(ptrType, baseTypePtr, []uint32{1})
 		global, ptr = tm.makeRuntimeTypeGlobal(ptrType)
@@ -742,7 +742,7 @@ func (tm *TypeMap) mapRuntimeType(m *types.Map) (global, ptr llvm.Value) {
 	mapType := llvm.ConstNull(tm.runtimeMapType)
 	mapType = llvm.ConstInsertValue(mapType, rtype, []uint32{0})
 	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Key()), []uint32{1})
-	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Elt()), []uint32{2})
+	mapType = llvm.ConstInsertValue(mapType, tm.ToRuntime(m.Elem()), []uint32{2})
 	return tm.makeRuntimeTypeGlobal(mapType)
 }
 
@@ -750,7 +750,7 @@ func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
 	rtype := tm.makeRtype(c, reflect.Chan)
 	chanType := llvm.ConstNull(tm.runtimeChanType)
 	chanType = llvm.ConstInsertValue(chanType, rtype, []uint32{0})
-	chanType = llvm.ConstInsertValue(chanType, tm.ToRuntime(c.Elt()), []uint32{1})
+	chanType = llvm.ConstInsertValue(chanType, tm.ToRuntime(c.Elem()), []uint32{1})
 
 	// go/ast and reflect disagree on values for direction.
 	var dir reflect.ChanDir

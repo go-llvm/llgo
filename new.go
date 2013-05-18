@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"code.google.com/p/go.exp/go/types"
+	"code.google.com/p/go.tools/go/types"
 	"go/ast"
 )
 
@@ -14,7 +14,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 		panic("Expecting only one argument to new")
 	}
 	ptrtyp := c.types.expr[expr].Type.(*types.Pointer)
-	typ := ptrtyp.Elt()
+	typ := ptrtyp.Elem()
 	llvmtyp := c.types.ToLLVM(typ)
 	mem := c.createTypeMalloc(llvmtyp)
 	return c.NewValue(mem, ptrtyp)
