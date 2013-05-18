@@ -1,4 +1,4 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -22,15 +22,15 @@ type _chan struct {
 }
 
 // #llgo name: reflect.makechan
-func reflect_makechan(t *type_, cap_ uint32) unsafe.Pointer {
+func reflect_makechan(t *rtype, cap_ int) unsafe.Pointer {
 	return unsafe.Pointer(makechan(unsafe.Pointer(t), cap_))
 }
 
-func makechan(t unsafe.Pointer, cap_ uint32) *int8 {
-	typ := (*type_)(t)
+func makechan(t unsafe.Pointer, cap_ int) *int8 {
+	typ := (*chanType)(t)
 	c := new(_chan)
-	c.typ = (*chanType)(unsafe.Pointer(&typ.commonType))
-	c.cap = int(cap_)
+	c.typ = typ
+	c.cap = cap_
 	return (*int8)(unsafe.Pointer(c))
 }
 
@@ -55,7 +55,7 @@ func chanlen(c unsafe.Pointer) int {
 }
 
 // #llgo name: reflect.chansend
-func reflect_chansend(t *type_, c unsafe.Pointer, val unsafe.Pointer, nb bool) bool {
+func reflect_chansend(t *rtype, c unsafe.Pointer, val unsafe.Pointer, nb bool) bool {
 	// TODO
 	return false
 }
@@ -75,7 +75,7 @@ func chansend(c_, ptr unsafe.Pointer) {
 }
 
 // #llgo name: reflect.chanrecv
-func reflect_chanrecv(t *type_, c unsafe.Pointer, nb bool) (val unsafe.Pointer, selected, received bool) {
+func reflect_chanrecv(t *rtype, c unsafe.Pointer, nb bool) (val unsafe.Pointer, selected, received bool) {
 	// TODO
 	return
 }

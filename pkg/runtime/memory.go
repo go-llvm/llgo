@@ -1,24 +1,6 @@
-/*
-Copyright (c) 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2012 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package runtime
 
@@ -29,20 +11,19 @@ func c_malloc(uintptr) *int8
 
 func malloc(size uintptr) unsafe.Pointer {
 	mem := unsafe.Pointer(c_malloc(size))
-	if mem != 0 {
+	if mem != nil {
 		bzero(mem, size)
 	}
 	return mem
 }
 
 func free(unsafe.Pointer)
-func memcpy(dst, src unsafe.Pointer, size int)
-func memmove(dst, src unsafe.Pointer, size int)
-func memset(dst unsafe.Pointer, fill byte, size int)
+func memcpy(dst, src unsafe.Pointer, size uintptr)
+func memmove(dst, src unsafe.Pointer, size uintptr)
+func memset(dst unsafe.Pointer, fill byte, size uintptr)
 
 func bzero(dst unsafe.Pointer, size uintptr) {
-	// FIXME, change memset et al. to take uintptr
-	memset(dst, 0, int(size))
+	memset(dst, 0, size)
 }
 
 // #llgo name: mmap
@@ -78,7 +59,7 @@ func memalign(align_ uintptr, size uintptr) unsafe.Pointer {
 	const prot = PROT_READ | PROT_WRITE | PROT_EXEC
 	const flags = MAP_ANON | MAP_PRIVATE
 	p := mmap(nil, size, prot, flags, -1, 0)
-	if p == -1 {
+	if p == unsafe.Pointer(uintptr((1<<32)-1)) {
 		panic("mmap failed")
 	}
 	return unsafe.Pointer(align(uintptr(p), align_))

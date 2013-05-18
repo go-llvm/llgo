@@ -81,7 +81,7 @@ type stringer interface {
 }
 
 func typestring(t interface{}) string {
-	typ := *(**type_)(unsafe.Pointer(&t))
+	typ := *(**rtype)(unsafe.Pointer(&t))
 	return *typ.string
 }
 

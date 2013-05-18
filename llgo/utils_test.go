@@ -8,17 +8,20 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
-	"syscall"
 	"testing"
-	"unsafe"
 )
 
-var testCompiler llgo.Compiler
+var (
+	testCompiler      llgo.Compiler
+	tempdir           string
+	runtimemodulefile string
+)
 
 func testdata(files ...string) []string {
 	for i, f := range files {
@@ -28,30 +31,42 @@ func testdata(files ...string) []string {
 }
 
 func init() {
-	llvm.LinkInJIT()
-	llvm.InitializeNativeTarget()
-}
+	tempdir = os.Getenv("LLGO_TESTDIR")
+	if tempdir != "" {
+		llvm.InitializeNativeTarget()
+	} else {
+		// Set LLGO_TESTDIR to a new temporary directory,
+		// then execute the tests in a new process, clean
+		// up and remove the temporary directory.
+		tempdir, err := ioutil.TempDir("", "llgo")
+		if err != nil {
+			panic(err)
+		}
+		os.Setenv("LLGO_TESTDIR", tempdir)
+		cmd := exec.Command(os.Args[0], os.Args[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
 
-func readPipe(p int, c chan<- string) {
-	var s string
-	buf := make([]byte, 4096)
-	n, _ := syscall.Read(p, buf)
-	for n > 0 {
-		s += string(buf[:n])
-		n, _ = syscall.Read(p, buf)
+		// Some operating systems won't kill the child on Ctrl-C.
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		go func() {
+			err = cmd.Run()
+			c <- nil
+		}()
+		if sig := <-c; sig != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+
+		os.RemoveAll(tempdir)
+		if err != nil {
+			panic(err)
+		}
+		os.Exit(0)
 	}
-	c <- s
 }
 
-func addExterns(m *llgo.Module) {
-	CharPtr := llvm.PointerType(llvm.Int8Type(), 0)
-	fn_type := llvm.FunctionType(
-		llvm.Int32Type(), []llvm.Type{CharPtr}, false)
-	fflush := llvm.AddFunction(m.Module, "fflush", fn_type)
-	fflush.SetFunctionCallConv(llvm.CCallConv)
-}
-
-func getRuntimeFiles() (gofiles []string, llfiles []string, err error) {
+func getRuntimeFiles() (gofiles []string, llfiles []string, cfiles []string, err error) {
 	var pkg *build.Package
 	pkgpath := "github.com/axw/llgo/pkg/runtime"
 	pkg, err = build.Import(pkgpath, "", 0)
@@ -67,68 +82,69 @@ func getRuntimeFiles() (gofiles []string, llfiles []string, err error) {
 		gofiles = nil
 		return
 	}
+	cfiles = make([]string, len(pkg.CFiles))
+	for i, filename := range pkg.CFiles {
+		cfiles[i] = path.Join(pkg.Dir, filename)
+	}
 	return
 }
 
-func getRuntimeModule() (llvm.Module, error) {
-	gofiles, llfiles, err := getRuntimeFiles()
+func getRuntimeModuleFile() (string, error) {
+	if runtimemodulefile != "" {
+		return runtimemodulefile, nil
+	}
+
+	gofiles, llfiles, cfiles, err := getRuntimeFiles()
 	if err != nil {
-		return llvm.Module{}, err
+		return "", err
 	}
 
 	var runtimeModule *llgo.Module
 	runtimeModule, err = compileFiles(testCompiler, gofiles, "runtime")
+	defer runtimeModule.Dispose()
 	if err != nil {
-		return llvm.Module{}, err
+		return "", err
+	}
+
+	outfile := filepath.Join(tempdir, "runtime.bc")
+	f, err := os.Create(outfile)
+	if err != nil {
+		return "", err
+	}
+	err = llvm.WriteBitcodeToFile(runtimeModule.Module, f)
+	if err != nil {
+		f.Close()
+		return "", err
+	}
+	f.Close()
+
+	for i, cfile := range cfiles {
+		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
+		cmd := exec.Command("clang", "-g", "-c", "-emit-llvm", "-o", bcfile, cfile)
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("clang failed: %s", err)
+		}
+		llfiles = append(llfiles, bcfile)
 	}
 
 	if llfiles != nil {
-		outfile, err := ioutil.TempFile("", "runtime.ll")
+		args := append([]string{"-o", outfile, outfile}, llfiles...)
+		cmd := exec.Command("llvm-link", args...)
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			runtimeModule.Dispose()
-			return llvm.Module{}, err
-		}
-		defer func() {
-			outfile.Close()
-			os.Remove(outfile.Name())
-		}()
-		err = llvm.WriteBitcodeToFile(runtimeModule.Module, outfile)
-		if err != nil {
-			runtimeModule.Dispose()
-			return llvm.Module{}, err
-		}
-		runtimeModule.Dispose()
-		o := outfile.Name()
-		for _, llfile := range llfiles {
-			cmd := exec.Command("llvm-link", "-o", o, o, llfile)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				err = fmt.Errorf("llvm-link failed: %s", err)
-				fmt.Fprintf(os.Stderr, string(output))
-				return llvm.Module{}, err
-			}
-		}
-		runtimeModule.Module, err = llvm.ParseBitcodeFile(o)
-		if err != nil {
-			return llvm.Module{}, err
+			err = fmt.Errorf("llvm-link failed: %s", err)
+			fmt.Fprintf(os.Stderr, string(output))
+			return "", err
 		}
 	}
 
-	return runtimeModule.Module, nil
-}
-
-func addRuntime(m *llgo.Module) (err error) {
-	runtimeModule, err := getRuntimeModule()
-	if err != nil {
-		return
-	}
-	llvm.LinkModules(m.Module, runtimeModule, llvm.LinkerDestroySource)
-	return
+	runtimemodulefile = outfile
+	return runtimemodulefile, nil
 }
 
 func runMainFunction(m *llgo.Module) (output []string, err error) {
-	addExterns(m)
-	err = addRuntime(m)
+	runtimeModule, err := getRuntimeModuleFile()
 	if err != nil {
 		return
 	}
@@ -139,65 +155,33 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 		return
 	}
 
-	engine, err := llvm.NewExecutionEngine(m.Module)
+	bcpath := filepath.Join(tempdir, "test.bc")
+	bcfile, err := os.Create(bcpath)
+	if err != nil {
+		return nil, err
+	}
+	llvm.WriteBitcodeToFile(m.Module, bcfile)
+	bcfile.Close()
+
+	cmd := exec.Command("llvm-link", "-o", bcpath, bcpath, runtimeModule)
+	err = cmd.Run()
 	if err != nil {
 		return
 	}
-	defer engine.Dispose()
 
-	fn := engine.FindFunction("main")
-	if fn.IsNil() {
-		err = fmt.Errorf("Couldn't find function 'main'")
-		return
-	}
-
-	// Redirect stdout to a pipe.
-	pipe_fds := make([]int, 2)
-	err = syscall.Pipe(pipe_fds)
+	exepath := filepath.Join(tempdir, "test")
+	cmd = exec.Command("clang++", "-g", "-o", exepath, bcpath)
+	err = cmd.Run()
 	if err != nil {
 		return
 	}
-	defer syscall.Close(pipe_fds[0])
-	defer syscall.Close(pipe_fds[1])
-	old_stdout, err := syscall.Dup(syscall.Stdout)
+
+	cmd = exec.Command(exepath)
+	data, err := cmd.Output()
 	if err != nil {
 		return
 	}
-	defer syscall.Close(old_stdout)
-	err = syscall.Dup2(pipe_fds[1], syscall.Stdout)
-	if err != nil {
-		return
-	}
-	defer syscall.Dup2(old_stdout, syscall.Stdout)
-
-	c := make(chan string)
-	go readPipe(pipe_fds[0], c)
-
-	// FIXME implement and use RunFunctionAsMain
-	argv0 := []byte("llgo-test\000")
-	var envs [1]*byte
-	argv0ptr := &argv0
-	exec_args := []llvm.GenericValue{
-		llvm.NewGenericValueFromInt(llvm.Int32Type(), 1, true),
-		llvm.NewGenericValueFromPointer(unsafe.Pointer(&argv0ptr)),
-		llvm.NewGenericValueFromPointer(unsafe.Pointer(&envs)),
-	}
-	engine.RunStaticConstructors()
-	engine.RunFunction(fn, exec_args)
-	defer engine.RunStaticDestructors()
-
-	// Call fflush to flush stdio (printf), then sync and close the write
-	// end of the pipe.
-	fflush := engine.FindFunction("fflush")
-	ptr0 := unsafe.Pointer(uintptr(0))
-	exec_args = []llvm.GenericValue{llvm.NewGenericValueFromPointer(ptr0)}
-	engine.RunFunction(fflush, exec_args)
-	syscall.Fsync(pipe_fds[1])
-	syscall.Close(pipe_fds[1])
-	syscall.Close(syscall.Stdout)
-
-	output_str := <-c
-	output = strings.Split(strings.TrimSpace(output_str), "\n")
+	output = strings.Split(strings.TrimSpace(string(data)), "\n")
 	return
 }
 

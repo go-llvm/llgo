@@ -1,12 +1,12 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 )
 
@@ -21,7 +21,7 @@ func (v *LLVMValue) chanSend(value Value) {
 	if value, ok := value.(*LLVMValue); ok && value.pointer != nil {
 		ptr = value.pointer.LLVMValue()
 	}
-	elttyp := types.Underlying(v.typ).(*types.Chan).Elt
+	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	c := v.compiler
 	if ptr.IsNil() {
 		ptr = c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
@@ -35,11 +35,11 @@ func (v *LLVMValue) chanSend(value Value) {
 
 func (v *LLVMValue) chanRecv() *LLVMValue {
 	c := v.compiler
-	elttyp := types.Underlying(v.typ).(*types.Chan).Elt
+	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	f := c.NamedFunction("runtime.chanrecv", "func f(c, ptr uintptr)")
 	c.builder.CreateCall(f, []llvm.Value{v.LLVMValue(), uintptr_}, "")
 	value := c.builder.CreateLoad(ptr, "")
-	return c.NewLLVMValue(value, elttyp)
+	return c.NewValue(value, elttyp)
 }

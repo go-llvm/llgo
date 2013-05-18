@@ -1,52 +1,33 @@
-/*
-Copyright (c) 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2012 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
-	"go/ast"
 	"go/token"
-	"sort"
-	"strconv"
 )
 
 // convertV2I converts a value to an interface.
-func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
-	// TODO deref indirect value, then use 'pointer' as pointer value.
-	var srcname *types.Name
+func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
+	var srcname *types.Named
 	srctyp := v.Type()
-	if name, isname := srctyp.(*types.Name); isname {
+	if name, isname := srctyp.(*types.Named); isname {
 		srcname = name
-		srctyp = name.Underlying
+		srctyp = name.Underlying()
 	}
 
+	var isptr bool
 	if p, fromptr := srctyp.(*types.Pointer); fromptr {
-		srctyp = p.Base
-		if name, isname := srctyp.(*types.Name); isname {
+		isptr = true
+		srctyp = p.Elem()
+		if name, isname := srctyp.(*types.Named); isname {
 			srcname = name
-			srctyp = name.Underlying
+			srctyp = name.Underlying()
 		}
 	}
 
@@ -58,7 +39,6 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	builder := v.compiler.builder
 	var ptr llvm.Value
 	lv := v.LLVMValue()
-	var overwide bool
 	if lv.Type().TypeKind() == llvm.PointerTypeKind {
 		ptr = builder.CreateBitCast(lv, element_types[1], "")
 	} else {
@@ -76,10 +56,15 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 				ptr = llvm.ConstNull(element_types[1])
 			}
 		} else {
-			ptr = c.createTypeMalloc(v.compiler.types.ToLLVM(srctyp))
-			builder.CreateStore(lv, ptr)
+			if lv.IsConstant() {
+				ptr = llvm.AddGlobal(c.module.Module, lv.Type(), "")
+				ptr.SetInitializer(lv)
+			} else {
+				ptr = c.createTypeMalloc(lv.Type())
+				builder.CreateStore(lv, ptr)
+			}
 			ptr = builder.CreateBitCast(ptr, element_types[1], "")
-			overwide = true
+			isptr = true
 		}
 	}
 	runtimeType := v.compiler.types.ToRuntime(v.Type())
@@ -87,86 +72,27 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) Value {
 	iface_struct = builder.CreateInsertValue(iface_struct, runtimeType, 0, "")
 	iface_struct = builder.CreateInsertValue(iface_struct, ptr, 1, "")
 
-	// TODO assert either source is a named type (or pointer to), or the
-	// interface has an empty methodset.
-
 	if srcname != nil {
-		// TODO check whether the functions in the struct take
-		// value or pointer receivers.
-
 		// Look up the method by name.
-		// TODO check embedded types.
-		for i, m := range iface.Methods {
-			// TODO make this loop linear by iterating through the
-			// interface methods and type methods together.
-			var methodobj *ast.Object
-			curr := []types.Type{srcname}
-			for methodobj == nil && len(curr) > 0 {
-				var next []types.Type
-				for _, typ := range curr {
-					if p, ok := types.Underlying(typ).(*types.Pointer); ok {
-						if _, ok := types.Underlying(p.Base).(*types.Struct); ok {
-							typ = p.Base
-						}
-					}
-					if n, ok := typ.(*types.Name); ok {
-						methods := n.Methods
-						mi := sort.Search(len(methods), func(i int) bool {
-							return methods[i].Name >= m.Name
-						})
-						if mi < len(methods) && methods[mi].Name == m.Name {
-							methodobj = methods[mi]
-							break
-						}
-					}
-					if typ, ok := types.Underlying(typ).(*types.Struct); ok {
-						for _, field := range typ.Fields {
-							if field.Name == "" {
-								typ := field.Type.(types.Type)
-								next = append(next, typ)
-							}
-						}
-					}
-				}
-				curr = next
-			}
-			if methodobj == nil {
-				msg := fmt.Sprintf("Failed to locate (%s).%s", srcname.Obj.Name, m.Name)
-				panic(msg)
-			}
-			method := v.compiler.Resolve(methodobj).(*LLVMValue)
-			llvm_value := method.LLVMValue()
-
-			// If we have a receiver wider than a word, or a pointer
-			// receiver value and non-pointer receiver method, then
-			// we must use the "wrapper" pointer method.
-			fntyp := methodobj.Type.(*types.Func)
-			recvtyp := fntyp.Recv.Type.(types.Type)
-			needload := overwide
-			if !needload {
-				// TODO handle embedded types here.
-				//needload = types.Identical(v.Type(), recvtyp)
-				if p, ok := v.Type().(*types.Pointer); ok {
-					needload = types.Identical(p.Base, recvtyp)
-				}
-			}
-			if needload {
-				ifname := fmt.Sprintf("*%s.%s", recvtyp, methodobj.Name)
-				llvm_value = v.compiler.module.NamedFunction(ifname)
-			}
+		for i := 0; i < iface.NumMethods(); i++ {
+			m := iface.Method(i)
+			method := v.compiler.methods(srcname).lookup(m.Name(), isptr)
+			methodident := v.compiler.objectdata[method].Ident
+			llvm_value := v.compiler.Resolve(methodident).LLVMValue()
+			llvm_value = builder.CreateExtractValue(llvm_value, 0, "")
 			llvm_value = builder.CreateBitCast(llvm_value, element_types[i+2], "")
 			iface_struct = builder.CreateInsertValue(iface_struct, llvm_value, i+2, "")
 		}
 	}
 
-	return v.compiler.NewLLVMValue(iface_struct, iface)
+	return v.compiler.NewValue(iface_struct, iface)
 }
 
 // convertI2I converts an interface to another interface.
-func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Value) {
+func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, success *LLVMValue) {
 	c := v.compiler
 	builder := v.compiler.builder
-	src_typ := types.Underlying(v.Type())
+	src_typ := v.Type().Underlying()
 	val := v.LLVMValue()
 
 	zero_iface_struct := llvm.ConstNull(c.types.ToLLVM(iface))
@@ -178,15 +104,19 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 	// value or pointer receivers.
 
 	// TODO handle dynamic interface conversion (non-subset).
-	methods := src_typ.(*types.Interface).Methods
-	for i, m := range iface.Methods {
-		// TODO make this loop linear by iterating through the
-		// interface methods and type methods together.
-		mi := sort.Search(len(methods), func(i int) bool {
-			return methods[i].Name >= m.Name
-		})
-		if mi >= len(methods) || methods[mi].Name != m.Name {
-			//panic("Failed to locate method: " + m.Name)
+	srciface := src_typ.(*types.Interface)
+	for i := 0; i < iface.NumMethods(); i++ {
+		m := iface.Method(i)
+
+		// FIXME sort methods somewhere, make loop linear.
+		var mi int
+		for ; mi < srciface.NumMethods(); mi++ {
+			if srciface.Method(i).Name() == m.Name() {
+				break
+			}
+		}
+
+		if mi >= srciface.NumMethods() {
 			goto check_dynamic
 		} else {
 			fptr := builder.CreateExtractValue(val, mi+2, "")
@@ -195,8 +125,8 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result Value, success Va
 	}
 	iface_struct = builder.CreateInsertValue(iface_struct, dynamicType, 0, "")
 	iface_struct = builder.CreateInsertValue(iface_struct, receiver, 1, "")
-	result = c.NewLLVMValue(iface_struct, iface)
-	success = ConstValue{types.Const{true}, c, types.Bool}
+	result = c.NewValue(iface_struct, iface)
+	success = c.NewValue(llvm.ConstAllOnes(llvm.Int1Type()), types.Typ[types.Bool])
 	return result, success
 
 check_dynamic:
@@ -221,8 +151,8 @@ check_dynamic:
 
 	value := c.builder.CreateLoad(to, "")
 	value = c.builder.CreateSelect(ok, value, zero_iface_struct, "")
-	result = c.NewLLVMValue(value, iface)
-	success = c.NewLLVMValue(ok, types.Bool)
+	result = c.NewValue(value, iface)
+	success = c.NewValue(ok, types.Typ[types.Bool])
 	return result, success
 }
 
@@ -237,7 +167,7 @@ func (v *LLVMValue) mustConvertI2I(iface *types.Interface) Value {
 	builder.SetInsertPointAtEnd(failed)
 
 	s := fmt.Sprintf("convertI2I(%s, %s) failed", v.typ, iface)
-	c.visitPanic(c.NewConstValue(token.STRING, strconv.Quote(s)))
+	c.visitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }
@@ -269,12 +199,12 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success Value) {
 	successValues := []llvm.Value{llvm.ConstAllOnes(llvm.Int1Type()), llvm.ConstNull(llvm.Int1Type())}
 	successBlocks := []llvm.BasicBlock{match, nonmatch}
 	successValue.AddIncoming(successValues, successBlocks)
-	success = v.compiler.NewLLVMValue(successValue, types.Bool)
+	success = v.compiler.NewValue(successValue, types.Typ[types.Bool])
 
 	resultValues := []llvm.Value{matchResultValue, nonmatchResultValue}
 	resultBlocks := []llvm.BasicBlock{match, nonmatch}
 	resultValue.AddIncoming(resultValues, resultBlocks)
-	result = v.compiler.NewLLVMValue(resultValue, typ)
+	result = v.compiler.NewValue(resultValue, typ)
 	return result, success
 }
 
@@ -289,7 +219,7 @@ func (v *LLVMValue) mustConvertI2V(typ types.Type) Value {
 	builder.SetInsertPointAtEnd(failed)
 
 	s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
-	c.visitPanic(c.NewConstValue(token.STRING, strconv.Quote(s)))
+	c.visitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }
@@ -322,36 +252,36 @@ func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
 
 // loadI2V loads an interface value to a type, without checking
 // that the interface type matches.
-func (v *LLVMValue) loadI2V(typ types.Type) Value {
+func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	c := v.compiler
-	if c.Sizeof(typ) > c.target.PointerSize() {
+	if c.types.Sizeof(typ) > int64(c.target.PointerSize()) {
 		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
-		typ = &types.Pointer{Base: typ}
+		typ = types.NewPointer(typ)
 		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")
-		return c.NewLLVMValue(ptr, typ).makePointee()
+		return c.NewValue(ptr, typ).makePointee()
 	}
 
 	value := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
-	if _, ok := types.Underlying(typ).(*types.Pointer); ok {
+	if _, ok := typ.Underlying().(*types.Pointer); ok {
 		value = c.builder.CreateBitCast(value, c.types.ToLLVM(typ), "")
-		return c.NewLLVMValue(value, typ)
+		return c.NewValue(value, typ)
 	}
 	bits := c.target.TypeSizeInBits(c.types.ToLLVM(typ))
 	value = c.builder.CreatePtrToInt(value, llvm.IntType(int(bits)), "")
 	value = c.coerce(value, c.types.ToLLVM(typ))
-	return c.NewLLVMValue(value, typ)
+	return c.NewValue(value, typ)
 }
 
 func (lhs *LLVMValue) interfaceTypeEquals(typ types.Type) *LLVMValue {
 	c, b := lhs.compiler, lhs.compiler.builder
 	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
 	rhsType := c.types.ToRuntime(typ)
-	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *type_) bool")
+	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *rtype) bool")
 	t := f.Type().ElementType().ParamTypes()[0]
 	lhsType = b.CreateBitCast(lhsType, t, "")
 	rhsType = b.CreateBitCast(rhsType, t, "")
 	result := b.CreateCall(f, []llvm.Value{lhsType, rhsType}, "")
-	return c.NewLLVMValue(result, types.Bool)
+	return c.NewValue(result, types.Typ[types.Bool])
 }
 
 // interfacesEqual compares two interfaces for equality, returning
@@ -375,7 +305,34 @@ func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
 
 	f := c.NamedFunction("runtime.compareI2I", "func f(t1, t2, v1, v2 uintptr) bool")
 	result := c.builder.CreateCall(f, args, "")
-	return c.NewLLVMValue(result, types.Bool)
+	return c.NewValue(result, types.Typ[types.Bool])
+}
+
+func (lhs *LLVMValue) compareI2V(rhs *LLVMValue) Value {
+	c := lhs.compiler
+	predicate := lhs.interfaceTypeEquals(rhs.typ).LLVMValue()
+
+	end := llvm.InsertBasicBlock(c.builder.GetInsertBlock(), "end")
+	end.MoveAfter(c.builder.GetInsertBlock())
+	nonmatch := llvm.InsertBasicBlock(end, "nonmatch")
+	match := llvm.InsertBasicBlock(nonmatch, "match")
+	c.builder.CreateCondBr(predicate, match, nonmatch)
+
+	c.builder.SetInsertPointAtEnd(match)
+	lhsValue := lhs.loadI2V(rhs.typ)
+	matchResultValue := lhsValue.BinaryOp(token.EQL, rhs).LLVMValue()
+	c.builder.CreateBr(end)
+
+	c.builder.SetInsertPointAtEnd(nonmatch)
+	nonmatchResultValue := llvm.ConstNull(llvm.Int1Type())
+	c.builder.CreateBr(end)
+
+	c.builder.SetInsertPointAtEnd(end)
+	resultValue := c.builder.CreatePHI(matchResultValue.Type(), "")
+	resultValues := []llvm.Value{matchResultValue, nonmatchResultValue}
+	resultBlocks := []llvm.BasicBlock{match, nonmatch}
+	resultValue.AddIncoming(resultValues, resultBlocks)
+	return c.NewValue(resultValue, types.Typ[types.Bool])
 }
 
 // vim: set ft=go :

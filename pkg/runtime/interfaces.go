@@ -1,36 +1,18 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package runtime
 
 import "unsafe"
 
-func compareI2I(atyp, btyp, aval, bval uintptr) bool {
-	if atyp == btyp {
-		atyp := (*type_)(unsafe.Pointer(atyp))
-		btyp := (*type_)(unsafe.Pointer(btyp))
+func compareI2I(atyp_, btyp_, aval, bval uintptr) bool {
+	atyp := (*rtype)(unsafe.Pointer(atyp_))
+	btyp := (*rtype)(unsafe.Pointer(btyp_))
+	if eqtyp(atyp, btyp) {
 		algs := unsafe.Pointer(atyp.alg)
 		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(algs))
-		eqFn := *(*equalalg)(eqPtr)
+		eqFn := *(*unsafe.Pointer)(eqPtr)
 		var avalptr, bvalptr unsafe.Pointer
 		if atyp.size <= unsafe.Sizeof(aval) {
 			// value fits in pointer
@@ -40,7 +22,7 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 			avalptr = unsafe.Pointer(aval)
 			bvalptr = unsafe.Pointer(bval)
 		}
-		return eqFn(atyp.size, avalptr, bvalptr)
+		return eqalg(eqFn, atyp.size, avalptr, bvalptr)
 	}
 	return false
 }
@@ -51,14 +33,13 @@ func compareI2I(atyp, btyp, aval, bval uintptr) bool {
 //
 // FIXME cache type-to-interface conversions.
 func convertI2I(typ_, from_, to_ uintptr) bool {
-	dyntypptr := (**type_)(unsafe.Pointer(from_))
+	dyntypptr := (**rtype)(unsafe.Pointer(from_))
 	if dyntypptr == nil {
 		return false
 	}
 	dyntyp := *dyntypptr
 	if dyntyp.uncommonType != nil {
-		typ := (*type_)(unsafe.Pointer(typ_))
-		targettyp := (*interfaceType)(unsafe.Pointer(&typ.commonType))
+		targettyp := (*interfaceType)(unsafe.Pointer(typ_))
 		if len(targettyp.methods) > len(dyntyp.methods) {
 			return false
 		}
@@ -80,7 +61,7 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 			}
 		}
 		targetvalue := (*uintptr)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
-		targetdyntyp := (**type_)(unsafe.Pointer(to_))
+		targetdyntyp := (**rtype)(unsafe.Pointer(to_))
 		*targetvalue = *(*uintptr)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
 		*targetdyntyp = dyntyp
 		return true
@@ -89,7 +70,7 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 }
 
 // #llgo name: reflect.ifaceE2I
-func reflect_ifaceE2I(t *type_, src interface{}, dst unsafe.Pointer) {
+func reflect_ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	// TODO
 	println("TODO: reflect.ifaceE2I")
 	llvm_trap()

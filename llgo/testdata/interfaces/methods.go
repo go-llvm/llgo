@@ -7,6 +7,14 @@ type Stringer interface {
 type X int
 type Y int
 
+type Z1 struct {
+	X
+}
+
+type Z2 struct {
+	Stringer
+}
+
 func (x X) String() string {
 	return "X()"
 }
@@ -20,15 +28,17 @@ func makeX() X {
 }
 
 func main() {
-	var z Stringer
-	z = X(0)
+	var z Stringer = X(0)
 	println(z.String())
-	//var y Y
-	//z = &y
-	//println(z.String())
+
+	z = new(Y)
+	println(z.String())
+
+	z = Z1{}
+	println(z.String())
+
+	z = Z2{new(Y)}
+	println(z.String())
 
 	println(makeX().String())
-
-	// Should fail type-checking: can't take address of temporary.
-	//println(makeY().String())
 }

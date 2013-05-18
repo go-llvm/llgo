@@ -1,38 +1,13 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package runtime
 
 import "unsafe"
 
 // This is a runtime-internal representation of runtimeType.
-// runtimeType is always proceeded by commonType.
-type type_ struct {
-	ptr unsafe.Pointer
-	typ unsafe.Pointer
-	commonType
-}
-
-type commonType struct {
+type rtype struct {
 	size       uintptr
 	hash       uint32
 	_          uint8
@@ -43,7 +18,7 @@ type commonType struct {
 	gc         unsafe.Pointer
 	string     *string
 	*uncommonType
-	ptrToThis *type_
+	ptrToThis *rtype
 }
 
 type uncommonType struct {
@@ -55,69 +30,69 @@ type uncommonType struct {
 type method struct {
 	name    *string
 	pkgPath *string
-	mtyp    *type_
-	typ     *type_
+	mtyp    *rtype
+	typ     *rtype
 	ifn     unsafe.Pointer
 	tfn     unsafe.Pointer
 }
 
 type sliceType struct {
-	commonType
-	elem *type_
+	rtype
+	elem *rtype
 }
 
 type mapType struct {
-	commonType
-	key  *type_
-	elem *type_
+	rtype
+	key  *rtype
+	elem *rtype
 }
 
 type imethod struct {
 	name    *string
 	pkgPath *string
-	typ     *type_
+	typ     *rtype
 }
 
 type interfaceType struct {
-	commonType
+	rtype
 	methods []imethod
 }
 
 type ptrType struct {
-	commonType
-	elem *type_
+	rtype
+	elem *rtype
 }
 
 type arrayType struct {
-	commonType
-	elem  *type_
-	slice *type_
+	rtype
+	elem  *rtype
+	slice *rtype
 	len   uintptr
 }
 
 type chanType struct {
-	commonType
-	elem *type_
+	rtype
+	elem *rtype
 	dir  uintptr
 }
 
 type funcType struct {
-	commonType
+	rtype
 	dotdotdot bool
-	in        []*type_
-	out       []*type_
+	in        []*rtype
+	out       []*rtype
 }
 
 type structField struct {
 	name    *string
 	pkgPath *string
-	typ     *type_
+	typ     *rtype
 	tag     *string
 	offset  uintptr
 }
 
 type structType struct {
-	commonType
+	rtype
 	fields []structField
 }
 
@@ -153,7 +128,7 @@ const (
 
 // eqtyp takes two runtime types and returns true
 // iff they are equal.
-func eqtyp(t1, t2 *type_) bool {
+func eqtyp(t1, t2 *rtype) bool {
 	if t1 == t2 {
 		return true
 	} else if t1 == nil || t2 == nil {
@@ -165,7 +140,7 @@ func eqtyp(t1, t2 *type_) bool {
 		// Named type equality is covered in the trivial
 		// case, since there is only one definition for
 		// each named type.
-		// 
+		//
 		// Basic types are not checked for explicitly,
 		// as we should never be comparing unnamed basic
 		// types.
@@ -176,8 +151,8 @@ func eqtyp(t1, t2 *type_) bool {
 		case interfaceKind:
 		case mapKind:
 		case ptrKind:
-			t1 := (*ptrType)(unsafe.Pointer(&t1.commonType))
-			t2 := (*ptrType)(unsafe.Pointer(&t2.commonType))
+			t1 := (*ptrType)(unsafe.Pointer(&t1))
+			t2 := (*ptrType)(unsafe.Pointer(&t2))
 			return eqtyp(t1.elem, t2.elem)
 		case sliceKind:
 		case structKind:

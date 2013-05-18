@@ -1,13 +1,12 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package llgo
 
 import (
-	"fmt"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -32,12 +31,15 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 	}
 
 	if strings.HasPrefix(name, c.module.Name+".") {
-		obj := c.pkg.Scope.Lookup(name[len(c.module.Name)+1:])
-		value := c.Resolve(obj)
-		f = value.LLVMValue()
+		obj := c.pkg.Scope().Lookup(name[len(c.module.Name)+1:])
+		if obj == nil {
+			panic("Missing function: " + name)
+		}
+		value := c.Resolve(c.objectdata[obj].Ident)
+		f = llvm.ConstExtractValue(value.LLVMValue(), []uint32{0})
 	} else {
 		fset := token.NewFileSet()
-		code := `package runtime;import("unsafe");` + signature + `{panic()}`
+		code := `package runtime;import("unsafe");` + signature + `{panic("")}`
 		file, err := parser.ParseFile(fset, "", code, 0)
 		if err != nil {
 			panic(err)
@@ -58,22 +60,16 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		if err != nil {
 			panic(err)
 		}
-		files["<src>"] = file
-
-		pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
-		if err != nil {
-			panic(err)
-		}
-
-		_, err = types.Check("", c.compiler, fset, pkg)
+		files = append(files, file)
+		_, _, err = c.typecheck("runtime", fset, files)
 		if err != nil {
 			panic(err)
 		}
 
 		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
-		ftype := fdecl.Name.Obj.Type.(*types.Func)
-		llvmfptrtype := c.types.ToLLVM(ftype)
-		f = llvm.AddFunction(c.module.Module, name, llvmfptrtype.ElementType())
+		ftype := c.objects[fdecl.Name].Type().(*types.Signature)
+		llvmfntyp := c.types.ToLLVM(ftype).StructElementTypes()[0].ElementType()
+		f = llvm.AddFunction(c.module.Module, name, llvmfntyp)
 	}
 	c.functions[name+":"+signature] = f
 	return f
@@ -83,19 +79,14 @@ func parseFile(fset *token.FileSet, name string) (*ast.File, error) {
 	return parser.ParseFile(fset, name, nil, parser.DeclarationErrors)
 }
 
-func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File, err error) {
-	files = make(map[string]*ast.File)
+func parseFiles(fset *token.FileSet, filenames []string) (files []*ast.File, err error) {
 	for _, filename := range filenames {
 		var file *ast.File
 		file, err = parseFile(fset, filename)
 		if err != nil {
 			return
 		} else if file != nil {
-			if files[filename] != nil {
-				err = fmt.Errorf("%q: duplicate file", filename)
-				return
-			}
-			files[filename] = file
+			files = append(files, file)
 		}
 	}
 	return
@@ -103,7 +94,7 @@ func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.
 
 // parseReflect parses the reflect package and type-checks its AST.
 // This is used to generate runtime type structures.
-func (c *compiler) parseReflect() (*ast.Package, error) {
+func (c *compiler) parseReflect() (*types.Package, error) {
 	buildpkg, err := build.Import("reflect", "", 0)
 	if err != nil {
 		return nil, err
@@ -119,21 +110,20 @@ func (c *compiler) parseReflect() (*ast.Package, error) {
 		return nil, err
 	}
 
-	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
+	pkg, _, err := c.typecheck("reflect", fset, files)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = types.Check(buildpkg.Name, c, fset, pkg)
-	if err != nil {
-		return nil, err
-	}
 	return pkg, nil
 }
 
 func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
 	malloc := c.NamedFunction("runtime.malloc", "func f(uintptr) unsafe.Pointer")
-	if size.Type().IntTypeWidth() > c.target.IntPtrType().IntTypeWidth() {
+	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
+	case n < 0:
+		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
+	case n > 0:
 		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
 	}
 	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")
