@@ -1,12 +1,5 @@
 package main
 
-import (
-	"bufio"
-	"net/http"
-	"os"
-	"unicode"
-)
-
 type E struct {
 	e *E
 }
@@ -16,10 +9,25 @@ type S struct {
 	a, b int
 }
 
+type File struct {
+}
+
+type Reader struct {
+}
+
+type Response struct {
+}
+
 type reader struct {
-	*bufio.Reader
-	fd   *os.File
-	resp *http.Response
+	*Reader
+	fd   *File
+	resp *Response
+}
+
+type Range32 struct {
+	Lo     uint32
+	Hi     uint32
+	Stride uint32
 }
 
 func main() {
@@ -30,13 +38,11 @@ func main() {
 
 	_ = &reader{}
 
-	// ensure keys resolve when imported
-	r := unicode.Range32{
+	r := Range32{
 		Lo:     0,
 		Stride: 2,
 		Hi:     1,
 	}
-
 	println(r.Lo, r.Hi, r.Stride)
 
 	// slice of structs

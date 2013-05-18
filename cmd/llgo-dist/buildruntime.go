@@ -1,26 +1,81 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package main
 
 import (
-	"go/build"
+	"fmt"
+	"github.com/axw/llgo/build"
+	gobuild "go/build"
+	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
 
-func getPackage(pkgpath string) (*build.Package, error) {
-	var err error
-	var pkg *build.Package
+type renamedFileInfo struct {
+	os.FileInfo
+	name string
+}
 
-	pkg, err = build.Import(pkgpath, "", 0)
+func (r *renamedFileInfo) Name() string {
+	return r.name
+}
+
+func getPackage(pkgpath string) (*gobuild.Package, error) {
+	var ctx gobuild.Context = gobuild.Default
+	ctx.GOARCH = GOARCH
+	ctx.GOOS = GOOS
+	ctx.BuildTags = append(ctx.BuildTags[:], "llgo")
+	//ctx.Compiler = "llgo"
+
+	// ReadDir is overridden to return a fake ".s"
+	// file for each ".ll" file in the directory.
+	ctx.ReadDir = func(dir string) (fi []os.FileInfo, err error) {
+		fi, err = ioutil.ReadDir(dir)
+		for i, info := range fi {
+			name := info.Name()
+			if strings.HasSuffix(name, ".ll") {
+				name = name[:len(name)-3] + ".s"
+				fi[i] = &renamedFileInfo{info, name}
+			}
+		}
+		return
+	}
+
+	// OpenFile is overridden to return the contents
+	// of the ".ll" file found in ReadDir above. The
+	// returned ReadCloser is wrapped to transform
+	// LLVM IR comments to use "//", as expected by
+	// go/build when looking for build tags.
+	ctx.OpenFile = func(path string) (io.ReadCloser, error) {
+		if strings.HasSuffix(path, ".s") {
+			origpath := path
+			path := path[:len(path)-2] + ".ll"
+			if _, err := os.Stat(path); err == nil {
+				var r io.ReadCloser
+				r, err = os.Open(path)
+				if err == nil {
+					r = build.NewLLVMIRReader(r)
+				}
+				return r, err
+			} else {
+				err = fmt.Errorf("No matching .ll file for %q", origpath)
+				return nil, err
+			}
+		}
+		return os.Open(path)
+	}
+
+	pkg, err := ctx.Import(pkgpath, "", 0)
 	if err != nil {
 		return nil, err
 	} else {
@@ -30,18 +85,11 @@ func getPackage(pkgpath string) (*build.Package, error) {
 		for i, filename := range pkg.CFiles {
 			pkg.CFiles[i] = path.Join(pkg.Dir, filename)
 		}
-
-		// Look for .ll files, treat them the same as .s.
-		// TODO look for build tags in the .ll file
-		var llfiles []string
-		llfiles, err = filepath.Glob(pkg.Dir + "/*.ll")
-		for _, file := range llfiles {
-			if goodOSArchFile(filepath.Base(file)) {
-				pkg.SFiles = append(pkg.SFiles, file)
-			}
+		for i, filename := range pkg.SFiles {
+			filename = filename[:len(filename)-2] + ".ll"
+			pkg.SFiles[i] = path.Join(pkg.Dir, filename)
 		}
 	}
-
 	return pkg, nil
 }
 
@@ -114,7 +162,7 @@ func buildRuntime() error {
 	for _, pkg := range runtimePackages {
 		log.Printf("- %s", pkg.name)
 		dir, file := path.Split(pkg.name)
-		outfile := path.Join(outdir, dir, file+".a")
+		outfile := path.Join(outdir, dir, file+".bc")
 		err = buildPackage(pkg.name, pkg.path, outfile)
 		if err != nil {
 			return err

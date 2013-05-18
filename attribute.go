@@ -1,12 +1,12 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"strings"
 )
@@ -114,8 +114,9 @@ func parseLinkageAttribute(value string) linkageAttribute {
 type nameAttribute string
 
 func (a nameAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Func); isfunc {
+	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
+		fn = llvm.ConstExtractValue(fn, []uint32{0})
 		fn.SetName(string(a))
 	} else {
 		global := v.(*LLVMValue).pointer.value
@@ -132,6 +133,10 @@ func parseLLVMAttribute(value string) llvmAttribute {
 			result |= llvmAttribute(llvm.NoReturnAttribute)
 		case "nounwind":
 			result |= llvmAttribute(llvm.NoUnwindAttribute)
+		case "noinline":
+			result |= llvmAttribute(llvm.NoInlineAttribute)
+		case "alwaysinline":
+			result |= llvmAttribute(llvm.AlwaysInlineAttribute)
 		}
 	}
 	return result
@@ -140,8 +145,10 @@ func parseLLVMAttribute(value string) llvmAttribute {
 type llvmAttribute llvm.Attribute
 
 func (a llvmAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Func); isfunc {
-		v.LLVMValue().AddFunctionAttr(llvm.Attribute(a))
+	if _, isfunc := v.Type().(*types.Signature); isfunc {
+		fn := v.LLVMValue()
+		fn = llvm.ConstExtractValue(fn, []uint32{0})
+		fn.AddFunctionAttr(llvm.Attribute(a))
 	} else {
 		v.LLVMValue().AddAttribute(llvm.Attribute(a))
 	}

@@ -35,6 +35,7 @@ func main() {
 	// operand of the shift expression.
 	shift := uint(2)
 	println(uint64(0xFFFFFFFF) & (1<<shift - 1))
+	println((1<<shift -1) & uint64(0xFFFFFFFF))
 
 	// rhs' type is converted lhs'
 	println(uint32(1) << uint64(2))

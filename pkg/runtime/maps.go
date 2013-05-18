@@ -1,24 +1,6 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package runtime
 
@@ -61,31 +43,30 @@ func maplen(m *map_) int {
 }
 
 // #llgo name: reflect.mapassign
-func reflect_mapassign(t *type_, m_, key, val unsafe.Pointer, ok bool) {
+func reflect_mapassign(t *rtype, m_, key, val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
 	if ok {
-		ptr := maplookup(t, m, key, true)
+		ptr := maplookup(unsafe.Pointer(t), m, key, true)
 		// TODO use copy alg
 		memmove(ptr, val, t.size)
 	} else {
-		mapdelete(t, m, key)
+		mapdelete(unsafe.Pointer(t), m, key)
 	}
 }
 
 // #llgo name: reflect.mapaccess
-func reflect_mapaccess(t *type_, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
+func reflect_mapaccess(t *rtype, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
-	ptr := maplookup(t, m, key, false)
+	ptr := maplookup(unsafe.Pointer(t), m, key, false)
 	return ptr, ptr != nil
 }
 
 func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {
 	if m == nil {
-		return 0
+		return nil
 	}
 
-	typ := (*type_)(t)
-	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
@@ -96,11 +77,11 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	// Search for the entry with the specified key.
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
-	keyeqfun := *(*equalalg)(keyeqptr)
+	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
 	var last *mapentry
 	for ptr := m.head; ptr != nil; ptr = ptr.next {
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		if keyeqfun(keysize, key, keyptr) {
+		if eqalg(keyeqfun, keysize, key, keyptr) {
 			elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
 			return elemptr
 		}
@@ -111,7 +92,7 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	if insert {
 		newentry := (*mapentry)(malloc(entrysize))
 		newentry.next = nil
-		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry) + keyoffset))
+		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + keyoffset)
 		elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + elemoffset)
 		memcpy(keyptr, key, keysize)
 		if last != nil {
@@ -123,16 +104,15 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 		return elemptr
 	}
 
-	return 0
+	return nil
 }
 
 func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	if m == nil {
-		return 0
+		return
 	}
 
-	typ := (*type_)(t)
-	maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
@@ -140,17 +120,17 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	// Search for the entry with the specified key.
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
-	keyeqfun := *(*equalalg)(keyeqptr)
+	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
 	var last *mapentry
 	for ptr := m.head; ptr != nil; ptr = ptr.next {
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		if keyeqfun(keysize, key, keyptr) {
+		if eqalg(keyeqfun, keysize, key, keyptr) {
 			if last == nil {
 				m.head = ptr.next
 			} else {
 				last.next = ptr.next
 			}
-			free(ptr)
+			free(unsafe.Pointer(ptr))
 			m.length--
 			return
 		}
@@ -159,7 +139,7 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 }
 
 // #llgo name: reflect.mapiterinit
-func reflect_mapiterinit(t *type_, m_ unsafe.Pointer) *byte {
+func reflect_mapiterinit(t *rtype, m_ unsafe.Pointer) *byte {
 	// TODO
 	return nil
 }
@@ -186,8 +166,7 @@ func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv 
 		ptr = ptr.next
 	}
 	if ptr != nil {
-		typ := (*type_)(t)
-		maptyp := (*mapType)(unsafe.Pointer(&typ.commonType))
+		maptyp := (*mapType)(t)
 		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 		keysize := uintptr(maptyp.key.size)
 		keyoffset := align(ptrsize, uintptr(maptyp.key.align))

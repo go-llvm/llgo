@@ -1,30 +1,12 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/types"
 	"go/token"
 )
 
@@ -44,8 +26,8 @@ func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
 	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
 	args := []llvm.Value{lhsstr, rhsstr}
 	result := c.builder.CreateCall(strcat, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
@@ -74,7 +56,7 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 		panic("unreachable")
 	}
 	result = c.builder.CreateICmp(pred, result, zero, "")
-	return c.NewLLVMValue(result, types.Bool)
+	return c.NewValue(result, types.Typ[types.Bool])
 }
 
 func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Value) {
@@ -91,10 +73,10 @@ func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Va
 func (v *LLVMValue) runeToString() *LLVMValue {
 	c := v.compiler
 	strrune := c.NamedFunction("runtime.strrune", "func f(n int64) _string")
-	args := []llvm.Value{v.Convert(types.Int64).LLVMValue()}
+	args := []llvm.Value{v.Convert(types.Typ[types.Int64]).LLVMValue()}
 	result := c.builder.CreateCall(strrune, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
@@ -103,9 +85,9 @@ func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
 	_string := strtorunes.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
 	result := c.builder.CreateCall(strtorunes, args, "")
-	runeslice := &types.Slice{Elt: types.Rune}
+	runeslice := types.NewSlice(types.Typ[types.Rune])
 	result = c.coerceSlice(result, c.types.ToLLVM(runeslice))
-	return c.NewLLVMValue(result, runeslice)
+	return c.NewValue(result, runeslice)
 }
 
 func (v *LLVMValue) runeSliceToString() *LLVMValue {
@@ -114,8 +96,8 @@ func (v *LLVMValue) runeSliceToString() *LLVMValue {
 	i8slice := runestostr.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceSlice(v.LLVMValue(), i8slice)}
 	result := c.builder.CreateCall(runestostr, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.String))
-	return c.NewLLVMValue(result, types.String)
+	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
+	return c.NewValue(result, types.Typ[types.String])
 }
 
 // vim: set ft=go:

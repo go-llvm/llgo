@@ -1,4 +1,4 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -31,6 +31,7 @@ func genSyscall() error {
 		return err
 	}
 
+	var filenames string
 	for _, filename := range gopkg.GoFiles {
 		srcfile := filepath.Join(gopkg.Dir, filename)
 		data, err := ioutil.ReadFile(srcfile)
@@ -42,8 +43,9 @@ func genSyscall() error {
 		if err != nil {
 			return err
 		}
-		log.Printf("- %s", filename)
+		filenames += " " + filename
 	}
+	log.Printf("-%s", filenames)
 
 	return nil
 }

@@ -40,10 +40,24 @@ func multi(i interface{}) {
 	}
 }
 
+type N int
+
+func (n N) String() string { return "N" }
+
+func named() {
+	var x interface{} = N(123)
+	switch x := x.(type) {
+	case N:
+		// Test for bug: previously, type switch was
+		// assigning underlying type of N (int).
+		println(x.String())
+	}
+}
+
 func main() {
 	test(int64(123))
 	test("abc")
 	multi(uint8(123))
 	multi(int8(123))
+	named()
 }
-

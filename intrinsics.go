@@ -1,24 +1,6 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 package llgo
 
@@ -50,7 +32,13 @@ func (c *compiler) defineRuntimeIntrinsics() {
 }
 
 func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
-	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size int)")
+	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size uintptr)")
+	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
+	case n < 0:
+		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
+	case n > 0:
+		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
+	}
 	ptr = c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	fill := llvm.ConstNull(llvm.Int8Type())
 	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
@@ -73,7 +61,7 @@ func (c *compiler) defineMemcpyFunction(fn llvm.Value, name string) {
 	sizeBits := sizeType.IntTypeWidth()
 
 	memcpyName := "llvm." + name + ".p0i8.p0i8.i" + strconv.Itoa(sizeBits)
-	memcpy := c.NamedFunction(memcpyName, "func f(dst, src *int8, size int, align int32, volatile bool)")
+	memcpy := c.NamedFunction(memcpyName, "func f(dst, src *int8, size uintptr, align int32, volatile bool)")
 
 	pint8 := memcpy.Type().ElementType().ParamTypes()[0]
 	dst = c.builder.CreateIntToPtr(dst, pint8, "")
@@ -94,7 +82,7 @@ func (c *compiler) defineMemsetFunction(fn llvm.Value) {
 	sizeType := size.Type()
 	sizeBits := sizeType.IntTypeWidth()
 	memsetName := "llvm.memset.p0i8.i" + strconv.Itoa(sizeBits)
-	memset := c.NamedFunction(memsetName, "func f(dst *int8, fill byte, size int, align int32, volatile bool)")
+	memset := c.NamedFunction(memsetName, "func f(dst *int8, fill byte, size uintptr, align int32, volatile bool)")
 	pint8 := memset.Type().ElementType().ParamTypes()[0]
 	dst = c.builder.CreateIntToPtr(dst, pint8, "")
 	args := []llvm.Value{

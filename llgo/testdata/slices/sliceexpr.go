@@ -5,15 +5,15 @@ func main() {
 	for i, val := range x[1:3] {
 		println(i, val)
 	}
-	println()
+	println("")
 	for i, val := range x[2:] {
 		println(i, val)
 	}
-	println()
+	println("")
 	for i, val := range x[:2] {
 		println(i, val)
 	}
-	println()
+	println("")
 	for i, val := range x[:] {
 		println(i, val)
 	}

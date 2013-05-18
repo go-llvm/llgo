@@ -1,4 +1,4 @@
-// Copyright 2011 Andrew Wilkins.
+// Copyright 2011 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -21,8 +21,8 @@ func strcat(a, b _string) _string {
 		// TODO panic? abort?
 	}
 
-	memcpy(mem, unsafe.Pointer(a.str), a.len)
-	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.len)), unsafe.Pointer(b.str), b.len)
+	memcpy(mem, unsafe.Pointer(a.str), uintptr(a.len))
+	memcpy(unsafe.Pointer(uintptr(mem)+uintptr(a.len)), unsafe.Pointer(b.str), uintptr(b.len))
 
 	a.str = (*uint8)(mem)
 	a.len = a.len + b.len
@@ -55,7 +55,7 @@ func strcmp(a, b _string) int32 {
 	return 0
 }
 
-func stringslice(a _string, low, high int32) _string {
+func stringslice(a _string, low, high int) _string {
 	if high == -1 {
 		high = a.len
 	} else {
@@ -74,8 +74,8 @@ func stringslice(a _string, low, high int32) _string {
 // along with the number of bytes that make it up.
 func strnext(s _string, i int) (n int, value rune) {
 	ptr := uintptr(unsafe.Pointer(s.str)) + uintptr(i)
-	c0 := *(*int8)(unsafe.Pointer(ptr))
-	n = uint(ctlz8(^c0))
+	c0 := *(*uint8)(unsafe.Pointer(ptr))
+	n = int(ctlz8(^c0))
 	if n == 0 {
 		value = rune(c0)
 		n = 1
@@ -85,9 +85,9 @@ func strnext(s _string, i int) (n int, value rune) {
 		n = 1
 		return
 	}
-	value = rune(c0 & int8(0xFF>>n))
-	for j := uint(1); j < n; j++ {
-		c := *(*int8)(unsafe.Pointer(ptr) + uintptr(j))
+	value = rune(c0 & uint8(0xFF>>uint(n)))
+	for j := 1; j < n; j++ {
+		c := *(*uint8)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + uintptr(j)))
 		// Make sure only the top bit is set.
 		if c&0xC0 != 0x80 {
 			n = 1
@@ -147,7 +147,7 @@ func runestostr(s slice) _string {
 	array := uintptr(unsafe.Pointer(s.array))
 	for i := uint(0); i < s.len; i++ {
 		r := *(*rune)(unsafe.Pointer(array))
-		str = strcat(str, strrune(r))
+		str = strcat(str, strrune(int64(r)))
 		array += unsafe.Sizeof(r)
 	}
 	return str

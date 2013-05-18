@@ -231,7 +231,7 @@ func fadd64(f, g uint64) uint64 {
 	shift := uint(fe - ge)
 	fm <<= 2
 	gm <<= 2
-	trunc := gm & (1<<shift - 1)
+	trunc := gm & (uint64(1)<<shift - 1)
 	gm >>= shift
 	if fs == gs {
 		fm += gm
@@ -280,7 +280,7 @@ func fmul64(f, g uint64) uint64 {
 	// 53-bit * 53-bit = 107- or 108-bit
 	lo, hi := mullu(fm, gm)
 	shift := mantbits64 - 1
-	trunc := lo & (1<<shift - 1)
+	trunc := lo & (uint64(1)<<shift - 1)
 	mant := hi<<(64-shift) | lo>>shift
 	return fpack64(fs^gs, mant, fe+ge-1, trunc)
 }

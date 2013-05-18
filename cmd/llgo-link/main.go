@@ -1,4 +1,4 @@
-// Copyright 2012 Andrew Wilkins.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -45,7 +45,9 @@ func link(files []string) error {
 
 	// TODO? Fix order of modules to be based on package dependency.
 	args := append([]string{"-o", tempf.Name()}, files...)
-	err = exec.Command(llvmlink, args...).Run()
+	cmd := exec.Command(llvmlink, args...)
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
 	if err != nil {
 		return err
 	}

@@ -1,24 +1,6 @@
-/*
-Copyright (c) 2011, 2012 Andrew Wilkins <axwalk@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright 2011 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
 
 // Portions (from gotype):
 //     Copyright 2011 The Go Authors. All rights reserved.
@@ -33,7 +15,6 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
-	"github.com/axw/llgo/types"
 	"go/ast"
 	"go/parser"
 	"go/scanner"
@@ -44,10 +25,6 @@ import (
 	"sort"
 	"strings"
 )
-
-var dumpast = flag.Bool(
-	"dumpast", false,
-	"Dump the AST to stderr and exit")
 
 var dump = flag.Bool(
 	"dump", false,
@@ -96,15 +73,16 @@ func parseFile(fset *token.FileSet, filename string) *ast.File {
 	return file
 }
 
-func parseFiles(fset *token.FileSet, filenames []string) (files map[string]*ast.File) {
-	files = make(map[string]*ast.File)
-	for _, filename := range filenames {
-		if file := parseFile(fset, filename); file != nil {
-			if files[filename] != nil {
-				report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
-				continue
+func parseFiles(fset *token.FileSet, filenames []string) (files []*ast.File) {
+	sort.Strings(filenames)
+	for i, filename := range filenames {
+		if i > 0 && filenames[i-1] == filename {
+			report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
+		} else {
+			file := parseFile(fset, filename)
+			if file != nil {
+				files = append(files, file)
 			}
-			files[filename] = file
 		}
 	}
 	return
@@ -131,34 +109,8 @@ func compileFiles(compiler llgo.Compiler, filenames []string, importpath string)
 		return nil, errors.New("No Go source files were specified")
 	}
 	fset := token.NewFileSet()
-	return compilePackage(compiler, fset, parseFiles(fset, filenames[0:i]), importpath)
-}
-
-func compilePackage(compiler llgo.Compiler, fset *token.FileSet, files map[string]*ast.File, importpath string) (*llgo.Module, error) {
-	// make a package (resolve all identifiers)
-	pkg, err := ast.NewPackage(fset, files, types.GcImport, types.Universe)
-	if err != nil {
-		report(err)
-		return nil, err
-	}
-
-	// an empty importpath means the same as the package name
-	if importpath == "" {
-		importpath = pkg.Name
-	}
-
-	exprTypes, err := types.Check(importpath, compiler, fset, pkg)
-	if err != nil {
-		report(err)
-		return nil, err
-	}
-
-	if *dumpast {
-		ast.Fprint(os.Stderr, fset, pkg, nil)
-		os.Exit(0)
-	}
-
-	return compiler.Compile(fset, pkg, importpath, exprTypes)
+	files := parseFiles(fset, filenames[0:i])
+	return compiler.Compile(fset, files, importpath)
 }
 
 func writeObjectFile(m *llgo.Module) error {
