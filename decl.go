@@ -90,7 +90,9 @@ func (stackvar *LLVMValue) promoteStackVar() {
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
 func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt, isvariadic bool) {
-	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {
+		defer c.builder.SetInsertPointAtEnd(currblock)
+	}
 	llvm_fn := llvm.ConstExtractValue(f.LLVMValue(), []uint32{0})
 	entry := llvm.AddBasicBlock(llvm_fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)

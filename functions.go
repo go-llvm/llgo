@@ -232,7 +232,9 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
 	if pkg == nil || pkg == c.pkg {
-		defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+		if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {
+			defer c.builder.SetInsertPointAtEnd(currblock)
+		}
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
@@ -301,7 +303,9 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
 	if pkg == nil || pkg == c.pkg {
-		defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+		if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {
+			defer c.builder.SetInsertPointAtEnd(currblock)
+		}
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
