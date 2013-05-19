@@ -182,18 +182,23 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	c.VisitBlockStmt(body, false)
 	c.functions.pop()
 
-	// If there are no results, then "return" is optional.
-	if results.Len() == 0 {
-		// Use GetInsertBlock rather than LastBasicBlock, since the
-		// last basic block might actually be a "defer" block.
-		last := c.builder.GetInsertBlock()
-		if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
-			c.builder.SetInsertPointAtEnd(last)
+	// If the last instruction in the function is not a terminator, then
+	// we either have unreachable code or a missing optional return statement
+	// (the latter case is allowable only for functions without results).
+	//
+	// Use GetInsertBlock rather than LastBasicBlock, since the
+	// last basic block might actually be a "defer" block.
+	last := c.builder.GetInsertBlock()
+	if in := last.LastInstruction(); in.IsNil() || in.IsATerminatorInst().IsNil() {
+		c.builder.SetInsertPointAtEnd(last)
+		if results.Len() == 0 {
 			if funcstate.deferblock.IsNil() {
 				c.builder.CreateRetVoid()
 			} else {
 				c.builder.CreateBr(funcstate.deferblock)
 			}
+		} else {
+			c.builder.CreateUnreachable()
 		}
 	}
 }
