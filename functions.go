@@ -237,6 +237,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 		}
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
+		llvmfn.SetLinkage(llvm.LinkOnceODRLinkage)
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
 		c.builder.SetInsertPointAtEnd(entry)
 
@@ -308,6 +309,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 		}
 		llvmfn := c.Resolve(ident).LLVMValue()
 		llvmfn = c.builder.CreateExtractValue(llvmfn, 0, "")
+		llvmfn.SetLinkage(llvm.LinkOnceODRLinkage)
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
 		c.builder.SetInsertPointAtEnd(entry)
 
