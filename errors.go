@@ -35,7 +35,7 @@ func (c *compiler) visitRecover() *LLVMValue {
 func (c *compiler) visitPanic(arg Value) {
 	panic_ := c.NamedFunction("runtime.panic_", "func f(interface{})")
 	args := []llvm.Value{arg.Convert(&types.Interface{}).LLVMValue()}
-	if f := c.functions.top(); !f.unwindblock.IsNil() {
+	if f := c.functions.top(); f != nil && !f.unwindblock.IsNil() {
 		c.builder.CreateInvoke(panic_, args, f.deferblock, f.unwindblock, "")
 	} else {
 		c.builder.CreateCall(panic_, args, "")
