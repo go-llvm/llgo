@@ -166,8 +166,6 @@ func main() {
 		initLlvm,
 		checkLlvmLibs,
 		buildLlgo,
-		genSyscall,
-		genMath,
 		buildRuntime,
 	}
 	for _, action := range actions {

@@ -61,4 +61,3 @@ func initGOVARS(triple string) error {
 	}
 	return nil
 }
-

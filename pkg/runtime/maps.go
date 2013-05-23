@@ -16,6 +16,12 @@ type mapentry struct {
 	// after this comes the key, then the value.
 }
 
+// #llgo name: reflect.ismapkey
+func reflect_ismapkey(t *rtype) bool {
+	// TODO
+	return false
+}
+
 // #llgo name: reflect.makemap
 func reflect_makemap(t *map_) unsafe.Pointer {
 	return makemap(unsafe.Pointer(t))
