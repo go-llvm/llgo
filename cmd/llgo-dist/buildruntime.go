@@ -41,9 +41,9 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 	// which we'll use in ReadDir below.
 	overlayentries := make(map[string]bool)
 	overlaypkgpath := llgoPkgPrefix + pkgpath
-	overlaypkg, _ := ctx.Import(overlaypkgpath, "", gobuild.FindOnly)
-	if overlaypkg == nil {
-		goto importpkg
+	overlaypkg, err := ctx.Import(overlaypkgpath, "", gobuild.FindOnly)
+	if err != nil {
+		overlaypkg = nil
 	}
 
 	// ReadDir is overridden to return a fake ".s"
@@ -60,8 +60,12 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 		// Overlay all files in the overlay package dir.
 		// If we find any .ll files, replace the suffix
 		// with .s.
-		fi, err = ioutil.ReadDir(overlaypkg.Dir)
+		if overlaypkg != nil {
+			fi, err = ioutil.ReadDir(overlaypkg.Dir)
+		}
 		if err == nil {
+			// Check for .ll files in the overlay dir if
+			// we have one, else in the standard package dir.
 			for _, info := range fi {
 				name := info.Name()
 				if strings.HasSuffix(name, ".ll") {
@@ -69,6 +73,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 					info = &renamedFileInfo{info, name}
 				}
 				overlayentries[name] = true
+				entries[name] = info
 			}
 		}
 		fi = make([]os.FileInfo, 0, len(entries))
@@ -87,7 +92,9 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 		base := filepath.Base(path)
 		overlay := overlayentries[base]
 		if overlay {
-			path = filepath.Join(overlaypkg.Dir, base)
+			if overlaypkg != nil {
+				path = filepath.Join(overlaypkg.Dir, base)
+			}
 			if strings.HasSuffix(path, ".s") {
 				path := path[:len(path)-2] + ".ll"
 				var r io.ReadCloser
@@ -102,11 +109,13 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 		return os.Open(path)
 	}
 
-importpkg:
 	pkg, err := ctx.Import(pkgpath, "", 0)
 	if err != nil {
 		return nil, err
 	} else {
+		if overlaypkg == nil {
+			overlaypkg = pkg
+		}
 		for i, filename := range pkg.GoFiles {
 			pkgdir := pkg.Dir
 			if overlayentries[filename] {
@@ -237,7 +246,7 @@ func buildRuntime() error {
 			pkg = llgoPkgPrefix + "runtime"
 		}
 		log.Printf("- %s", name)
-		dir, file := path.Split(pkg)
+		dir, file := path.Split(name)
 		outfile := path.Join(outdir, dir, file+".bc")
 		err = buildPackage(name, pkg, outfile)
 		if err != nil {
