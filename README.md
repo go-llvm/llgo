@@ -1,3 +1,4 @@
+[![Build Status](https://drone.io/github.com/axw/llgo/status.png)](https://drone.io/github.com/axw/llgo/latest)
 # llgo
 
 llgo is a compiler for [Go](http://golang.org), written in Go, and using the
