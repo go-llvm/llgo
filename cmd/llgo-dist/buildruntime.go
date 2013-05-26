@@ -31,24 +31,21 @@ func (r *renamedFileInfo) Name() string {
 }
 
 func getPackage(pkgpath string) (*gobuild.Package, error) {
-	var ctx gobuild.Context = gobuild.Default
-	ctx.GOARCH = GOARCH
-	ctx.GOOS = GOOS
-	ctx.BuildTags = append(ctx.BuildTags[:], "llgo")
-	//ctx.Compiler = "llgo"
+	// Make a copy, as we'll be modifying ReadDir/OpenFile.
+	buildctx := *buildctx
 
 	// Attempt to find an overlay package path,
 	// which we'll use in ReadDir below.
 	overlayentries := make(map[string]bool)
 	overlaypkgpath := llgoPkgPrefix + pkgpath
-	overlaypkg, err := ctx.Import(overlaypkgpath, "", gobuild.FindOnly)
+	overlaypkg, err := buildctx.Import(overlaypkgpath, "", gobuild.FindOnly)
 	if err != nil {
 		overlaypkg = nil
 	}
 
 	// ReadDir is overridden to return a fake ".s"
 	// file for each ".ll" file in the directory.
-	ctx.ReadDir = func(dir string) (fi []os.FileInfo, err error) {
+	buildctx.ReadDir = func(dir string) (fi []os.FileInfo, err error) {
 		fi, err = ioutil.ReadDir(dir)
 		if err != nil {
 			return nil, err
@@ -88,7 +85,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 	// returned ReadCloser is wrapped to transform
 	// LLVM IR comments to use "//", as expected by
 	// go/build when looking for build tags.
-	ctx.OpenFile = func(path string) (io.ReadCloser, error) {
+	buildctx.OpenFile = func(path string) (io.ReadCloser, error) {
 		base := filepath.Base(path)
 		overlay := overlayentries[base]
 		if overlay {
@@ -109,7 +106,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 		return os.Open(path)
 	}
 
-	pkg, err := ctx.Import(pkgpath, "", 0)
+	pkg, err := buildctx.Import(pkgpath, "", 0)
 	if err != nil {
 		return nil, err
 	} else {

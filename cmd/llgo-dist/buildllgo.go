@@ -6,7 +6,8 @@ package main
 
 import (
 	"fmt"
-	"go/build"
+	"github.com/axw/llgo/build"
+	gobuild "go/build"
 	"log"
 	"os"
 	"os/exec"
@@ -31,7 +32,7 @@ func buildLlgo() error {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
 		return err
 	}
-	pkg, err := build.Import(gollvmpkgpath, "", build.FindOnly)
+	pkg, err := gobuild.Import(gollvmpkgpath, "", gobuild.FindOnly)
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,7 @@ func buildLlgo() error {
 		return err
 	}
 
-	pkg, err = build.Import(llgopkgpath, "", build.FindOnly)
+	pkg, err = gobuild.Import(llgopkgpath, "", gobuild.FindOnly)
 	if err != nil {
 		return err
 	}
@@ -81,10 +82,11 @@ func buildLlgo() error {
 		}
 		triple = strings.TrimSpace(string(output))
 	}
-	if err = initGOVARS(triple); err != nil {
+	buildctx, err = build.Context(triple)
+	if err != nil {
 		return err
 	}
-	log.Printf("GOARCH = %s, GOOS = %s", GOARCH, GOOS)
+	log.Printf("GOARCH = %s, GOOS = %s", buildctx.GOARCH, buildctx.GOOS)
 	log.Printf("Built %s", llgobin)
 	return nil
 }

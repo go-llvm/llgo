@@ -7,6 +7,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/build"
 	"log"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ var (
 	llvmbindir  string
 
 	triple     string
+	buildctx   *build.Context
 	sharedllvm bool
 )
 

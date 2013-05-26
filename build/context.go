@@ -2,20 +2,34 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-package main
+package build
 
 import (
+    "go/build"
 	"errors"
 	"regexp"
 	"strings"
 )
 
-var (
-	GOARCH, GOOS string
-)
+// Context returns a new go/build.Context with GOOS and GOARCH
+// configured from the given triple.
+func Context(triple string) (*build.Context, error) {
+	goos, goarch, err := parseTriple(triple)
+	if err != nil {
+		return nil, err
+	}
+	ctx := build.Default
+	ctx.GOOS = goos
+	ctx.GOARCH = goarch
+    ctx.BuildTags = append(ctx.BuildTags, "llgo")
+	return &ctx, nil
+}
 
-// initGOVARS initilizes GOARCH and GOOS from the given triple.
-func initGOVARS(triple string) error {
+func parseTriple(triple string) (goos string, goarch string, err error) {
+	if strings.ToLower(triple) == "pnacl" {
+		return "nacl", "le32", nil
+	}
+
 	type REs struct{ re, out string }
 	// reference: http://llvm.org/docs/doxygen/html/Triple_8cpp_source.html
 	goarchREs := []REs{
@@ -42,22 +56,21 @@ func initGOVARS(triple string) error {
 	s := strings.Split(triple, "-")
 	switch l := len(s); l {
 	default:
-		return errors.New("triple should be made up of 2, 3, or 4 parts.")
+		return "", "", errors.New("triple should be made up of 2, 3, or 4 parts.")
 	case 2, 3: // ARCHITECTURE-(VENDOR-)OPERATING_SYSTEM
-		GOARCH = s[0]
-		GOOS = s[l-1]
+		goarch = s[0]
+		goos = s[l-1]
 	case 4: // ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
-		GOARCH = s[0]
-		GOOS = s[2]
+		goarch = s[0]
+		goos = s[2]
 	}
-	GOARCH = match(goarchREs, GOARCH)
-	GOOS = match(goosREs, GOOS)
-
-	if GOARCH == "" {
-		return errors.New("unknown architecture in triple")
+	goarch = match(goarchREs, goarch)
+	if goarch == "" {
+		return "", "", errors.New("unknown architecture in triple")
 	}
-	if GOOS == "" {
-		return errors.New("unknown OS in triple")
+	goos = match(goosREs, goos)
+	if goos == "" {
+		return "", "", errors.New("unknown OS in triple")
 	}
-	return nil
+	return goos, goarch, nil
 }
