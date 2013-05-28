@@ -20,15 +20,21 @@ var (
 	triple        string
 	defaulttriple string
 	pkgroot       string
+	output        string
 	buildctx      *build.Context
 )
 
 func init() {
 	flag.StringVar(&triple, "triple", defaulttriple, "The target triple")
+	flag.StringVar(&output, "o", "", "Output file")
 }
 
 func main() {
 	flag.Parse()
+
+	if triple == "" {
+		log.Fatal("No default triple set")
+	}
 
 	var err error
 	buildctx, err = llgobuild.Context(triple)
@@ -45,13 +51,8 @@ func main() {
 	}
 	pkgroot = filepath.Join(gopath, "pkg", "llgo", triple)
 
-    var packages []*build.Package
-	for _, pkgpath := range flag.Args() {
-		log.Println(pkgpath)
-		pkg, err := buildPackage(pkgpath)
-		if err != nil {
-			log.Fatal(err)
-		}
-        packages = append(packages, pkg)
+	err = buildPackages(flag.Args())
+	if err != nil {
+		log.Fatal(err)
 	}
 }

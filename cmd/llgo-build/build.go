@@ -6,10 +6,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/axw/llgo/build"
-	gobuild "go/build"
+	llgobuild "github.com/axw/llgo/build"
+	"go/build"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -28,7 +29,7 @@ func (r *renamedFileInfo) Name() string {
 	return r.name
 }
 
-func getPackage(pkgpath string) (*gobuild.Package, error) {
+func getPackage(pkgpath string) (*build.Package, error) {
 	// "runtime" is special: it's mostly written from scratch,
 	// so we don't both with the overlay.
 	if pkgpath == "runtime" {
@@ -42,7 +43,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 	// which we'll use in ReadDir below.
 	overlayentries := make(map[string]bool)
 	overlaypkgpath := llgoPkgPrefix + pkgpath
-	overlaypkg, err := buildctx.Import(overlaypkgpath, "", gobuild.FindOnly)
+	overlaypkg, err := buildctx.Import(overlaypkgpath, "", build.FindOnly)
 	if err != nil {
 		overlaypkg = nil
 	}
@@ -102,7 +103,7 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 				var err error
 				r, err = os.Open(path)
 				if err == nil {
-					r = build.NewLLVMIRReader(r)
+					r = llgobuild.NewLLVMIRReader(r)
 				}
 				return r, err
 			}
@@ -146,34 +147,65 @@ func getPackage(pkgpath string) (*gobuild.Package, error) {
 	return pkg, nil
 }
 
-func buildPackage(pkgpath string) (*gobuild.Package, error) {
-	pkg, err := getPackage(pkgpath)
-	if err != nil {
-		return nil, err
+func buildPackages(pkgpaths []string) error {
+	if len(pkgpaths) > 0 && strings.HasSuffix(pkgpaths[0], ".go") {
+		pkg, err := goFilesPackage(pkgpaths)
+		if err != nil {
+			return err
+		}
+		output := output
+		if output == "" && pkg.IsCommand() {
+			first := pkg.GoFiles[0]
+			output = first[:len(first)-len(".go")]
+		}
+		for i, filename := range pkg.GoFiles {
+			pkg.GoFiles[i] = filepath.Join(pkg.Dir, filename)
+		}
+		log.Printf("building %s\n", pkg.Name)
+		return buildPackage(pkg, output)
 	}
 
-	var outfile string
-	dir, file := path.Split(pkgpath)
+	for _, pkgpath := range pkgpaths {
+		log.Printf("building %s\n", pkgpath)
+		pkg, err := getPackage(pkgpath)
+		if err != nil {
+			return err
+		}
+		err = buildPackage(pkg, output)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildPackage(pkg *build.Package, output string) error {
+	args := []string{"-c", "-triple", triple}
+	dir, file := path.Split(pkg.ImportPath)
 	if pkg.IsCommand() {
-		pkgpath = "main"
-		outfile = file + ".bc"
+		if output == "" {
+			output = file + ".bc"
+		}
 	} else {
 		dir = filepath.Join(pkgroot, dir)
 		err := os.MkdirAll(dir, os.FileMode(0755))
 		if err != nil {
-			return nil, err
+			return err
 		}
-		outfile = path.Join(dir, file+".bc")
+		if output == "" {
+			output = path.Join(dir, file+".bc")
+		}
+		args = append(args, "-importpath", pkg.ImportPath)
 	}
 
-	args := []string{"-c", "-triple", triple, "-importpath", pkgpath, "-o", outfile}
+	args = append(args, "-o", output)
 	args = append(args, pkg.GoFiles...)
 	cmd := exec.Command("llgo", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Compile and link .c files in.
@@ -188,30 +220,29 @@ func buildPackage(pkgpath string) (*gobuild.Package, error) {
 		err = cmd.Run()
 		if err != nil {
 			os.Remove(bcfile)
-			return nil, err
+			return err
 		}
-		cmd = exec.Command(llvmlink, "-o", outfile, outfile, bcfile)
+		cmd = exec.Command(llvmlink, "-o", output, output, bcfile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 		os.Remove(bcfile)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	// Link .ll files in.
 	if len(pkg.SFiles) > 0 {
-		args = []string{"-o", outfile, outfile}
+		args = []string{"-o", output, output}
 		args = append(args, pkg.SFiles...)
 		cmd := exec.Command(llvmlink, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	return pkg, nil
+	return nil
 }
