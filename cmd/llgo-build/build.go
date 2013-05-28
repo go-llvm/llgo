@@ -156,7 +156,7 @@ func buildPackages(pkgpaths []string) error {
 		output := output
 		if output == "" && pkg.IsCommand() {
 			first := pkg.GoFiles[0]
-			output = first[:len(first)-len(".go")]
+			output = first[:len(first)-len(".go")] + ".bc"
 		}
 		for i, filename := range pkg.GoFiles {
 			pkg.GoFiles[i] = filepath.Join(pkg.Dir, filename)
@@ -243,6 +243,11 @@ func buildPackage(pkg *build.Package, output string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// If it's a command, link in the dependencies.
+	if pkg.IsCommand() {
+		linkdeps(pkg, output)
 	}
 	return nil
 }
