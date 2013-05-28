@@ -21,6 +21,18 @@ var llgobuildbin string
 func buildLlgoTools() error {
 	log.Println("Building llgo-build")
 
+	pkg, err := build.Import(llgoBuildPath, "", build.FindOnly)
+	if err != nil {
+		return err
+	}
+	llgobuildbin = path.Join(pkg.BinDir, "llgo-build")
+	if _, err = os.Stat(llgobuildbin); err == nil {
+		err = os.Remove(llgobuildbin)
+		if err != nil {
+			return fmt.Errorf("Failed to remove llgo-build: %s", err)
+		}
+	}
+
 	// We set default values in the llgo-build binary.
 	ldflags := []string{
 		fmt.Sprintf("-X main.llgobin %q", llgobin),
@@ -34,11 +46,6 @@ func buildLlgoTools() error {
 		return err
 	}
 
-	pkg, err := build.Import(llgoBuildPath, "", build.FindOnly)
-	if err != nil {
-		return err
-	}
-	llgobuildbin = path.Join(pkg.BinDir, "llgo-build")
 	log.Printf("Built %s", llgobuildbin)
 	return nil
 }
