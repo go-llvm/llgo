@@ -29,11 +29,12 @@ func (r *renamedFileInfo) Name() string {
 	return r.name
 }
 
-func getPackage(pkgpath string) (*build.Package, error) {
+func getPackage(pkgpath string) (pkg *build.Package, err error) {
 	// "runtime" is special: it's mostly written from scratch,
 	// so we don't both with the overlay.
 	if pkgpath == "runtime" {
 		pkgpath = llgoPkgPrefix + "runtime"
+		defer func() {pkg.ImportPath = "runtime"}()
 	}
 
 	// Make a copy, as we'll be modifying ReadDir/OpenFile.
@@ -111,7 +112,7 @@ func getPackage(pkgpath string) (*build.Package, error) {
 		return os.Open(path)
 	}
 
-	pkg, err := buildctx.Import(pkgpath, "", 0)
+	pkg, err = buildctx.Import(pkgpath, "", 0)
 	if err != nil {
 		return nil, err
 	} else {
