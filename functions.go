@@ -10,6 +10,7 @@ import (
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/token"
+	"sort"
 )
 
 type function struct {
@@ -177,6 +178,8 @@ func (c *compiler) methods(t types.Type) *methodset {
 		curr = next
 	}
 
+	sort.Sort(objectsByName(methods.ptr))
+	sort.Sort(objectsByName(methods.nonptr))
 	return methods
 }
 
@@ -184,8 +187,8 @@ type synthFunc struct {
 	// Func is the original funcion object
 	// from which this object was derived.
 	*types.Func
-	pkg  *types.Package
-	typ  types.Type
+	pkg *types.Package
+	typ types.Type
 }
 
 func (f *synthFunc) Pkg() *types.Package {

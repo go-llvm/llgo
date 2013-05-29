@@ -9,6 +9,7 @@ import (
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"go/ast"
+	"sort"
 )
 
 // XXX the below function is a clone of the one from llgo/types.
@@ -125,6 +126,36 @@ func fieldIndex(s *types.Struct, name string) int {
 	return -1
 }
 
+type objectsByName []types.Object
+
+func (o objectsByName) Len() int {
+	return len(o)
+}
+
+func (o objectsByName) Less(i, j int) bool {
+	return o[i].Name() < o[j].Name()
+}
+
+func (o objectsByName) Swap(i, j int) {
+	o[i], o[j] = o[j], o[i]
+}
+
+// TODO interfaces' methods should probably
+// out of go/types already sorted. If not,
+// cache sortedMethods.
+func sortedMethods(iface *types.Interface) []*types.Func {
+	objects := make([]types.Object, iface.NumMethods())
+	for i := 0; i < len(objects); i++ {
+		objects[i] = iface.Method(i)
+	}
+	sort.Sort(objectsByName(objects))
+	methods := make([]*types.Func, len(objects))
+	for i, o := range objects {
+		methods[i] = o.(*types.Func)
+	}
+	return methods
+}
+
 type TypeStringer struct {
 	pkgmap map[*types.TypeName]*types.Package
 }
@@ -224,8 +255,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Interface:
 		buf.WriteString("interface{")
-		for i := 0; i < t.NumMethods(); i++ {
-			m := t.Method(i)
+		for i, m := range sortedMethods(t) {
 			if i > 0 {
 				buf.WriteString("; ")
 			}

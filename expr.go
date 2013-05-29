@@ -11,6 +11,7 @@ import (
 	"go/ast"
 	"go/token"
 	"reflect"
+	"sort"
 )
 
 func (c *compiler) isNilIdent(x ast.Expr) bool {
@@ -413,22 +414,14 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	name := expr.Sel.Name
 	if iface, ok := lhs.Type().Underlying().(*types.Interface); ok {
-		// FIXME
-		//i := sort.Search(len(iface.Methods), func(i int) bool {
-		//	return iface.Methods[i].Name >= name
-		//})
-		var i int
-		var m *types.Func
-		for ; i < iface.NumMethods(); i++ {
-			m = iface.Method(i)
-			if m.Name() == name {
-				break
-			}
-		}
+		methods := sortedMethods(iface)
+		i := sort.Search(len(methods), func(i int) bool {
+			return methods[i].Name() >= name
+		})
 		structValue := lhs.LLVMValue()
 		receiver := c.builder.CreateExtractValue(structValue, 1, "")
 		f := c.builder.CreateExtractValue(structValue, i+2, "")
-		ftype := m.Type()
+		ftype := methods[i].Type()
 		types := []llvm.Type{f.Type(), receiver.Type()}
 		llvmStructType := llvm.StructType(types, false)
 		structValue = llvm.Undef(llvmStructType)

@@ -360,11 +360,7 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 		elements := make([]llvm.Type, 2+i.NumMethods())
 		elements[0] = typptr_type // type
 		elements[1] = valptr_type // value
-		for n := 0; n < i.NumMethods(); n++ {
-			// Add an opaque pointer parameter to the function for the
-			// struct pointer. Take a copy of the Type here, so we don't
-			// change how the Interface's TypeString is determined.
-			m := i.Method(n)
+		for n, m := range sortedMethods(i) {
 			fntype := m.Type()
 			elements[n+2] = tm.ToLLVM(fntype).StructElementTypes()[0]
 		}
@@ -702,9 +698,7 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
 
 	imethods := make([]llvm.Value, i.NumMethods())
-	for index := range imethods {
-		method := i.Method(index)
-
+	for index, method := range sortedMethods(i) {
 		//name, pkgPath, type
 		imethod := llvm.ConstNull(tm.runtimeImethod)
 		name := tm.globalStringPtr(method.Name())

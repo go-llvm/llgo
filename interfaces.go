@@ -74,8 +74,7 @@ func (v *LLVMValue) convertV2I(iface *types.Interface) *LLVMValue {
 
 	if srcname != nil {
 		// Look up the method by name.
-		for i := 0; i < iface.NumMethods(); i++ {
-			m := iface.Method(i)
+		for i, m := range sortedMethods(iface) {
 			method := v.compiler.methods(srcname).lookup(m.Name(), isptr)
 			methodident := v.compiler.objectdata[method].Ident
 			llvm_value := v.compiler.Resolve(methodident).LLVMValue()
@@ -105,17 +104,15 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, succe
 
 	// TODO handle dynamic interface conversion (non-subset).
 	srciface := src_typ.(*types.Interface)
-	for i := 0; i < iface.NumMethods(); i++ {
-		m := iface.Method(i)
-
-		// FIXME sort methods somewhere, make loop linear.
+	for i, m := range sortedMethods(iface) {
+		// FIXME make loop linear.
 		var mi int
-		for ; mi < srciface.NumMethods(); mi++ {
-			if srciface.Method(i).Name() == m.Name() {
+		for _, m2 := range sortedMethods(srciface) {
+			if m2.Name() == m.Name() {
 				break
 			}
+			mi++
 		}
-
 		if mi >= srciface.NumMethods() {
 			goto check_dynamic
 		} else {
