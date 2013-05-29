@@ -181,8 +181,10 @@ func (c *compiler) methods(t types.Type) *methodset {
 }
 
 type synthFunc struct {
+	// Func is the original funcion object
+	// from which this object was derived.
+	*types.Func
 	pkg  *types.Package
-	name string
 	typ  types.Type
 }
 
@@ -190,12 +192,8 @@ func (f *synthFunc) Pkg() *types.Package {
 	return f.pkg
 }
 
-func (f *synthFunc) Scope() *types.Scope {
+func (f *synthFunc) Outer() *types.Scope {
 	return nil
-}
-
-func (f *synthFunc) Name() string {
-	return f.name
 }
 
 func (f *synthFunc) Type() types.Type {
@@ -219,7 +217,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex in
 	recvvar := types.NewVar(pkg, "", recv)
 	sig := m.Type().(*types.Signature)
 	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
-	f := &synthFunc{pkg: pkg, name: m.Name(), typ: sig}
+	f := &synthFunc{Func: m, pkg: pkg, typ: sig}
 	ident := ast.NewIdent(f.Name())
 
 	var isptr bool
@@ -291,7 +289,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	recvvar := types.NewVar(pkg, "", recv)
 	sig := m.Type().(*types.Signature)
 	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
-	f := &synthFunc{pkg: pkg, name: m.Name(), typ: sig}
+	f := &synthFunc{Func: m, pkg: pkg, typ: sig}
 	ident := ast.NewIdent(f.Name())
 
 	var isptr bool
