@@ -147,14 +147,13 @@ func (c *compiler) methods(t types.Type) *methodset {
 
 			switch typ := typ.(type) {
 			case *types.Interface:
-				for i := 0; i < typ.NumMethods(); i++ {
-					m := typ.Method(i)
+				for i, m := range sortedMethods(typ) {
 					if methods.lookup(m.Name(), true) == nil {
 						indices := candidate.Indices[:]
 						indices = append(indices, -1) // always load
-						f := c.promoteInterfaceMethod(typ, i, t, indices)
+						f := c.promoteInterfaceMethod(typ, m, i, t, indices)
 						methods.nonptr = append(methods.nonptr, f)
-						f = c.promoteInterfaceMethod(typ, i, types.NewPointer(t), indices)
+						f = c.promoteInterfaceMethod(typ, m, i, types.NewPointer(t), indices)
 						methods.ptr = append(methods.ptr, f)
 					}
 				}
@@ -211,8 +210,7 @@ func (*synthFunc) Pos() token.Pos {
 // which has embedded the interface.
 //
 // TODO consolidate this and promoteMethod.
-func (c *compiler) promoteInterfaceMethod(iface *types.Interface, methodIndex int, recv types.Type, indices []int) types.Object {
-	m := iface.Method(methodIndex)
+func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func, methodIndex int, recv types.Type, indices []int) types.Object {
 	var pkg *types.Package
 	if recv, ok := recv.(*types.Named); ok {
 		pkg = c.objectdata[recv.Obj()].Package
