@@ -120,10 +120,11 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 		c.builder.CreateRetVoid()
 	} else {
 		values := make([]llvm.Value, 0, f.results.Len())
-		f.results.ForEach(func(v *types.Var) {
+		for i := 0; i < f.results.Len(); i++ {
+			v := f.results.At(i)
 			value := c.objectdata[v].Value.LLVMValue()
 			values = append(values, value)
-		})
+		}
 		if len(values) == 1 {
 			c.builder.CreateRet(values[0])
 		} else {

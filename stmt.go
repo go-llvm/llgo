@@ -920,8 +920,8 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		}
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
-			obj := c.objects[assignIdent]
 			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
+				obj := c.implicitobjects[caseClause]
 				switch utyp := typ.Underlying().(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
@@ -931,6 +931,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					c.objectdata[obj].Value = iface.loadI2V(typ)
 				}
 			} else {
+				obj := c.objects[assignIdent]
 				c.objectdata[obj].Value = iface
 			}
 		}

@@ -48,9 +48,10 @@ type compiler struct {
 	pkg            *types.Package
 	fileset        *token.FileSet
 
-	objects    map[*ast.Ident]types.Object
-	objectdata map[types.Object]*ObjectData
-	methodsets map[types.Type]*methodset
+	implicitobjects map[ast.Node]types.Object
+	objects         map[*ast.Ident]types.Object
+	objectdata      map[types.Object]*ObjectData
+	methodsets      map[types.Type]*methodset
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -233,6 +234,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.varinitfuncs = nil
 
 	// Type-check, and store object data.
+	compiler.implicitobjects = make(map[ast.Node]types.Object)
 	compiler.objects = make(map[*ast.Ident]types.Object)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
 	compiler.methodsets = make(map[types.Type]*methodset)

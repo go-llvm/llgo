@@ -16,7 +16,7 @@ import (
 
 func (c *compiler) isNilIdent(x ast.Expr) bool {
 	ident, ok := x.(*ast.Ident)
-	return ok && c.objects[ident] == types.Universe.Lookup("nil")
+	return ok && c.objects[ident] == types.Universe.Lookup(nil, "nil")
 }
 
 // Binary logical operators are handled specially, outside of the Value

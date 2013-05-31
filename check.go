@@ -36,6 +36,9 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 				objectdata[obj] = data
 			}
 		},
+		ImplicitObj: func(node ast.Node, obj types.Object) {
+			c.implicitobjects[node] = obj
+		},
 	}
 	pkg, err := ctx.Check(pkgpath, fset, files...)
 	if err != nil {
@@ -76,7 +79,8 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 }
 
 func assocObjectPackages(pkg *types.Package, objectdata map[types.Object]*ObjectData) {
-	for _, obj := range pkg.Scope().Entries {
+	for i := 0; i < pkg.Scope().NumEntries(); i++ {
+		obj := pkg.Scope().At(i)
 		if data, ok := objectdata[obj]; ok {
 			data.Package = pkg
 		} else {

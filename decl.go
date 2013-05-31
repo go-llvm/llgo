@@ -156,7 +156,8 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	hasdefer := hasDefer(funcstate, body)
 
 	// Allocate space on the stack for named results.
-	results.ForEach(func(v *types.Var) {
+	for i := 0; i < results.Len(); i++ {
+		v := results.At(i)
 		name := v.Name()
 		allocstack := name != ""
 		if !allocstack && hasdefer {
@@ -173,7 +174,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 			stackvar.stack = f
 			c.objectdata[v].Value = stackvar
 		}
-	})
+	}
 
 	// Create the function body.
 	if hasdefer {
@@ -218,10 +219,11 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	if recv := ftyp.Recv(); recv != nil {
 		paramVars = append(paramVars, recv)
 	}
-	if ftyp.Params != nil {
-		ftyp.Params().ForEach(func(p *types.Var) {
+	if ftyp.Params() != nil {
+		for i := 0; i < ftyp.Params().Len(); i++ {
+			p := ftyp.Params().At(i)
 			paramVars = append(paramVars, p)
-		})
+		}
 	}
 	paramVarsTuple := types.NewTuple(paramVars...)
 	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body, ftyp.IsVariadic())
@@ -346,7 +348,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 
 	// If the ValueSpec exists at the package level, create globals.
 	if obj, ok := c.objects[valspec.Names[0]]; ok {
-		if c.pkg.Scope().Lookup(valspec.Names[0].Name) == obj {
+		if c.pkg.Scope().Lookup(nil, valspec.Names[0].Name) == obj {
 			c.createGlobals(valspec.Names, valspec.Values, pkgpath(c.pkg))
 			return
 		}

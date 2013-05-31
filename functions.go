@@ -119,10 +119,10 @@ func (c *compiler) methods(t types.Type) *methodset {
 			}
 
 			if named, ok := typ.(*types.Named); ok {
-				named.ForEachMethod(func(m *types.Func) {
-					m = c.methodfunc(m)
+				for i := 0; i < named.NumMethods(); i++ {
+					m := c.methodfunc(named.Method(i))
 					if methods.lookup(m.Name(), true) != nil {
-						return
+						continue
 					}
 					sig := m.Type().(*types.Signature)
 					indices := candidate.Indices[:]
@@ -141,7 +141,7 @@ func (c *compiler) methods(t types.Type) *methodset {
 						f := c.promoteMethod(m, types.NewPointer(t), indices)
 						methods.ptr = append(methods.ptr, f)
 					}
-				})
+				}
 				typ = named.Underlying()
 			}
 

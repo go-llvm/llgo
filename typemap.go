@@ -102,7 +102,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 		panic(err) // FIXME return err
 	}
 	reflectLLVMType := func(name string) llvm.Type {
-		obj := pkg.Scope().Lookup(name)
+		obj := pkg.Scope().Lookup(nil, name)
 		if obj == nil {
 			panic(fmt.Errorf("Failed to find type: %s", name))
 		}
