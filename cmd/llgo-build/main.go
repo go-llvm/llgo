@@ -19,14 +19,19 @@ var (
 	llgobin       string
 	triple        string
 	defaulttriple string
+	clang         string
+	defaultclang  string
 	pkgroot       string
 	output        string
+	printcommands bool
 	buildctx      *build.Context
 )
 
 func init() {
+	flag.StringVar(&clang, "clang", defaultclang, "The path to the clang compiler")
 	flag.StringVar(&triple, "triple", defaulttriple, "The target triple")
 	flag.StringVar(&output, "o", "", "Output file")
+	flag.BoolVar(&printcommands, "x", false, "Print the commands")
 }
 
 func main() {
@@ -34,6 +39,10 @@ func main() {
 
 	if triple == "" {
 		log.Fatal("No default triple set")
+	}
+
+	if clang == "" {
+		clang = "clang"
 	}
 
 	var err error

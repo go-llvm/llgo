@@ -36,6 +36,12 @@ func buildLlgo() error {
 	if err != nil {
 		return err
 	}
+	if alwaysbuild {
+		if _, err := os.Stat(pkg.PkgObj); err == nil {
+			log.Println("- Rebuilding gollvm")
+			os.Remove(pkg.PkgObj)
+		}
+	}
 
 	cgoCflags := fmt.Sprintf("%s -I %s/../include", llvmcflags, pkg.Dir)
 	cgoLdflags := fmt.Sprintf("-Wl,-L%s", llvmlibdir)

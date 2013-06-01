@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	pepper      string
 	llvmconfig  string
 	llvmversion string
 	llvmcflags  string
@@ -24,9 +25,10 @@ var (
 	llvmldflags string
 	llvmbindir  string
 
-	triple     string
-	buildctx   *build.Context
-	sharedllvm bool
+	triple      string
+	buildctx    *build.Context
+	sharedllvm  bool
+	alwaysbuild bool
 )
 
 func errorf(format string, args ...interface{}) {
@@ -35,9 +37,14 @@ func errorf(format string, args ...interface{}) {
 }
 
 func init() {
+	flag.StringVar(&pepper, "pepper", "", "Path to the Native Client Pepper version to target (e.g. nacl_sdk/pepper_canary)")
 	flag.StringVar(&llvmconfig, "llvm-config", "llvm-config", "Path to the llvm-config executable")
 	flag.StringVar(&triple, "triple", "", "The target triple")
 	flag.BoolVar(&sharedllvm, "shared", false, "If possible, dynamically link against LLVM")
+
+	// We default this to true, as the eventually intended usage
+	// of llgo-dist is for building binary distributions.
+	flag.BoolVar(&alwaysbuild, "a", true, "Force rebuilding packages that are already up-to-date")
 }
 
 func llvmconfigValue(option string) (string, error) {
@@ -164,13 +171,18 @@ func checkLlvmLibs() error {
 func main() {
 	flag.Parse()
 
-	actions := []func() error{
+	var actions []func() error
+	if pepper != "" {
+		actions = append(actions, initPepper)
+	}
+	actions = append(actions,
 		initLlvm,
 		checkLlvmLibs,
 		buildLlgo,
 		buildLlgoTools,
 		buildRuntime,
-	}
+	)
+
 	for _, action := range actions {
 		err := action()
 		if err != nil {

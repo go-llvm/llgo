@@ -39,6 +39,11 @@ func buildLlgoTools() error {
 		fmt.Sprintf("-X main.llvmbindir %q", llvmbindir),
 		fmt.Sprintf("-X main.defaulttriple %q", triple),
 	}
+	if triple == "pnacl" {
+		pnaclClangFlag := fmt.Sprintf("-X main.defaultclang %q", pnaclClang)
+		ldflags = append(ldflags, pnaclClangFlag)
+	}
+
 	args := []string{"install", "-ldflags", strings.Join(ldflags, " "), llgoBuildPath}
 	output, err := exec.Command("go", args...).CombinedOutput()
 	if err != nil {

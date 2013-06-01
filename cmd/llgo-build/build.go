@@ -29,12 +29,20 @@ func (r *renamedFileInfo) Name() string {
 	return r.name
 }
 
+func runCmd(cmd *exec.Cmd) error {
+	if printcommands {
+		s := fmt.Sprint(cmd.Args)
+		log.Println(s[1 : len(s)-1])
+	}
+	return cmd.Run()
+}
+
 func getPackage(pkgpath string) (pkg *build.Package, err error) {
 	// "runtime" is special: it's mostly written from scratch,
 	// so we don't both with the overlay.
 	if pkgpath == "runtime" {
 		pkgpath = llgoPkgPrefix + "runtime"
-		defer func() {pkg.ImportPath = "runtime"}()
+		defer func() { pkg.ImportPath = "runtime" }()
 	}
 
 	// Make a copy, as we'll be modifying ReadDir/OpenFile.
@@ -204,21 +212,24 @@ func buildPackage(pkg *build.Package, output string) error {
 	cmd := exec.Command("llgo", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
+	err := runCmd(cmd)
 	if err != nil {
 		return err
 	}
 
 	// Compile and link .c files in.
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
-	clang := "clang" // TODO make configurable
 	for _, cfile := range pkg.CFiles {
 		bcfile := cfile + ".bc"
-		args = []string{"-c", "-target", triple, "-emit-llvm", "-o", bcfile, cfile}
+		args = []string{"-c", "-o", bcfile}
+		if triple != "pnacl" {
+			args = append(args, "-target", triple, "-emit-llvm")
+		}
+		args = append(args, cfile)
 		cmd := exec.Command(clang, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		err = runCmd(cmd)
 		if err != nil {
 			os.Remove(bcfile)
 			return err
@@ -226,7 +237,7 @@ func buildPackage(pkg *build.Package, output string) error {
 		cmd = exec.Command(llvmlink, "-o", output, output, bcfile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		err = runCmd(cmd)
 		os.Remove(bcfile)
 		if err != nil {
 			return err
@@ -240,7 +251,7 @@ func buildPackage(pkg *build.Package, output string) error {
 		cmd := exec.Command(llvmlink, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		err = runCmd(cmd)
 		if err != nil {
 			return err
 		}
