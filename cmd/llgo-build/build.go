@@ -217,6 +217,11 @@ func buildPackage(pkg *build.Package, output string) error {
 		return err
 	}
 
+	var cgoCFLAGS []string
+	if len(pkg.CFiles) > 0 {
+		cgoCFLAGS = strings.Fields(os.Getenv("CGO_CFLAGS"))
+	}
+
 	// Compile and link .c files in.
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
 	for _, cfile := range pkg.CFiles {
@@ -225,6 +230,7 @@ func buildPackage(pkg *build.Package, output string) error {
 		if triple != "pnacl" {
 			args = append(args, "-target", triple, "-emit-llvm")
 		}
+		args = append(args, cgoCFLAGS...)
 		args = append(args, cfile)
 		cmd := exec.Command(clang, args...)
 		cmd.Stdout = os.Stdout

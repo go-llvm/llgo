@@ -5,8 +5,8 @@
 package build
 
 import (
-    "go/build"
 	"errors"
+	"go/build"
 	"regexp"
 	"strings"
 )
@@ -21,7 +21,10 @@ func Context(triple string) (*build.Context, error) {
 	ctx := build.Default
 	ctx.GOOS = goos
 	ctx.GOARCH = goarch
-    ctx.BuildTags = append(ctx.BuildTags, "llgo")
+	ctx.BuildTags = append(ctx.BuildTags, "llgo")
+	if triple == "pnacl" {
+		ctx.BuildTags = append(ctx.BuildTags, "pnacl")
+	}
 	return &ctx, nil
 }
 

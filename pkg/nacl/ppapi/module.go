@@ -79,15 +79,9 @@ func (m *Module) PostMessage(value interface{}) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-var instanceInterface = pppInstance1_1{
-	instanceDidCreate,
-	instanceDidDestroy,
-	instanceDidChangeView,
-	instanceDidChangeFocus,
-	instanceHandleDocumentLoad,
-}
-
+// #llgo name: ppapi_instanceDidCreate
 func instanceDidCreate(i PP_Instance, argc uint32, argn_, argv_ *cstring) ppBool {
+	println("instanceDidCreate")
 	inst, err := module.instanceCreator.CreateInstance(i)
 	if err != nil {
 		return ppFalse
@@ -101,6 +95,7 @@ func instanceDidCreate(i PP_Instance, argc uint32, argn_, argv_ *cstring) ppBool
 		args[name.String()] = value.String()
 		argn += unsafe.Sizeof(name)
 		argv += unsafe.Sizeof(value)
+		println(name.String(), "=", value.String())
 	}
 	err = inst.DidCreate(args)
 	if err != nil {
@@ -110,22 +105,26 @@ func instanceDidCreate(i PP_Instance, argc uint32, argn_, argv_ *cstring) ppBool
 	return ppTrue
 }
 
+// #llgo name: ppapi_instanceDidDestroy
 func instanceDidDestroy(i PP_Instance) {
 	delete(module.instances, i)
 }
 
+// #llgo name: ppapi_instanceDidChangeView
 func instanceDidChangeView(i PP_Instance, view View) {
 	if inst, ok := module.instances[i]; ok {
 		inst.DidChangeView(view)
 	}
 }
 
+// #llgo name: ppapi_instanceDidChangeFocus
 func instanceDidChangeFocus(i PP_Instance, hasFocus ppBool) {
 	if inst, ok := module.instances[i]; ok {
 		inst.DidChangeFocus(hasFocus.toBool())
 	}
 }
 
+// #llgo name: ppapi_instanceHandleDocumentLoad
 func instanceHandleDocumentLoad(i PP_Instance, urlLoader Resource) ppBool {
 	// Ignored
 	return ppFalse

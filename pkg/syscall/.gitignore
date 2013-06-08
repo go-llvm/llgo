@@ -1,3 +1,0 @@
-# Ignore all .go files, as they'll be copied from the standard syscall package.
-*.go
-

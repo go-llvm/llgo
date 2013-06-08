@@ -23,4 +23,3 @@ type ppbView1_0 struct {
 	isPageVisible func(View) ppBool
 	getClipRect   func(View, *Rect) ppBool
 }
-

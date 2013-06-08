@@ -46,7 +46,5 @@ declare double @math.floor(double)
 declare double @math.sqrt(double)
 @math.Sqrt = alias double (double)* @math.sqrt
 
-define double @math.Abs(double) {
-        %2 = call double (double)* @llvm.fabs.f64(double %0)
-            ret double %2
-}
+declare double @math.abs(double)
+@math.Abs = alias double (double)* @math.abs

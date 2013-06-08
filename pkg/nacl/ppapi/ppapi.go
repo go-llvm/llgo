@@ -79,20 +79,6 @@ func initializeModule(module_ int32, getBrowserInterface ppbGetInterface) int32 
 	return PP_OK
 }
 
-// #llgo name: PPP_ShutdownModule
-func shutdownModule() {
-	// We must define this to link with ppapi.
-}
-
-// #llgo name: PPP_GetInterface
-func getInterface(name cstring) unsafe.Pointer {
-	switch name.String() {
-	case "PPP_Instance;1.1":
-		return unsafe.Pointer(&instanceInterface)
-	}
-	return nil
-}
-
 /*
 // TODO store the ppbGetInterface from initializeModule,
 // and load these interfaces on demand using sync.Once

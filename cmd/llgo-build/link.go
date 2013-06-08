@@ -52,9 +52,22 @@ func linkdeps(pkg *build.Package, output string) error {
 		cmd := exec.Command(llvmlink, "-o", output, output, bcfile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err = cmd.Run(); err != nil {
+		if err = runCmd(cmd); err != nil {
 			return err
 		}
+	}
+
+	// Finally, link with clang++ to get exception handling.
+	clangxx := clang + "++"
+    args := []string{"-o", output, output}
+    if triple == "pnacl" {
+        args = append(args, "-l", "ppapi")
+    }
+	cmd := exec.Command(clangxx, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err = runCmd(cmd); err != nil {
+		return err
 	}
 
 	return nil
