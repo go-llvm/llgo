@@ -7,7 +7,7 @@ package llgo
 import (
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
+	"github.com/greggoryhz/gollvm/llvm"
 	"go/ast"
 )
 

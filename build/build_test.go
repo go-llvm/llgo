@@ -2,7 +2,7 @@ package build_test
 
 import (
 	"bytes"
-	"github.com/axw/llgo/build"
+	"github.com/greggoryhz/llgo/build"
 	"io/ioutil"
 	"strings"
 	"testing"

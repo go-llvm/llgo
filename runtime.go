@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
+	"github.com/greggoryhz/gollvm/llvm"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -48,7 +48,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		// Parse the runtime package, since we may need to refer to
 		// its types. Can't be cached, because type-checking can't
 		// be done twice on the AST.
-		buildpkg, err := build.Import("github.com/axw/llgo/pkg/runtime", "", 0)
+		buildpkg, err := build.Import("github.com/greggoryhz/llgo/pkg/runtime", "", 0)
 		if err != nil {
 			panic(err)
 		}

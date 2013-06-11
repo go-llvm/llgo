@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"github.com/axw/gollvm/llvm"
+	"github.com/greggoryhz/gollvm/llvm"
 	"go/ast"
 )
 

@@ -1,4 +1,4 @@
-[![Build Status](https://drone.io/github.com/axw/llgo/status.png)](https://drone.io/github.com/axw/llgo/latest)
+[![Build Status](https://drone.io/github.com/greggoryhz/llgo/status.png)](https://drone.io/github.com/greggoryhz/llgo/latest)
 # llgo
 
 llgo is a compiler for [Go](http://golang.org), written in Go, and using the
@@ -15,7 +15,7 @@ couple of environment variables first:
 
     export CGO_CFLAGS="`llvm-config --cflags`"
     export CGO_LDFLAGS="`llvm-config --ldflags` -Wl,-L`llvm-config --libdir` -lLLVM-`llvm-config --version`"
-    go get github.com/axw/llgo/llgo
+    go get github.com/greggoryhz/llgo/llgo
 
 You must have LLVM 3.2 or better in your path. You can also use latest development
 version of LLVM, and build it from [LLVM SVN repository](http://llvm.org/docs/GettingStarted.html#checkout),
@@ -40,8 +40,8 @@ line argument before ```<file.go>```.
 First make sure you have LLVM 3.2+ installed, then re-install gollvm package with
 the tag llvmsvn.
 
-	go clean -i github.com/axw/gollvm/llvm
-	go install -tags llvmsvn github.com/axw/gollvm/llvm
-	go test -i github.com/axw/llgo/llgo
-	go test -v github.com/axw/llgo/llgo
+	go clean -i github.com/greggoryhz/gollvm/llvm
+	go install -tags llvmsvn github.com/greggoryhz/gollvm/llvm
+	go test -i github.com/greggoryhz/llgo/llgo
+	go test -v github.com/greggoryhz/llgo/llgo
 

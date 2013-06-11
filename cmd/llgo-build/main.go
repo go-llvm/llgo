@@ -6,7 +6,7 @@ package main
 
 import (
 	"flag"
-	llgobuild "github.com/axw/llgo/build"
+	llgobuild "github.com/greggoryhz/llgo/build"
 	"go/build"
 	"log"
 	"os"

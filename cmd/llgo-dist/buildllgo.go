@@ -6,7 +6,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/axw/llgo/build"
+	"github.com/greggoryhz/llgo/build"
 	gobuild "go/build"
 	"log"
 	"os"
@@ -15,8 +15,8 @@ import (
 	"strings"
 )
 
-const gollvmpkgpath = "github.com/axw/gollvm/llvm"
-const llgopkgpath = "github.com/axw/llgo/llgo"
+const gollvmpkgpath = "github.com/greggoryhz/gollvm/llvm"
+const llgopkgpath = "github.com/greggoryhz/llgo/llgo"
 
 var (
 	// llgobin is the path to the llgo command.
