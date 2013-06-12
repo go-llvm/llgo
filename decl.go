@@ -231,7 +231,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 	if f.Recv == nil && f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.
 		fnptr := llvm.ConstExtractValue(fn.value, []uint32{0})
-		c.initfuncs = append(c.initfuncs, fnptr)
+		c.state.initfuncs = append(c.state.initfuncs, fnptr)
 	}
 	return fn
 }
@@ -321,7 +321,7 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 		}
 	}
 	c.builder.CreateRetVoid()
-	c.varinitfuncs = append(c.varinitfuncs, fn)
+	c.state.varinitfuncs = append(c.state.varinitfuncs, fn)
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
@@ -430,12 +430,12 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
 	// This is temporary. We'll return errors later, rather than panicking.
 	if c.Logger != nil {
-		c.Logger.Println("Compile declaration:", c.fileset.Position(decl.Pos()))
+		c.Logger.Println("Compile declaration:", c.state.fileset.Position(decl.Pos()))
 	}
 	defer func() {
 		if e := recover(); e != nil {
 			elist := new(scanner.ErrorList)
-			elist.Add(c.fileset.Position(decl.Pos()), fmt.Sprint(e))
+			elist.Add(c.state.fileset.Position(decl.Pos()), fmt.Sprint(e))
 			panic(elist)
 		}
 	}()
@@ -449,5 +449,5 @@ func (c *compiler) VisitDecl(decl ast.Decl) Value {
 	}
 	panic(fmt.Sprintf("Unhandled decl (%s) at %s\n",
 		reflect.TypeOf(decl),
-		c.fileset.Position(decl.Pos())))
+		c.state.fileset.Position(decl.Pos())))
 }
