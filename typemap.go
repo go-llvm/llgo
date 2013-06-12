@@ -269,7 +269,7 @@ func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 		elements := make([]llvm.Type, s.NumFields())
 		for i := range elements {
 			f := s.Field(i)
-			ft := f.Type
+			ft := f.Type()
 			elements[i] = tm.ToLLVM(ft)
 		}
 		typ.StructSetBody(elements, false)
@@ -402,7 +402,7 @@ func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
 		max := int64(1)
 		for i := 0; i < typ.NumFields(); i++ {
 			f := typ.Field(i)
-			a := tm.Alignof(f.Type)
+			a := tm.Alignof(f.Type())
 			if a > max {
 				max = a
 			}
@@ -433,16 +433,16 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 		}
 		return (eltsize + eltpad) * typ.Len()
 	case *types.Struct:
-		if typ.NumFields() == 0 {
+		n := typ.NumFields()
+		if n == 0 {
 			return 0
 		}
-		fields := make([]*types.Field, int(typ.NumFields()))
+		fields := make([]*types.Field, n)
 		for i := range fields {
 			fields[i] = typ.Field(i)
 		}
 		offsets := tm.Offsetsof(fields)
-		n := len(fields)
-		return offsets[n-1] + tm.Sizeof(fields[n-1].Type)
+		return offsets[n-1] + tm.Sizeof(fields[n-1].Type())
 	}
 	return int64(tm.target.PointerSize())
 }
@@ -451,8 +451,8 @@ func (tm *LLVMTypeMap) Offsetsof(fields []*types.Field) []int64 {
 	offsets := make([]int64, len(fields))
 	var offset int64
 	for i, f := range fields {
-		falign := tm.Alignof(f.Type)
-		fsize := tm.Sizeof(f.Type)
+		falign := tm.Alignof(f.Type())
+		fsize := tm.Sizeof(f.Type())
 		if offset%falign != 0 {
 			offset += falign - (offset % falign)
 		}
@@ -515,22 +515,18 @@ func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) 
 func (tm *TypeMap) makeRtype(t types.Type, k reflect.Kind) llvm.Value {
 	// Not sure if there's an easier way to do this, but if you just
 	// use ConstStruct, you end up getting a different llvm.Type.
-	lt := tm.ToLLVM(t)
 	typ := llvm.ConstNull(tm.runtimeType)
 	elementTypes := tm.runtimeType.StructElementTypes()
 
 	// Size.
-	size := llvm.SizeOf(lt)
-	if size.Type().IntTypeWidth() > elementTypes[0].IntTypeWidth() {
-		size = llvm.ConstTrunc(size, elementTypes[0])
-	}
+	size := llvm.ConstInt(elementTypes[0], uint64(tm.Sizeof(t)), false)
 	typ = llvm.ConstInsertValue(typ, size, []uint32{0})
 
 	// TODO hash
 	// TODO padding
 
 	// Alignment.
-	align := llvm.ConstTrunc(llvm.AlignOf(lt), llvm.Int8Type())
+	align := llvm.ConstInt(llvm.Int8Type(), uint64(tm.Alignof(t)), false)
 	typ = llvm.ConstInsertValue(typ, align, []uint32{3}) // var
 	typ = llvm.ConstInsertValue(typ, align, []uint32{4}) // field
 

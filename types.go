@@ -119,7 +119,7 @@ func (c *compiler) exportBuiltinRuntimeTypes() {
 func fieldIndex(s *types.Struct, name string) int {
 	for i := 0; i < s.NumFields(); i++ {
 		f := s.Field(i)
-		if f.Name == name {
+		if f.Name() == name {
 			return i
 		}
 	}
@@ -231,11 +231,11 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 			if i > 0 {
 				buf.WriteString("; ")
 			}
-			if !f.IsAnonymous {
-				buf.WriteString(f.Name)
+			if !f.Anonymous() {
+				buf.WriteString(f.Name())
 				buf.WriteByte(' ')
 			}
-			ts.writeType(buf, f.Type)
+			ts.writeType(buf, f.Type())
 			if tag := t.Tag(i); tag != "" {
 				fmt.Fprintf(buf, " %q", tag)
 			}
