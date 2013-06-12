@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"github.com/greggoryhz/gollvm/llvm"
+	"github.com/axw/gollvm/llvm"
 )
 
 type Builder struct {

@@ -8,7 +8,7 @@ import (
 	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
-	"github.com/greggoryhz/gollvm/llvm"
+	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/token"
 )

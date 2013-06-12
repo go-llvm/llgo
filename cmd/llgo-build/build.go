@@ -6,7 +6,7 @@ package main
 
 import (
 	"fmt"
-	llgobuild "github.com/greggoryhz/llgo/build"
+	llgobuild "github.com/axw/llgo/build"
 	"go/build"
 	"io"
 	"io/ioutil"
@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-const llgoPkgPrefix = "github.com/greggoryhz/llgo/pkg/"
+const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
 
 type renamedFileInfo struct {
 	os.FileInfo
