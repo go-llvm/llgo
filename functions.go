@@ -165,9 +165,9 @@ func (c *compiler) methods(t types.Type) *methodset {
 				}
 				for i := 0; i < typ.NumFields(); i++ {
 					field := typ.Field(i)
-					if field.IsAnonymous {
+					if field.Anonymous() {
 						indices := append(indices[:], i)
-						ftype := field.Type
+						ftype := field.Type()
 						candidate := selectorCandidate{indices, ftype}
 						next = append(next, candidate)
 					}
@@ -215,7 +215,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func,
 	if recv, ok := recv.(*types.Named); ok {
 		pkg = c.objectdata[recv.Obj()].Package
 	}
-	recvvar := types.NewVar(pkg, "", recv)
+	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
 	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
 	f := &synthFunc{Func: m, pkg: pkg, typ: sig}
@@ -287,7 +287,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	if recv, ok := recv.(*types.Named); ok {
 		pkg = c.objectdata[recv.Obj()].Package
 	}
-	recvvar := types.NewVar(pkg, "", recv)
+	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
 	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
 	f := &synthFunc{Func: m, pkg: pkg, typ: sig}

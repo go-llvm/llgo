@@ -176,7 +176,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case *types.Struct:
 		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
 		if element_types_count > 0 {
-			t := typ.Field(0).Type
+			t := typ.Field(0).Type()
 			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
 			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
@@ -189,7 +189,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result := first
 			for i := 1; i < element_types_count; i++ {
 				result = c.compileLogicalOp(logicalop, result, func() Value {
-					t := typ.Field(i).Type
+					t := typ.Field(i).Type()
 					lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 					rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
 					return lhs.BinaryOp(op, rhs)

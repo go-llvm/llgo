@@ -477,15 +477,15 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 			if t, ok := t.Underlying().(*types.Struct); ok {
 				if i := fieldIndex(t, name); i != -1 {
 					result.Indices = append(indices, i)
-					result.Type = t.Field(i).Type
+					result.Type = t.Field(i).Type()
 					break
 				} else {
 					// Add embedded types to the next set of types to check.
 					for i := 0; i < t.NumFields(); i++ {
 						field := t.Field(i)
-						if field.IsAnonymous {
+						if field.Anonymous() {
 							indices := append(indices[:], i)
-							t := field.Type
+							t := field.Type()
 							candidate := selectorCandidate{indices, t}
 							next = append(next, candidate)
 						}
@@ -517,7 +517,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				structTyp := fieldValue.typ.Deref().Underlying().(*types.Struct)
 				field := structTyp.Field(i)
 				fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
-				fieldPtrTyp := types.NewPointer(field.Type.(types.Type))
+				fieldPtrTyp := types.NewPointer(field.Type())
 				fieldValue = c.NewValue(fieldPtr, fieldPtrTyp).makePointee()
 			}
 		}

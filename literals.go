@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/greggoryhz/gollvm/llvm"
 	"go/ast"
+	"go/token"
 )
 
 type identVisitor struct {
@@ -72,9 +73,10 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 		// Add the additional context param.
 		ctxfields := make([]*types.Field, len(v.captures))
 		for i, capturevar := range v.captures {
-			ctxfields[i] = &types.Field{
-				Type: types.NewPointer(capturevar.Type()),
-			}
+			p := capturevar.Pkg()
+			n := capturevar.Name()
+			t := types.NewPointer(capturevar.Type())
+			ctxfields[i] = types.NewField(token.NoPos, p, n, t, false)
 		}
 		ctxtyp := types.NewPointer(types.NewStruct(ctxfields, nil))
 		llvmctxtyp := c.types.ToLLVM(ctxtyp)
@@ -163,7 +165,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 					name := kv.Key.(*ast.Ident).Name
 					key = name
 					typ := typ.Underlying().(*types.Struct)
-					elttyp = typ.Field(fieldIndex(typ, name)).Type
+					elttyp = typ.Field(fieldIndex(typ, name)).Type()
 				case isarray:
 					key = c.types.expr[kv.Key].Value
 					typ := typ.Underlying().(*types.Array)
@@ -185,7 +187,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 				switch {
 				case isstruct:
 					typ := typ.Underlying().(*types.Struct)
-					c.convertUntyped(elt, typ.Field(i).Type)
+					c.convertUntyped(elt, typ.Field(i).Type())
 				case isarray:
 					typ := typ.Underlying().(*types.Array)
 					c.convertUntyped(elt, typ.Elem())
@@ -289,7 +291,7 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 		}
 		for i, value := range values {
 			if value != nil {
-				elttype := typ.Field(i).Type
+				elttype := typ.Field(i).Type()
 				llvm_value := value.Convert(elttype).LLVMValue()
 				ptr := c.builder.CreateStructGEP(ptr, i, "")
 				c.builder.CreateStore(llvm_value, ptr)
