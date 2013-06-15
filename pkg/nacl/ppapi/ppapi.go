@@ -7,6 +7,7 @@ package ppapi
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"unsafe"
 )
 
@@ -39,13 +40,6 @@ func (s cstring) String() string {
 	return string(bytes)
 }
 
-// FIXME set calling convention of function to C.
-//
-// Actually, don't bother, as we'll have to move a
-// lot of this into C/LLVM IR later anyway, when
-// function types change.
-type ppbGetInterface func(cstring) unsafe.Pointer
-
 var module *Module
 
 // #llgo name: PPP_InitializeModule
@@ -58,7 +52,7 @@ func initializeModule(module_ int32, getBrowserInterface ppbGetInterface) int32 
 	}
 
 	module.getBrowserInterface = getBrowserInterface
-	module.Core = (*ppbCore1_0)(getBrowserInterface(makecstring("PPB_Core;1.0")))
+	module.Core = (*ppbCore1_0)(callPPBGetInterface(getBrowserInterface, "PPB_Core;1.0"))
 	if module.Core == nil {
 		return PP_ERROR_NOINTERFACE
 	}
@@ -89,3 +83,16 @@ var browserViewInterface *ppbView1_0
 var browserInstanceInterface *ppbInstance1_0
 var browserImageDataInterface *ppbImageData1_0
 */
+
+type ppbGetInterface unsafe.Pointer
+
+func callPPBGetInterface(g ppbGetInterface, name string) unsafe.Pointer {
+	p0, err := syscall.BytePtrFromString(name)
+	if err != nil {
+		panic(err)
+	}
+	return _callPPBGetInterface(g, p0)
+}
+
+// #llgo name: ppapi_callPPBGetInterface
+func _callPPBGetInterface(g ppbGetInterface, name *byte) unsafe.Pointer

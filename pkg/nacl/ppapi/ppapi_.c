@@ -6,7 +6,10 @@
 
 #include <ppapi/c/ppp.h>
 #include <ppapi/c/ppp_instance.h>
+#include <ppapi/c/ppb_messaging.h>
+#include <ppapi/c/ppb_var.h>
 
+#include <stdio.h>
 #include <string.h>
 
 PP_Bool ppapi_instanceDidCreate(PP_Instance instance,
@@ -36,5 +39,25 @@ const void* PPP_GetInterface(const char *name)
     if (strcmp(name, PPP_INSTANCE_INTERFACE_1_1) == 0)
         return &instance;
     return NULL;
+}
+
+const void* ppapi_callPPBGetInterface(PPB_GetInterface fn, const char *name)
+{
+    return fn(name);
+}
+
+void ppapi_callPostMessage(struct PPB_Messaging_1_0 *m,
+                           PP_Instance instance,
+                           struct PP_Var message)
+{
+    m->PostMessage(instance, message);
+}
+
+void ppapi_callVarFromUtf8(struct PPB_Var_1_1 *i,
+                           struct PP_Var *v,
+                           const char *data,
+                           uint32_t len)
+{
+    *v = i->VarFromUtf8(data, len);
 }
 

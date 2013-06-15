@@ -5,6 +5,7 @@
 package ppapi
 
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -26,6 +27,16 @@ const (
 
 type VarValue float64
 
+func MakeVar(value interface{}) (Var, error) {
+	switch value := value.(type) {
+	case int32:
+		return MakeVarInt32(value), nil
+	case string:
+		return MakeVarString(value), nil
+	}
+	return Var{}, fmt.Errorf("Unhandled type %T", value)
+}
+
 func MakeVarInt32(value int32) Var {
 	var v Var
 	v.Type = VarTypeInt32
@@ -42,13 +53,16 @@ func MakeVarString(s string) Var {
 	}
 	var v Var
 	varIface := module.BrowserInterface("PPB_Var;1.1").(*ppbVar1_1)
-	varIface.varFromUtf8(&v, cstr, n)
+	callVarFromUtf8(varIface, &v, cstr, n)
 	return v
 }
 
 type ppbVar1_1 struct {
-	addRef      func(Var)
-	release     func(Var)
-	varFromUtf8 func(v *Var, data unsafe.Pointer, len uint32)
-	varToUtf8   func(v Var, len *uint32) unsafe.Pointer
+	addRef      uintptr //func(Var)
+	release     uintptr //func(Var)
+	varFromUtf8 uintptr //func(v *Var, data unsafe.Pointer, len uint32)
+	varToUtf8   uintptr //func(v Var, len *uint32) unsafe.Pointer
 }
+
+// #llgo name: ppapi_callVarFromUtf8
+func callVarFromUtf8(i *ppbVar1_1, v *Var, data unsafe.Pointer, n uint32)

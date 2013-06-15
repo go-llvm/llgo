@@ -5,5 +5,8 @@
 package ppapi
 
 type ppbMessaging1_0 struct {
-	postMessage func(i PP_Instance, msg Var)
+	postMessage uintptr //func(i PP_Instance, msg Var)
 }
+
+// #llgo name: ppapi_callPostMessage
+func callPostMessage(m *ppbMessaging1_0, i PP_Instance, msg *Var)

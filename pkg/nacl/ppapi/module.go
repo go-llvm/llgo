@@ -58,13 +58,15 @@ func NewModule(c InstanceCreator) (*Module, error) {
 }
 
 func (m *Module) BrowserInterface(name string) interface{} {
-	result := m.getBrowserInterface(makecstring(name))
+	result := callPPBGetInterface(m.getBrowserInterface, name)
 	if result == nil {
 		return nil
 	}
 	switch name {
 	case "PPB_Var;1.1":
 		return (*ppbVar1_1)(result)
+	case "PPB_Messaging;1.0":
+		return (*ppbMessaging1_0)(result)
 	}
 	panic("unimplemented")
 }
@@ -73,15 +75,27 @@ func (m *Module) PluginInterface(name string) interface{} {
 	panic("unimplemented")
 }
 
-func (m *Module) PostMessage(value interface{}) {
-	panic("unimplemented")
+func (m *Module) PostMessage(instance PP_Instance, value interface{}) error {
+	messaging := m.BrowserInterface("PPB_Messaging;1.0").(*ppbMessaging1_0)
+	v, err := MakeVar(value)
+	if err != nil {
+		return err
+	}
+	callPostMessage(messaging, instance, &v)
+	// TODO release var
+	return nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 // #llgo name: ppapi_instanceDidCreate
 func instanceDidCreate(i PP_Instance, argc uint32, argn_, argv_ *cstring) ppBool {
-	println("instanceDidCreate")
+	//defer func() {
+	//    // FIXME do something more appropriate with the error.
+	//    if err := recover(); err != nil {
+	//        println(err)
+	//    }
+	//}()
 	inst, err := module.instanceCreator.CreateInstance(i)
 	if err != nil {
 		return ppFalse
@@ -95,7 +109,6 @@ func instanceDidCreate(i PP_Instance, argc uint32, argn_, argv_ *cstring) ppBool
 		args[name.String()] = value.String()
 		argn += unsafe.Sizeof(name)
 		argv += unsafe.Sizeof(value)
-		println(name.String(), "=", value.String())
 	}
 	err = inst.DidCreate(args)
 	if err != nil {

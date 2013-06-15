@@ -11,28 +11,35 @@ import (
 var module *ppapi.Module
 
 func CreateModule() (*ppapi.Module, error) {
+	println("CreateModule")
 	var err error
 	module, err = ppapi.NewModule(creator{})
 	return module, err
 }
 
-type creator struct {}
-func (_ creator) CreateInstance(ppapi.PP_Instance) (ppapi.Instance, error) {
-	return &Example{}, nil
+type creator struct{}
+
+func (_ creator) CreateInstance(i ppapi.PP_Instance) (ppapi.Instance, error) {
+	println("CreateInstance")
+	return &Example{i}, nil
 }
 
 type Example struct {
+	ppapi.PP_Instance
 }
 
 func (x *Example) DidCreate(args map[string]string) error {
-	module.PostMessage("alert:Hello from llgo!")
+	println("DidCreate")
+	module.PostMessage(x.PP_Instance, "alert:Hello from llgo!")
 	return nil
 }
 
 func (x *Example) DidChangeView(v ppapi.View) {
+	println("DidChangeView")
 }
 
 func (x *Example) DidChangeFocus(hasFocus bool) {
+	println("DidChangeFocus")
 }
 
 /*
