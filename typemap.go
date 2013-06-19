@@ -468,7 +468,7 @@ func (tm *TypeMap) makeRuntimeType(tstr string, t types.Type) (global, ptr llvm.
 	var info runtimeTypeInfo
 	switch t := t.(type) {
 	case *types.Basic:
-		info.global, info.dyntyp = tm.basicRuntimeType(t)
+		info.global, info.dyntyp = tm.basicRuntimeType(t, false)
 	case *types.Array:
 		info.global, info.dyntyp = tm.arrayRuntimeType(t)
 	case *types.Slice:
@@ -571,9 +571,26 @@ var basicReflectKinds = [...]reflect.Kind{
 	types.UnsafePointer: reflect.UnsafePointer,
 }
 
-func (tm *TypeMap) basicRuntimeType(b *types.Basic) (global, ptr llvm.Value) {
+// basicRuntimeType creates the runtime type structure for
+// a basic type. If underlying is true, then a new global
+// is always created.
+func (tm *TypeMap) basicRuntimeType(b *types.Basic, underlying bool) (global, ptr llvm.Value) {
+	var globalname string
+	if !underlying {
+		globalname = "__llgo.type.runtime." + b.Name()
+		if tm.pkgpath != "runtime" {
+			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
+			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
+			global.SetLinkage(llvm.CommonLinkage)
+			return global, global
+		}
+	}
 	rtype := tm.makeRtype(b, basicReflectKinds[b.Kind()])
-	return tm.makeRuntimeTypeGlobal(rtype)
+	global, ptr = tm.makeRuntimeTypeGlobal(rtype)
+	if globalname != "" {
+		global.SetName(globalname)
+	}
+	return global, ptr
 }
 
 func (tm *TypeMap) arrayRuntimeType(a *types.Array) (global, ptr llvm.Value) {
@@ -611,16 +628,18 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	// Is the base type a named type from another package? If so, we'll
 	// create a reference to the externally defined symbol.
 	var globalname string
-	if n, ok := p.Elem().(*types.Named); ok {
-		// FIXME horrible circular relationship
-		var path string
-		if data, ok := tm.functions.objectdata[n.Obj()]; ok {
-			path = pkgpath(data.Package)
+	switch elem := p.Elem().(type) {
+	case *types.Basic:
+		globalname = "__llgo.type.*runtime." + elem.Name()
+		if tm.pkgpath != "runtime" {
+			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
+			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
+			global.SetLinkage(llvm.CommonLinkage)
+			return global, global
 		}
-		if path == "" {
-			path = "runtime"
-		}
-		globalname = "__llgo.type.*" + path + "." + n.Obj().Name()
+	case *types.Named:
+		path := tm.functions.objectdata[elem.Obj()].Package.Path()
+		globalname = "__llgo.type.*" + path + "." + elem.Obj().Name()
 		if path != tm.pkgpath {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
@@ -760,16 +779,9 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 	namePtr := tm.globalStringPtr(n.Obj().Name())
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, namePtr, []uint32{0})
 
-	// FIXME clean this up
-	var pkgpathPtr llvm.Value
-	var path string
-	if data, ok := tm.functions.objectdata[n.Obj()]; ok {
-		path = pkgpath(data.Package)
-	}
-	if path != "" {
-		pkgpathPtr = tm.globalStringPtr(path)
-		uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
-	}
+	path := tm.functions.objectdata[n.Obj()].Package.Path()
+	pkgpathPtr := tm.globalStringPtr(path)
+	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 
 	methodset := tm.functions.methods(n)
 	methodfuncs := methodset.nonptr
@@ -839,14 +851,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 }
 
 func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
-	var path string
-	if data, ok := tm.functions.objectdata[n.Obj()]; ok {
-		path = pkgpath(data.Package)
-	}
-	if path == "" {
-		// Set to "runtime", so the builtin types have a home.
-		path = "runtime"
-	}
+	path := tm.functions.objectdata[n.Obj()].Package.Path()
 	globalname := "__llgo.type." + path + "." + n.Obj().Name()
 	if path != tm.pkgpath {
 		// We're not compiling the package from whence the type came,
@@ -857,12 +862,19 @@ func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
 		return global, global
 	}
 
+	// If the underlying type is Basic, then we always create
+	// a new global. Otherwise, we clone the value returned
+	// from toRuntime in case it is cached and reused.
 	underlying := n.Underlying()
-	if name, ok := underlying.(*types.Named); ok {
-		underlying = name.Underlying()
+	if basic, ok := underlying.(*types.Basic); ok {
+		global, ptr = tm.basicRuntimeType(basic, true)
+	} else {
+		global, ptr = tm.toRuntime(underlying)
+		clone := llvm.AddGlobal(tm.module, global.Type().ElementType(), globalname)
+		clone.SetInitializer(global.Initializer())
+		global = clone
+		ptr = llvm.ConstBitCast(global, llvm.PointerType(tm.runtimeType, 0))
 	}
-
-	global, ptr = tm.toRuntime(underlying)
 
 	// Locate the rtype.
 	underlyingRuntimeType := global.Initializer()

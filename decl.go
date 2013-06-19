@@ -28,13 +28,13 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 				if named, ok := recvtyp.Elem().(*types.Named); ok {
 					obj := named.Obj()
 					recvname = "*" + obj.Name()
-					pkgname = pkgpath(c.objectdata[obj].Package)
+					pkgname = c.objectdata[obj].Package.Path()
 				}
 			case *types.Named:
 				named := recvtyp
 				obj := named.Obj()
 				recvname = obj.Name()
-				pkgname = pkgpath(c.objectdata[obj].Package)
+				pkgname = c.objectdata[obj].Package.Path()
 			}
 
 			if recvname != "" {
@@ -48,7 +48,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 			}
 		} else {
 			obj := c.objects[ident]
-			pkgname = pkgpath(c.objectdata[obj].Package)
+			pkgname = c.objectdata[obj].Package.Path()
 		}
 		if fname != "" {
 			fname = pkgname + "." + fname
@@ -349,7 +349,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 	// If the ValueSpec exists at the package level, create globals.
 	if obj, ok := c.objects[valspec.Names[0]]; ok {
 		if c.pkg.Scope().Lookup(nil, valspec.Names[0].Name) == obj {
-			c.createGlobals(valspec.Names, valspec.Values, pkgpath(c.pkg))
+			c.createGlobals(valspec.Names, valspec.Values, c.pkg.Path())
 			return
 		}
 	}

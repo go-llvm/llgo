@@ -116,7 +116,7 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 		if value == nil {
 			module := c.module.Module
 			t := obj.Type()
-			name := pkgpath(data.Package) + "." + obj.Name()
+			name := data.Package.Path() + "." + obj.Name()
 			g := module.NamedGlobal(name)
 			if g.IsNil() {
 				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
@@ -233,6 +233,13 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.initfuncs = nil
 	compiler.varinitfuncs = nil
 
+	// If no import path is specified, or the package's
+	// name (not path) is "main", then set the import
+	// path to be the same as the package's name.
+	if importpath == "" || files[0].Name.String() == "main" {
+		importpath = files[0].Name.String()
+	}
+
 	// Type-check, and store object data.
 	compiler.implicitobjects = make(map[ast.Node]types.Object)
 	compiler.objects = make(map[*ast.Ident]types.Object)
@@ -244,7 +251,6 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		return nil, err
 	}
 	compiler.pkg = pkg
-	importpath = pkgpath(pkg)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke

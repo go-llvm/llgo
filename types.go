@@ -284,8 +284,8 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 		ts.writeType(buf, t.Elem())
 
 	case *types.Named:
-		if pkg := ts.pkgmap[t.Obj()]; pkg != nil && pkgpath(pkg) != "" {
-			buf.WriteString(pkgpath(pkg))
+		if pkg := ts.pkgmap[t.Obj()]; pkg != nil && pkg.Path() != "" {
+			buf.WriteString(pkg.Path())
 			buf.WriteByte('.')
 		}
 		buf.WriteString(t.Obj().Name())
