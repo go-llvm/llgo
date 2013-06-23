@@ -151,8 +151,8 @@ func eqtyp(t1, t2 *rtype) bool {
 		case interfaceKind:
 		case mapKind:
 		case ptrKind:
-			t1 := (*ptrType)(unsafe.Pointer(&t1))
-			t2 := (*ptrType)(unsafe.Pointer(&t2))
+			t1 := (*ptrType)(unsafe.Pointer(t1))
+			t2 := (*ptrType)(unsafe.Pointer(t2))
 			return eqtyp(t1.elem, t2.elem)
 		case sliceKind:
 		case structKind:
