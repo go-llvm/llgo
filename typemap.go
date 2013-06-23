@@ -443,6 +443,8 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 		}
 		offsets := tm.Offsetsof(fields)
 		return offsets[n-1] + tm.Sizeof(fields[n-1].Type())
+	case *types.Interface:
+		return int64((2 + typ.NumMethods()) * tm.target.PointerSize())
 	}
 	return int64(tm.target.PointerSize())
 }
