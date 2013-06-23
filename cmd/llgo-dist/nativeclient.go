@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"go/build"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,8 +110,15 @@ func (t *pnaclToolchain) makeSyscall() error {
 	if err != nil {
 		return err
 	}
+
+	objdir, err := ioutil.TempDir("", "llgo_dist")
+	if err != nil {
+		return fmt.Errorf("Failed to create temporary directory: %s", err)
+	}
+	defer os.RemoveAll(objdir)
+
 	args := []string{
-		"tool", "cgo", "-godefs", "--",
+		"tool", "cgo", "-godefs", "-objdir", objdir, "--",
 		"-nostdinc",
 		"-D__native_client__",
 		"-isystem", filepath.Join(t.newlib, "usr", "include"),
@@ -124,12 +132,18 @@ func (t *pnaclToolchain) makeSyscall() error {
 		return err
 	}
 	defer f.Close()
+
+	// Add "// +build pnacl" to the beginning of the file,
+	// with newlines on either side.
+	fmt.Fprintln(f)
+	fmt.Fprintln(f, "// +build pnacl")
+	fmt.Fprintln(f)
+
 	cmd := exec.Command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CC="+t.clang)
 	cmd.Env = append(cmd.Env, "GOARCH=386")
 	cmd.Stdout = f
 	cmd.Stderr = os.Stderr
-	// TODO delete _obj afterwards.
 	return cmd.Run()
 }
