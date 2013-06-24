@@ -956,7 +956,7 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.Logger != nil {
 		c.Logger.Println("Compile statement:", reflect.TypeOf(stmt),
-			"@", c.fileset.Position(stmt.Pos()))
+			"@", c.state.fileset.Position(stmt.Pos()))
 	}
 	switch x := stmt.(type) {
 	case *ast.ReturnStmt:

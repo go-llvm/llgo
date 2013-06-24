@@ -43,10 +43,9 @@ type compiler struct {
 	functions      functionStack
 	breakblocks    []llvm.BasicBlock
 	continueblocks []llvm.BasicBlock
-	initfuncs      []llvm.Value
-	varinitfuncs   []llvm.Value
 	pkg            *types.Package
-	fileset        *token.FileSet
+
+	state compilerstate
 
 	implicitobjects map[ast.Node]types.Object
 	objects         map[*ast.Ident]types.Object
@@ -133,6 +132,12 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 
 	data.Value = value
 	return value
+}
+
+type compilerstate struct {
+	initfuncs    []llvm.Value
+	varinitfuncs []llvm.Value
+	fileset      *token.FileSet
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -228,10 +233,7 @@ func (compiler *compiler) Dispose() {
 }
 
 func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, importpath string) (m *Module, err error) {
-	// FIXME create a compilation state, rather than storing in 'compiler'.
-	compiler.fileset = fset
-	compiler.initfuncs = nil
-	compiler.varinitfuncs = nil
+	compiler.state.fileset = fset
 
 	// If no import path is specified, or the package's
 	// name (not path) is "main", then set the import
@@ -315,11 +317,11 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	// function (runtime.main) will invoke the constructors
 	// in reverse order.
 	var initfuncs [][]llvm.Value
-	if compiler.varinitfuncs != nil {
-		initfuncs = append(initfuncs, compiler.varinitfuncs)
+	if compiler.state.varinitfuncs != nil {
+		initfuncs = append(initfuncs, compiler.state.varinitfuncs)
 	}
-	if compiler.initfuncs != nil {
-		initfuncs = append(initfuncs, compiler.initfuncs)
+	if compiler.state.initfuncs != nil {
+		initfuncs = append(initfuncs, compiler.state.initfuncs)
 	}
 	if initfuncs != nil {
 		ctortype := llvm.PointerType(llvm.Int8Type(), 0)
