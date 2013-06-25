@@ -58,16 +58,18 @@ func linkdeps(pkg *build.Package, output string) error {
 	}
 
 	// Finally, link with clang++ to get exception handling.
-	clangxx := clang + "++"
-	args := []string{"-o", output, output}
-	if triple == "pnacl" {
-		args = append(args, "-l", "ppapi")
-	}
-	cmd := exec.Command(clangxx, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err = runCmd(cmd); err != nil {
-		return err
+	if !emitllvm || triple == "pnacl" {
+		clangxx := clang + "++"
+		args := []string{"-o", output, output}
+		if triple == "pnacl" {
+			args = append(args, "-l", "ppapi")
+		}
+		cmd := exec.Command(clangxx, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err = runCmd(cmd); err != nil {
+			return err
+		}
 	}
 
 	return nil

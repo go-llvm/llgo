@@ -24,6 +24,7 @@ var (
 	pkgroot       string
 	output        string
 	printcommands bool
+	emitllvm      bool
 	buildctx      *build.Context
 )
 
@@ -31,6 +32,7 @@ func init() {
 	flag.StringVar(&clang, "clang", defaultclang, "The path to the clang compiler")
 	flag.StringVar(&triple, "triple", defaulttriple, "The target triple")
 	flag.StringVar(&output, "o", "", "Output file")
+	flag.BoolVar(&emitllvm, "emit-llvm", false, "Emit LLVM bitcode instead of a native binary")
 	flag.BoolVar(&printcommands, "x", false, "Print the commands")
 }
 
