@@ -104,7 +104,9 @@ func strnext(s _string, i int) (n int, value rune) {
 func strrune(n int64) _string {
 	var b [4]uint8
 	if n >= 0x10000 {
-		// TODO panic if range > 0x1fffff?
+		if n > 0x10ffff {
+			goto badstr
+		}
 		b[0] = 0xf0 | uint8((n>>18)&0x3f)
 		b[1] = 0x80 | uint8((n>>12)&0x3f)
 		b[2] = 0x80 | uint8((n>>6)&0x3f)
@@ -112,6 +114,10 @@ func strrune(n int64) _string {
 		return _string{&b[0], 4}
 	}
 	if n >= 0x800 {
+		if n >= 0xd800 && n <= 0xdfff {
+			// surrogate-half
+			goto badstr
+		}
 		b[0] = 0xe0 | uint8((n>>12)&0x3f)
 		b[1] = 0x80 | uint8((n>>6)&0x3f)
 		b[2] = 0x80 | uint8(n&0x3f)
@@ -122,8 +128,19 @@ func strrune(n int64) _string {
 		b[1] = 0x80 | uint8(n&0x3f)
 		return _string{&b[0], 2}
 	}
+	if n < 0 {
+		goto badstr
+	}
 	b[0] = uint8(n)
 	return _string{&b[0], 1}
+
+badstr:
+	// "Values outside the range of valid Unicode
+	// code points are converted to `\uFFFD`"
+	b[0] = 0xef
+	b[1] = 0xbf
+	b[2] = 0xbd
+	return _string{&b[0], 3}
 }
 
 // strtorunes converts string to []rune

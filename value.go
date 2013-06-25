@@ -142,8 +142,8 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		return c.NewValue(llvmvalue, typ)
 	}
 
-	// Special case for string -> []byte
-	if types.IsIdentical(typ.Underlying(), types.NewSlice(types.Typ[types.Byte])) {
+	// Special case for string -> [](byte|rune)
+	if u, ok := typ.Underlying().(*types.Slice); ok && isInteger(u.Elem()) {
 		if v.Kind() == exact.String {
 			strval := c.NewConstValue(v, types.Typ[types.String])
 			return strval.Convert(typ).(*LLVMValue)
