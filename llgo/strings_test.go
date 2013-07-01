@@ -10,4 +10,4 @@ func TestStringIndex(t *testing.T)         { checkOutputEqual(t, "strings/index.
 func TestStringSlice(t *testing.T)         { checkOutputEqual(t, "strings/slice.go") }
 func TestStringBytes(t *testing.T)         { checkOutputEqual(t, "strings/bytes.go") }
 func TestStringRange(t *testing.T)         { checkOutputEqual(t, "strings/range.go") }
-func TestStringFromRune(t *testing.T)         { checkOutputEqual(t, "strings/runetostring.go") }
+func TestStringFromRune(t *testing.T)      { checkOutputEqual(t, "strings/runetostring.go") }
