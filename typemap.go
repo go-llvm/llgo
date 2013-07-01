@@ -432,6 +432,8 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 			eltpad = eltalign - (eltsize % eltalign)
 		}
 		return (eltsize + eltpad) * typ.Len()
+	case *types.Slice:
+		return 3 * int64(tm.target.PointerSize())
 	case *types.Struct:
 		n := typ.NumFields()
 		if n == 0 {
@@ -502,7 +504,16 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
 	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
 
-	equalAlg := tm.functions.NamedFunction("runtime.memequal", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
+	var equalAlg llvm.Value
+	switch t := t.(type) {
+	case *types.Basic:
+		if t.Kind() == types.String {
+			equalAlg = tm.functions.NamedFunction("runtime.streqalg", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
+		}
+	}
+	if equalAlg.IsNil() {
+		equalAlg = tm.functions.NamedFunction("runtime.memequal", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
+	}
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)
 }

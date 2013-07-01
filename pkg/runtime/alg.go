@@ -25,3 +25,9 @@ func memequal(size uintptr, lhs, rhs unsafe.Pointer) bool {
 	}
 	return true
 }
+
+func streqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
+	a := (*_string)(lhs)
+	b := (*_string)(rhs)
+	return strcmp(*a, *b) == 0
+}
