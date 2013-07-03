@@ -39,11 +39,7 @@ func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
 		ptr := c.builder.CreateCall(f, args, "")
 		return c.NewValue(ptr, typ)
 	case *types.Map:
-		f := c.NamedFunction("runtime.makemap", "func f(t uintptr) uintptr")
-		dyntyp := c.types.ToRuntime(typ)
-		dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-		mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp}, "")
-		return c.NewValue(mapval, typ)
+		return c.makeMapLiteral(typ, nil, nil)
 	}
 	panic(fmt.Sprintf("unhandled type: %s", typ))
 }

@@ -87,3 +87,36 @@ func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llv
 
 	return
 }
+
+// makeMapLiteral makes a map with the specified keys and values.
+func (c *compiler) makeMapLiteral(typ types.Type, keys, values []Value) *LLVMValue {
+	var count, keysptr, valuesptr llvm.Value
+	dyntyp := c.types.ToRuntime(typ)
+	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+	if len(keys) == 0 {
+		count = llvm.ConstNull(c.types.inttype)
+		keysptr = llvm.ConstNull(c.target.IntPtrType())
+		valuesptr = keysptr
+	} else {
+		maptyp := typ.Underlying().(*types.Map)
+		keytyp := maptyp.Key()
+		valtyp := maptyp.Elem()
+		count = llvm.ConstInt(c.types.inttype, uint64(len(keys)), false)
+		keysptr = c.builder.CreateArrayAlloca(c.types.ToLLVM(keytyp), count, "")
+		valuesptr = c.builder.CreateArrayAlloca(c.types.ToLLVM(valtyp), count, "")
+		for i := range keys {
+			gepindices := []llvm.Value{llvm.ConstInt(c.types.inttype, uint64(i), false)}
+			key := keys[i].Convert(keytyp).LLVMValue()
+			ptr := c.builder.CreateGEP(keysptr, gepindices, "")
+			c.builder.CreateStore(key, ptr)
+			value := values[i].Convert(valtyp).LLVMValue()
+			ptr = c.builder.CreateGEP(valuesptr, gepindices, "")
+			c.builder.CreateStore(value, ptr)
+		}
+		keysptr = c.builder.CreatePtrToInt(keysptr, c.target.IntPtrType(), "")
+		valuesptr = c.builder.CreatePtrToInt(valuesptr, c.target.IntPtrType(), "")
+	}
+	f := c.NamedFunction("runtime.makemap", "func f(t uintptr, n int, keys, values uintptr) uintptr")
+	mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp, count, keysptr, valuesptr}, "")
+	return c.NewValue(mapval, typ)
+}

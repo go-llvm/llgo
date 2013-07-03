@@ -301,9 +301,13 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 		return m.makePointee()
 
 	case *types.Map:
-		value := llvm.ConstNull(c.types.ToLLVM(typ))
-		// TODO initialise map
-		return c.NewValue(value, origtyp)
+		keys := make([]Value, 0, len(valuemap))
+		values := make([]Value, 0, len(valuemap))
+		for k, v := range valuemap {
+			keys = append(keys, k.(Value))
+			values = append(values, v)
+		}
+		return c.makeMapLiteral(origtyp, keys, values)
 	}
 	panic(fmt.Sprint("Unhandled type kind: ", typ))
 }

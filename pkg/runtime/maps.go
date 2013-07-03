@@ -24,14 +24,20 @@ func reflect_ismapkey(t *rtype) bool {
 
 // #llgo name: reflect.makemap
 func reflect_makemap(t *map_) unsafe.Pointer {
-	return makemap(unsafe.Pointer(t))
+	return makemap(unsafe.Pointer(t), 0, 0, 0)
 }
 
-func makemap(t unsafe.Pointer) unsafe.Pointer {
+func makemap(t unsafe.Pointer, n int, keys, values uintptr) unsafe.Pointer {
 	m := (*map_)(malloc(uintptr(unsafe.Sizeof(map_{}))))
 	if m != nil {
 		m.length = 0
 		m.head = nil
+		maptyp := (*mapType)(t)
+		for i := 0; i < n; i++ {
+			reflect_mapassign((*rtype)(t), unsafe.Pointer(m), unsafe.Pointer(keys), unsafe.Pointer(values), true)
+			keys = align(keys+maptyp.key.size, uintptr(maptyp.key.align))
+			values = align(values+maptyp.elem.size, uintptr(maptyp.elem.align))
+		}
 	}
 	return unsafe.Pointer(m)
 }
