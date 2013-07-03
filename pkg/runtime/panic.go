@@ -10,10 +10,16 @@ type deferred struct {
 	next   *deferred
 }
 
+type panicstack struct {
+	next  *panicstack
+	value interface{}
+}
+
 func panic_(e interface{})
 func caller_region(skip int32) uintptr
 func pushdefer(f func())
 func rundefers()
+func current_panic() *panicstack
 
 // #llgo attr: noinline
 func callniladic(f func()) {

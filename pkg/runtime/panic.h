@@ -31,6 +31,14 @@ struct Panic {
 	struct Eface value;
 };
 
+// current_panic returns the panic stack
+// for the calling thread.
+struct Panic* current_panic()
+    __asm__("runtime.current_panic");
+
+// runtime_caller_region returns the instruction
+// region of the call frame specified by the number
+// of frames to skip from the current location.
 uintptr_t runtime_caller_region(int skip)
 		__asm__("runtime.caller_region") __attribute__((noinline));
 

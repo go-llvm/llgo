@@ -27,8 +27,8 @@ void pushdefer(struct Func)
 	__asm__("runtime.pushdefer") __attribute__((noinline));
 void rundefers(void)
 	__asm__("runtime.rundefers") __attribute__((noinline));
-void guardedcall(struct Func f)
-	__asm__("runtime.guardedcall");
+void guardedcall0(struct Func f)
+	__asm__("runtime.guardedcall0");
 
 void panic(struct Eface error) {
 	struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));
@@ -38,13 +38,17 @@ void panic(struct Eface error) {
 	__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);
 }
 
+struct Panic* current_panic() {
+    return tlspanic;
+}
+
 void recover(int32_t indirect, struct Eface *error) {
 	// (valid) call stack:
 	//     recover
 	//     deferred function
 	//     <deferred function wrapper>
 	//     callniladic
-	//     guardedcall
+	//     guardedcall0
 	//     run_defers
 	//     catch-site
 	int depth = 5 + (indirect ? 1 : 0);
@@ -74,7 +78,7 @@ void rundefers(void) {
 	const uintptr_t caller = runtime_caller_region(1);
 	for (; tlsdefer && tlsdefer->caller == caller;) {
 	    struct Defer *d = tlsdefer;
-	    guardedcall(d->f);
+	    guardedcall0(d->f);
 	    tlsdefer = tlsdefer->next;
 	    free(d);
 	}

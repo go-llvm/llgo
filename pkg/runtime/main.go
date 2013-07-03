@@ -7,9 +7,11 @@ package runtime
 // #llgo linkage: appending
 var ctors [1]*int8 // nil, used to find end of list
 
-// helper function to call a raw function pointer.
-// TODO move all of this code to .ll/.c
-func callNiladicFunc(f *int8)
+// Defined in panic.ll
+func guardedcall1(f func(), errback func())
+
+// Defined in main.ll
+func ccall(f *int8)
 
 // A Go program will enter this function before doing anything else.
 func main(argc int32, argv **byte, envp **byte, mainmain *int8) int32 {
@@ -23,15 +25,29 @@ func main(argc int32, argv **byte, envp **byte, mainmain *int8) int32 {
 		if ctors[i] == nil {
 			for i > 0 {
 				i--
-				callNiladicFunc(ctors[i])
+				ccall(ctors[i])
 			}
 			break
 		}
 	}
 
 	// All done, call "main.main".
-	// TODO recover from panics, alter return code accordingly.
-	callNiladicFunc(mainmain)
-
-	return 0
+	var rc int32
+	f := func() { ccall(mainmain) }
+	onpanic := func() {
+		// XXX I guess this all needs to move somewhere
+		// else, for reuse in handling panics escaping
+		// goroutines.
+		println()
+		println("Panic:\t")
+		for p := current_panic(); p != nil; p = p.next {
+			print("\t")
+			// TODO stack trace
+			printany(p.value)
+			println()
+		}
+		rc = -1
+	}
+	guardedcall1(f, onpanic)
+	return rc
 }
