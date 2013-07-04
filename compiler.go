@@ -52,6 +52,7 @@ type compiler struct {
 	objects         map[*ast.Ident]types.Object
 	objectdata      map[types.Object]*ObjectData
 	methodsets      map[types.Type]*methodset
+	exportedtypes   []types.Type
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -290,9 +291,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	}
 
 	// Export runtime type information.
-	if importpath == "runtime" {
-		compiler.exportBuiltinRuntimeTypes()
-	}
+	compiler.exportRuntimeTypes()
 
 	// Wrap "main.main" in a call to runtime.main.
 	if importpath == "main" {

@@ -590,7 +590,7 @@ var basicReflectKinds = [...]reflect.Kind{
 func (tm *TypeMap) basicRuntimeType(b *types.Basic, underlying bool) (global, ptr llvm.Value) {
 	var globalname string
 	if !underlying {
-		globalname = "__llgo.type.runtime." + b.Name()
+		globalname = "__llgo.type.runtime." + tm.TypeString(b)
 		if tm.pkgpath != "runtime" {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
@@ -643,7 +643,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	var globalname string
 	switch elem := p.Elem().(type) {
 	case *types.Basic:
-		globalname = "__llgo.type.*runtime." + elem.Name()
+		globalname = "__llgo.type.*runtime." + tm.TypeString(elem)
 		if tm.pkgpath != "runtime" {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))

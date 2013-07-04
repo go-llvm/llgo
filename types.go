@@ -85,35 +85,38 @@ func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 	return false
 }
 
-func (c *compiler) exportBuiltinRuntimeTypes() {
-	kinds := [...]types.BasicKind{
-		types.Uint,
-		types.Uint8,
-		types.Uint16,
-		types.Uint32,
-		types.Uint64,
-		types.Int,
-		types.Int8,
-		types.Int16,
-		types.Int32,
-		types.Int64,
-		types.Float32,
-		types.Float64,
-		types.Complex64,
-		types.Complex128,
-		types.Bool,
-		types.Uintptr,
-		types.UnsafePointer,
-		types.String,
+func (c *compiler) exportRuntimeTypes() {
+	if c.pkg.Path() == "runtime" {
+		kinds := [...]types.BasicKind{
+			types.Uint,
+			types.Uint8,
+			types.Uint16,
+			types.Uint32,
+			types.Uint64,
+			types.Int,
+			types.Int8,
+			types.Int16,
+			types.Int32,
+			types.Int64,
+			types.Float32,
+			types.Float64,
+			types.Complex64,
+			types.Complex128,
+			types.Bool,
+			types.Uintptr,
+			types.UnsafePointer,
+			types.String,
+		}
+		for _, kind := range kinds {
+			c.exportedtypes = append(c.exportedtypes, types.Typ[kind])
+		}
+		error_ := types.Universe.Lookup(nil, "error").Type()
+		c.exportedtypes = append(c.exportedtypes, error_)
 	}
-	for _, kind := range kinds {
-		typ := types.Typ[kind]
+	for _, typ := range c.exportedtypes {
 		c.types.ToRuntime(typ)
+		c.types.ToRuntime(types.NewPointer(typ))
 	}
-
-	// error
-	errorObj := types.Universe.Lookup(nil, "error")
-	c.types.ToRuntime(errorObj.Type())
 }
 
 func fieldIndex(s *types.Struct, name string) int {

@@ -61,10 +61,15 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 		assocObjectPackages(pkg, c.objectdata)
 	}
 
-	// Add TypeNames to the LLVMTypeMap's TypeStringer.
 	for object, data := range c.objectdata {
 		if object, ok := object.(*types.TypeName); ok {
+			// Add TypeNames to the LLVMTypeMap's TypeStringer.
 			c.llvmtypes.pkgmap[object] = data.Package
+
+			// Record exported types for generating runtime type information.
+			if ast.IsExported(object.Name()) {
+				c.exportedtypes = append(c.exportedtypes, object.Type())
+			}
 		}
 	}
 
