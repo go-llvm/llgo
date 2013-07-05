@@ -67,7 +67,9 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 			c.llvmtypes.pkgmap[object] = data.Package
 
 			// Record exported types for generating runtime type information.
-			if ast.IsExported(object.Name()) {
+			// c.pkg is nil iff the package being checked is the package
+			// being compiled.
+			if c.pkg == nil && object.Pkg() == pkg && ast.IsExported(object.Name()) {
 				c.exportedtypes = append(c.exportedtypes, object.Type())
 			}
 		}
