@@ -34,7 +34,7 @@ func makemap(t unsafe.Pointer, n int, keys, values uintptr) unsafe.Pointer {
 		m.head = nil
 		maptyp := (*mapType)(t)
 		for i := 0; i < n; i++ {
-			reflect_mapassign((*rtype)(t), unsafe.Pointer(m), unsafe.Pointer(keys), unsafe.Pointer(values), true)
+			reflect_mapassign(maptyp, unsafe.Pointer(m), unsafe.Pointer(keys), unsafe.Pointer(values), true)
 			keys = align(keys+maptyp.key.size, uintptr(maptyp.key.align))
 			values = align(values+maptyp.elem.size, uintptr(maptyp.elem.align))
 		}
@@ -55,12 +55,12 @@ func maplen(m *map_) int {
 }
 
 // #llgo name: reflect.mapassign
-func reflect_mapassign(t *rtype, m_, key, val unsafe.Pointer, ok bool) {
+func reflect_mapassign(t *mapType, m_, key, val unsafe.Pointer, ok bool) {
 	m := (*map_)(m_)
 	if ok {
 		ptr := maplookup(unsafe.Pointer(t), m, key, true)
 		// TODO use copy alg
-		memmove(ptr, val, t.size)
+		memmove(ptr, val, t.elem.size)
 	} else {
 		mapdelete(unsafe.Pointer(t), m, key)
 	}

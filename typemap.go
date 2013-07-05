@@ -504,15 +504,25 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
 	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
 
+	const eqalgsig = "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool"
 	var equalAlg llvm.Value
 	switch t := t.(type) {
 	case *types.Basic:
-		if t.Kind() == types.String {
-			equalAlg = tm.functions.NamedFunction("runtime.streqalg", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
+		switch t.Kind() {
+		case types.String:
+			equalAlg = tm.functions.NamedFunction("runtime.streqalg", eqalgsig)
+		case types.Float32:
+			equalAlg = tm.functions.NamedFunction("runtime.f32eqalg", eqalgsig)
+		case types.Float64:
+			equalAlg = tm.functions.NamedFunction("runtime.f64eqalg", eqalgsig)
+		case types.Complex64:
+			equalAlg = tm.functions.NamedFunction("runtime.c64eqalg", eqalgsig)
+		case types.Complex128:
+			equalAlg = tm.functions.NamedFunction("runtime.c128eqalg", eqalgsig)
 		}
 	}
 	if equalAlg.IsNil() {
-		equalAlg = tm.functions.NamedFunction("runtime.memequal", "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool")
+		equalAlg = tm.functions.NamedFunction("runtime.memequal", eqalgsig)
 	}
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)

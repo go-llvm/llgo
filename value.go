@@ -181,14 +181,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
 			first := first_lhs.BinaryOp(op, first_rhs)
 
-			logicalop := token.LAND
-			if op == token.NEQ {
-				logicalop = token.LOR
-			}
-
 			result := first
 			for i := 1; i < element_types_count; i++ {
-				result = c.compileLogicalOp(logicalop, result, func() Value {
+				result = c.compileLogicalOp(token.LAND, result, func() Value {
 					t := typ.Field(i).Type()
 					lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 					rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
@@ -294,16 +289,19 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result = b.CreateLShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewValue(result, lhs.typ)
-	case token.NEQ:
-		if isFloat(lhs.typ) {
-			result = b.CreateFCmp(llvm.FloatONE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
-			result = b.CreateICmp(llvm.IntNE, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		}
-		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.EQL:
 		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
+		} else if isComplex(lhs.typ) {
+			lhsval := lhs.LLVMValue()
+			rhsval := rhs.LLVMValue()
+			lhsreal := b.CreateExtractValue(lhsval, 0, "")
+			lhsimag := b.CreateExtractValue(lhsval, 1, "")
+			rhsreal := b.CreateExtractValue(rhsval, 0, "")
+			rhsimag := b.CreateExtractValue(rhsval, 1, "")
+			realeq := b.CreateFCmp(llvm.FloatOEQ, lhsreal, rhsreal, "")
+			imageq := b.CreateFCmp(llvm.FloatOEQ, lhsimag, rhsimag, "")
+			result = b.CreateAnd(realeq, imageq, "")
 		} else {
 			result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}

@@ -31,3 +31,19 @@ func streqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
 	b := (*_string)(rhs)
 	return strcmp(*a, *b) == 0
 }
+
+func f32eqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
+	return *(*float32)(lhs) == *(*float32)(rhs)
+}
+
+func f64eqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
+	return *(*float64)(lhs) == *(*float64)(rhs)
+}
+
+func c64eqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
+	return *(*complex64)(lhs) == *(*complex64)(rhs)
+}
+
+func c128eqalg(size uintptr, lhs, rhs unsafe.Pointer) bool {
+	return *(*complex128)(lhs) == *(*complex128)(rhs)
+}
