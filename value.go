@@ -331,18 +331,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 			result = b.CreateSub(lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
 		return lhs.compiler.NewValue(result, lhs.typ)
-	case token.SHL:
-		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
-		result = b.CreateShl(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		return lhs.compiler.NewValue(result, lhs.typ)
-	case token.SHR:
-		rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
-		if !isUnsigned(lhs.Type()) {
-			result = b.CreateAShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else {
-			result = b.CreateLShr(lhs.LLVMValue(), rhs.LLVMValue(), "")
-		}
-		return lhs.compiler.NewValue(result, lhs.typ)
+	case token.SHL, token.SHR:
+		return lhs.shift(rhs, op)
 	case token.EQL:
 		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -408,6 +398,50 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		panic(fmt.Sprint("Unimplemented operator: ", op))
 	}
 	panic("unreachable")
+}
+
+func (lhs *LLVMValue) shift(rhs *LLVMValue, op token.Token) *LLVMValue {
+	rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
+	lhsval := lhs.LLVMValue()
+	bits := rhs.LLVMValue()
+	unsigned := isUnsigned(lhs.Type())
+	if !bits.IsAConstant().IsNil() {
+		if bits.ZExtValue() >= uint64(lhsval.Type().IntTypeWidth()) {
+			var fix llvm.Value
+			if unsigned || op == token.SHL {
+				fix = llvm.ConstNull(lhsval.Type())
+			} else {
+				fix = llvm.ConstAllOnes(lhsval.Type())
+			}
+			return lhs.compiler.NewValue(fix, lhs.typ)
+		}
+	}
+	b := lhs.compiler.builder
+	var result llvm.Value
+	if op == token.SHL {
+		result = b.CreateShl(lhsval, bits, "")
+	} else {
+		if unsigned {
+			result = b.CreateLShr(lhsval, bits, "")
+		} else {
+			result = b.CreateAShr(lhsval, bits, "")
+		}
+	}
+	if bits.IsAConstant().IsNil() {
+		// Shifting >= the width of the lhs
+		// yields undefined behaviour, so we
+		// must generate runtime branching logic.
+		width := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()), false)
+		less := b.CreateICmp(llvm.IntULT, bits, width, "")
+		var fix llvm.Value
+		if unsigned || op == token.SHL {
+			fix = llvm.ConstNull(lhsval.Type())
+		} else {
+			fix = llvm.ConstAllOnes(lhsval.Type())
+		}
+		result = b.CreateSelect(less, result, fix, "")
+	}
+	return lhs.compiler.NewValue(result, lhs.typ)
 }
 
 func (v *LLVMValue) UnaryOp(op token.Token) Value {
