@@ -231,8 +231,62 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		panic("unimplemented")
 	}
 
-	// Numbers.
-	// Determine whether to use integer or floating point instructions.
+	// Complex numbers.
+	if isComplex(lhs.typ) {
+		// XXX Should we represent complex numbers as vectors?
+		lhsval := lhs.LLVMValue()
+		rhsval := rhs.LLVMValue()
+		a_ := b.CreateExtractValue(lhsval, 0, "")
+		b_ := b.CreateExtractValue(lhsval, 1, "")
+		c_ := b.CreateExtractValue(rhsval, 0, "")
+		d_ := b.CreateExtractValue(rhsval, 1, "")
+		switch op {
+		case token.QUO:
+			// (a+bi)/(c+di) = (ac+bd)/(c**2+d**2) + (bc-ad)/(c**2+d**2)i
+			ac := b.CreateFMul(a_, c_, "")
+			bd := b.CreateFMul(b_, d_, "")
+			bc := b.CreateFMul(b_, c_, "")
+			ad := b.CreateFMul(a_, d_, "")
+			cpow2 := b.CreateFMul(c_, c_, "")
+			dpow2 := b.CreateFMul(d_, d_, "")
+			denom := b.CreateFAdd(cpow2, dpow2, "")
+			realnumer := b.CreateFAdd(ac, bd, "")
+			imagnumer := b.CreateFSub(bc, ad, "")
+			real_ := b.CreateFDiv(realnumer, denom, "")
+			imag_ := b.CreateFDiv(imagnumer, denom, "")
+			lhsval = b.CreateInsertValue(lhsval, real_, 0, "")
+			result = b.CreateInsertValue(lhsval, imag_, 1, "")
+		case token.MUL:
+			// (a+bi)(c+di) = (ac-bd)+(bc+ad)i
+			ac := b.CreateFMul(a_, c_, "")
+			bd := b.CreateFMul(b_, d_, "")
+			bc := b.CreateFMul(b_, c_, "")
+			ad := b.CreateFMul(a_, d_, "")
+			real_ := b.CreateFSub(ac, bd, "")
+			imag_ := b.CreateFAdd(bc, ad, "")
+			lhsval = b.CreateInsertValue(lhsval, real_, 0, "")
+			result = b.CreateInsertValue(lhsval, imag_, 1, "")
+		case token.ADD:
+			real_ := b.CreateFAdd(a_, c_, "")
+			imag_ := b.CreateFAdd(b_, d_, "")
+			lhsval = b.CreateInsertValue(lhsval, real_, 0, "")
+			result = b.CreateInsertValue(lhsval, imag_, 1, "")
+		case token.SUB:
+			real_ := b.CreateFSub(a_, c_, "")
+			imag_ := b.CreateFSub(b_, d_, "")
+			lhsval = b.CreateInsertValue(lhsval, real_, 0, "")
+			result = b.CreateInsertValue(lhsval, imag_, 1, "")
+		case token.EQL:
+			realeq := b.CreateFCmp(llvm.FloatOEQ, a_, c_, "")
+			imageq := b.CreateFCmp(llvm.FloatOEQ, b_, d_, "")
+			result = b.CreateAnd(realeq, imageq, "")
+		default:
+			panic(fmt.Errorf("unhandled operator: %v", op))
+		}
+		return lhs.compiler.NewValue(result, lhs.typ)
+	}
+
+	// Floats and integers.
 	// TODO determine the NaN rules.
 
 	switch op {
@@ -292,16 +346,6 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	case token.EQL:
 		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
-		} else if isComplex(lhs.typ) {
-			lhsval := lhs.LLVMValue()
-			rhsval := rhs.LLVMValue()
-			lhsreal := b.CreateExtractValue(lhsval, 0, "")
-			lhsimag := b.CreateExtractValue(lhsval, 1, "")
-			rhsreal := b.CreateExtractValue(rhsval, 0, "")
-			rhsimag := b.CreateExtractValue(rhsval, 1, "")
-			realeq := b.CreateFCmp(llvm.FloatOEQ, lhsreal, rhsreal, "")
-			imageq := b.CreateFCmp(llvm.FloatOEQ, lhsimag, rhsimag, "")
-			result = b.CreateAnd(realeq, imageq, "")
 		} else {
 			result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
@@ -468,6 +512,18 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			value := v.LLVMValue()
 			strdata := c.builder.CreateExtractValue(value, 0, "")
 			strlen := c.builder.CreateExtractValue(value, 1, "")
+
+			// Data must be copied, to prevent changes in
+			// the byte slice from mutating the string.
+			newdata := c.builder.CreateArrayMalloc(strdata.Type().ElementType(), strlen, "")
+			memcpy := c.NamedFunction("runtime.memcpy", "func f(uintptr, uintptr, uintptr)")
+			c.builder.CreateCall(memcpy, []llvm.Value{
+				c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+				c.builder.CreatePtrToInt(strdata, c.target.IntPtrType(), ""),
+				strlen,
+			}, "")
+			strdata = newdata
+
 			struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
 			struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
 			struct_ = c.builder.CreateInsertValue(struct_, strlen, 1, "")
@@ -487,6 +543,18 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		value := v.LLVMValue()
 		data := c.builder.CreateExtractValue(value, 0, "")
 		len := c.builder.CreateExtractValue(value, 1, "")
+
+		// Data must be copied, to prevent changes in
+		// the byte slice from mutating the string.
+		newdata := c.builder.CreateArrayMalloc(data.Type().ElementType(), len, "")
+		memcpy := c.NamedFunction("runtime.memcpy", "func f(uintptr, uintptr, uintptr)")
+		c.builder.CreateCall(memcpy, []llvm.Value{
+			c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+			c.builder.CreatePtrToInt(data, c.target.IntPtrType(), ""),
+			len,
+		}, "")
+		data = newdata
+
 		struct_ := llvm.Undef(c.types.ToLLVM(types.Typ[types.String]))
 		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")
 		struct_ = c.builder.CreateInsertValue(struct_, len, 1, "")

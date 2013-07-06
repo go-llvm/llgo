@@ -4,6 +4,11 @@ func testBytesConversion() {
 	s := "abc"
 	b := []byte(s)
 	println("testBytesConversion:", s == string(b))
+	b[0] = '!'
+	println(s)
+	s = string(b)
+	b[0] = 'a'
+	println(s)
 }
 
 func testBytesCopy() {
