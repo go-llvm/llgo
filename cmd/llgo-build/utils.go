@@ -11,6 +11,8 @@ package main
 import (
 	"fmt"
 	"go/build"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,4 +63,38 @@ func goFilesPackage(gofiles []string) (*build.Package, error) {
 		dir = filepath.Join(cwd, dir)
 	}
 	return buildctx.ImportDir(dir, 0)
+}
+
+func moveFile(src, dst string) error {
+	if printcommands {
+		log.Printf("mv %s %s\n", src, dst)
+	}
+	if os.Rename(src, dst) != nil {
+		// rename may fail if the paths are on
+		// different filesystems.
+		fin, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer fin.Close()
+
+		fout, err := os.Create(dst)
+		if err != nil {
+			return err
+		}
+		defer fout.Close()
+
+		info, err := fin.Stat()
+		if err != nil {
+			return err
+		}
+		if err = fout.Chmod(info.Mode()); err != nil {
+			return err
+		}
+		if _, err = io.Copy(fout, fin); err != nil {
+			return err
+		}
+		return os.Remove(src)
+	}
+	return nil
 }

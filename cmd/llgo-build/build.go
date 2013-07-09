@@ -165,7 +165,7 @@ func buildPackages(pkgpaths []string) error {
 		output := output
 		if output == "" && pkg.IsCommand() {
 			first := pkg.GoFiles[0]
-			output = first[:len(first)-len(".go")] + ".bc"
+			output = first[:len(first)-len(".go")]
 		}
 		for i, filename := range pkg.GoFiles {
 			pkg.GoFiles[i] = filepath.Join(pkg.Dir, filename)
@@ -193,7 +193,7 @@ func buildPackage(pkg *build.Package, output string) error {
 	dir, file := path.Split(pkg.ImportPath)
 	if pkg.IsCommand() {
 		if output == "" {
-			output = file + ".bc"
+			output = file
 		}
 	} else {
 		dir = filepath.Join(pkgroot, dir)
@@ -207,7 +207,9 @@ func buildPackage(pkg *build.Package, output string) error {
 		args = append(args, "-importpath", pkg.ImportPath)
 	}
 
-	args = append(args, "-o", output)
+	_, file = path.Split(output)
+	tempfile := path.Join(workdir, file+".bc")
+	args = append(args, "-o", tempfile)
 	args = append(args, pkg.GoFiles...)
 	cmd := exec.Command("llgo", args...)
 	cmd.Stdout = os.Stdout
@@ -240,7 +242,7 @@ func buildPackage(pkg *build.Package, output string) error {
 			os.Remove(bcfile)
 			return err
 		}
-		cmd = exec.Command(llvmlink, "-o", output, output, bcfile)
+		cmd = exec.Command(llvmlink, "-o", tempfile, tempfile, bcfile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = runCmd(cmd)
@@ -252,7 +254,7 @@ func buildPackage(pkg *build.Package, output string) error {
 
 	// Link .ll files in.
 	if len(pkg.SFiles) > 0 {
-		args = []string{"-o", output, output}
+		args = []string{"-o", tempfile, tempfile}
 		args = append(args, pkg.SFiles...)
 		cmd := exec.Command(llvmlink, args...)
 		cmd.Stdout = os.Stdout
@@ -265,7 +267,7 @@ func buildPackage(pkg *build.Package, output string) error {
 
 	// If it's a command, link in the dependencies.
 	if pkg.IsCommand() {
-		linkdeps(pkg, output)
+		linkdeps(pkg, tempfile)
 	}
-	return nil
+	return moveFile(tempfile, output)
 }

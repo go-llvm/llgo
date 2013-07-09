@@ -8,6 +8,7 @@ import (
 	"flag"
 	llgobuild "github.com/axw/llgo/build"
 	"go/build"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ var (
 	printcommands bool
 	emitllvm      bool
 	buildctx      *build.Context
+	workdir       string
 )
 
 func init() {
@@ -62,7 +64,13 @@ func main() {
 	}
 	pkgroot = filepath.Join(gopath, "pkg", "llgo", triple)
 
+	// Create a temporary work dir.
+	workdir, err = ioutil.TempDir("", "llgo")
+	if err != nil {
+		log.Fatal(err)
+	}
 	err = buildPackages(flag.Args())
+	os.RemoveAll(workdir)
 	if err != nil {
 		log.Fatal(err)
 	}
