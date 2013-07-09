@@ -77,27 +77,24 @@ func strnext(s _string, i int) (n int, value rune) {
 	c0 := *(*uint8)(unsafe.Pointer(ptr))
 	n = int(ctlz8(^c0))
 	if n == 0 {
-		value = rune(c0)
-		n = 1
-		return
+		return 1, rune(c0)
 	} else if i+n > s.len {
-		value = 0xFFFD
-		n = 1
-		return
+		return 1, '\uFFFD'
 	}
 	value = rune(c0 & uint8(0xFF>>uint(n)))
 	for j := 1; j < n; j++ {
 		c := *(*uint8)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + uintptr(j)))
 		// Make sure only the top bit is set.
 		if c&0xC0 != 0x80 {
-			n = 1
-			value = 0xFFFD
-			return
+			return 1, '\uFFFD'
 		}
 		// only take the low 6 bits of continuation bytes.
 		value = (value << 6) | rune(c&0x3F)
 	}
-	return
+	if value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff) {
+		return n, '\uFFFD'
+	}
+	return n, value
 }
 
 // strrune converts a rune to a string.

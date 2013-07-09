@@ -627,12 +627,11 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	}
 
 	// Is it a new var definition? Then allocate some memory on the stack.
-	var keyType, valueType types.Type
 	var keyPtr, valuePtr llvm.Value
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
 			keyobj := c.objects[key]
-			keyType = keyobj.Type()
+			keyType := keyobj.Type()
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
 			stackvar := c.NewValue(keyPtr, types.NewPointer(keyType)).makePointee()
 			stackvar.stack = c.functions.top().LLVMValue
@@ -641,11 +640,21 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
 				valueobj := c.objects[value]
-				valueType = valueobj.Type()
+				valueType := valueobj.Type()
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
 				stackvar := c.NewValue(valuePtr, types.NewPointer(valueType)).makePointee()
 				stackvar.stack = c.functions.top().LLVMValue
 				c.objectdata[valueobj].Value = stackvar
+			}
+		}
+	} else {
+		// Simple assignment, resolve the key/value pointers.
+		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
+			keyPtr = c.Resolve(key).(*LLVMValue).pointer.LLVMValue()
+		}
+		if stmt.Value != nil {
+			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
+				valuePtr = c.Resolve(value).(*LLVMValue).pointer.LLVMValue()
 			}
 		}
 	}

@@ -4,6 +4,13 @@ func printchars(s string) {
 	for i, c := range s {
 		println(i, c)
 	}
+
+	// now test with plain old assignment
+	var i int
+	var c rune
+	for i, c = range s {
+		println(i, c)
+	}
 }
 
 func main() {
