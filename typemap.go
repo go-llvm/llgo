@@ -668,7 +668,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
 			global.SetLinkage(llvm.CommonLinkage)
 			return global, global
-		} else if !isGlobalObject(obj) {
+		} else if !isGlobalObject(elem.Obj()) {
 			globalname = ""
 		}
 	}
