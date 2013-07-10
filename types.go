@@ -163,15 +163,21 @@ type TypeStringer struct {
 	pkgmap map[*types.TypeName]*types.Package
 }
 
+func (ts *TypeStringer) TypeKey(typ types.Type) string {
+	var buf bytes.Buffer
+	ts.writeType(&buf, typ, true)
+	return buf.String()
+}
+
 // typeString returns a string representation for typ.
 // below code based on go/types' typeString and friends.
 func (ts *TypeStringer) TypeString(typ types.Type) string {
 	var buf bytes.Buffer
-	ts.writeType(&buf, typ)
+	ts.writeType(&buf, typ, false)
 	return buf.String()
 }
 
-func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVariadic bool) {
+func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVariadic, unique bool) {
 	buf.WriteByte('(')
 	for i := 0; i < int(params.Len()); i++ {
 		par := params.At(i)
@@ -181,18 +187,18 @@ func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVa
 		if isVariadic && i == int(params.Len()-1) {
 			buf.WriteString("...")
 		}
-		ts.writeType(buf, par.Type())
+		ts.writeType(buf, par.Type(), unique)
 	}
 	buf.WriteByte(')')
 }
 
-func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) {
+func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature, unique bool) {
 	if recv := sig.Recv(); recv != nil {
-		ts.writeType(buf, recv.Type())
+		ts.writeType(buf, recv.Type(), unique)
 		buf.WriteByte(' ')
 	}
 
-	ts.writeParams(buf, sig.Params(), sig.IsVariadic())
+	ts.writeParams(buf, sig.Params(), sig.IsVariadic(), unique)
 	if sig.Results().Len() == 0 {
 		// no result
 		return
@@ -201,15 +207,15 @@ func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature) 
 	buf.WriteByte(' ')
 	if sig.Results().Len() == 1 {
 		// single unnamed result
-		ts.writeType(buf, sig.Results().At(0).Type())
+		ts.writeType(buf, sig.Results().At(0).Type(), unique)
 		return
 	}
 
 	// multiple or named result(s)
-	ts.writeParams(buf, sig.Results(), false)
+	ts.writeParams(buf, sig.Results(), false, unique)
 }
 
-func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
+func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type, unique bool) {
 	switch t := typ.(type) {
 	case nil:
 		buf.WriteString("<nil>")
@@ -221,11 +227,11 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Array:
 		fmt.Fprintf(buf, "[%d]", t.Len())
-		ts.writeType(buf, t.Elem())
+		ts.writeType(buf, t.Elem(), unique)
 
 	case *types.Slice:
 		buf.WriteString("[]")
-		ts.writeType(buf, t.Elem())
+		ts.writeType(buf, t.Elem(), unique)
 
 	case *types.Struct:
 		buf.WriteString("struct{")
@@ -238,7 +244,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 				buf.WriteString(f.Name())
 				buf.WriteByte(' ')
 			}
-			ts.writeType(buf, f.Type())
+			ts.writeType(buf, f.Type(), unique)
 			if tag := t.Tag(i); tag != "" {
 				fmt.Fprintf(buf, " %q", tag)
 			}
@@ -247,14 +253,14 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 
 	case *types.Pointer:
 		buf.WriteByte('*')
-		ts.writeType(buf, t.Elem())
+		ts.writeType(buf, t.Elem(), unique)
 
 	case *types.Tuple:
-		ts.writeParams(buf, t, false)
+		ts.writeParams(buf, t, false, unique)
 
 	case *types.Signature:
 		buf.WriteString("func")
-		ts.writeSignature(buf, t)
+		ts.writeSignature(buf, t, unique)
 
 	case *types.Interface:
 		buf.WriteString("interface{")
@@ -263,15 +269,15 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 				buf.WriteString("; ")
 			}
 			buf.WriteString(m.Name())
-			ts.writeSignature(buf, m.Type().(*types.Signature))
+			ts.writeSignature(buf, m.Type().(*types.Signature), unique)
 		}
 		buf.WriteByte('}')
 
 	case *types.Map:
 		buf.WriteString("map[")
-		ts.writeType(buf, t.Key())
+		ts.writeType(buf, t.Key(), unique)
 		buf.WriteByte(']')
-		ts.writeType(buf, t.Elem())
+		ts.writeType(buf, t.Elem(), unique)
 
 	case *types.Chan:
 		var s string
@@ -284,14 +290,27 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type) {
 			s = "chan "
 		}
 		buf.WriteString(s)
-		ts.writeType(buf, t.Elem())
+		ts.writeType(buf, t.Elem(), unique)
 
 	case *types.Named:
-		if pkg := ts.pkgmap[t.Obj()]; pkg != nil && pkg.Path() != "" {
+		obj := t.Obj()
+		if pkg := ts.pkgmap[obj]; pkg != nil && pkg.Path() != "" {
 			buf.WriteString(pkg.Path())
 			buf.WriteByte('.')
 		}
-		buf.WriteString(t.Obj().Name())
+		buf.WriteString(obj.Name())
+
+		// pkg.name may exist in multiple scopes within a package,
+		// so we must add the object's pointer (which is unique)
+		// to differentiate them.
+		//
+		// XXX Note that this is only to support the use of TypeString
+		// for generating unique keys in typemap. When go/types/typemap
+		// is ready, we should use that instead.
+		if unique {
+			buf.WriteByte('@')
+			buf.WriteString(fmt.Sprintf("%p", obj))
+		}
 
 	default:
 		fmt.Fprintf(buf, "<type %T>", t)

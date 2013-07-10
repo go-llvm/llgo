@@ -140,7 +140,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTyp
 }
 
 func (tm *LLVMTypeMap) ToLLVM(t types.Type) llvm.Type {
-	tstr := tm.TypeString(t)
+	tstr := tm.TypeKey(t)
 	lt, ok := tm.types[tstr]
 	if !ok {
 		lt = tm.makeLLVMType(tstr, t)
@@ -157,7 +157,7 @@ func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 }
 
 func (tm *TypeMap) toRuntime(t types.Type) (global, value llvm.Value) {
-	tstr := tm.TypeString(t)
+	tstr := tm.TypeKey(t)
 	info, ok := tm.types[tstr]
 	if !ok {
 		info.global, info.dyntyp = tm.makeRuntimeType(tstr, t)
@@ -668,6 +668,8 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
 			global.SetLinkage(llvm.CommonLinkage)
 			return global, global
+		} else if !isGlobalObject(obj) {
+			globalname = ""
 		}
 	}
 
@@ -883,6 +885,8 @@ func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
 		global.SetInitializer(llvm.ConstNull(tm.runtimeType))
 		global.SetLinkage(llvm.CommonLinkage)
 		return global, global
+	} else if !isGlobalObject(n.Obj()) {
+		globalname = ""
 	}
 
 	// If the underlying type is Basic, then we always create
@@ -940,4 +944,9 @@ func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	g := llvm.AddGlobal(tm.module, str.Type(), "")
 	g.SetInitializer(str)
 	return g
+}
+
+func isGlobalObject(obj types.Object) bool {
+    pkg := obj.Pkg()
+    return pkg == nil || obj.Parent() == pkg.Scope()
 }
