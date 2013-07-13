@@ -14,6 +14,14 @@ func appendnothing() {
 	println(len(append(x)) == 1)
 }
 
+func appendmulti() {
+	a := append([]bool{}, []bool{false, true, false}...)
+	b := append([]bool{}, false, true, false)
+	for i := range a {
+		println(a[i], b[i])
+	}
+}
+
 func main() {
 	x := []int{}
 	for i := 0; i < 100; i++ {
@@ -29,4 +37,5 @@ func main() {
 	}
 	stringtobytes()
 	appendnothing()
+	appendmulti()
 }

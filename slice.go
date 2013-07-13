@@ -78,14 +78,16 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 
 func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	s := c.VisitExpr(expr.Args[0])
+	elemtyp := s.Type().Underlying().(*types.Slice).Elem()
 	if len(expr.Args) == 1 {
 		return s
 	} else if expr.Ellipsis.IsValid() {
 		c.convertUntyped(expr.Args[1], s.Type())
 	} else {
-		c.convertUntyped(expr.Args[1], s.Type().Underlying().(*types.Slice).Elem())
+		for _, arg := range expr.Args[1:] {
+			c.convertUntyped(arg, elemtyp)
+		}
 	}
-	elem := c.VisitExpr(expr.Args[1])
 
 	sliceappend := c.NamedFunction("runtime.sliceappend", "func f(t uintptr, dst, src slice) slice")
 	i8slice := sliceappend.Type().ElementType().ReturnType()
@@ -100,18 +102,22 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	if expr.Ellipsis.IsValid() {
 		// Pass the provided slice straight through. If it's a string,
 		// convert it to a []byte first.
-		elem = elem.Convert(s.Type())
+		elem := c.VisitExpr(expr.Args[1]).Convert(s.Type())
 		b = c.coerceSlice(elem.LLVMValue(), i8slice)
 	} else {
 		// Construct a fresh []int8 for the temporary slice.
-		b_ := elem.LLVMValue()
-		one := llvm.ConstInt(c.types.inttype, 1, false)
-		mem := c.builder.CreateAlloca(elem.LLVMValue().Type(), "")
-		c.builder.CreateStore(b_, mem)
+		n := llvm.ConstInt(c.types.inttype, uint64(len(expr.Args)-1), false)
+		mem := c.builder.CreateArrayAlloca(c.types.ToLLVM(elemtyp), n, "")
+		for i, arg := range expr.Args[1:] {
+			elem := c.VisitExpr(arg).Convert(elemtyp)
+			indices := []llvm.Value{llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
+			ptr := c.builder.CreateGEP(mem, indices, "")
+			c.builder.CreateStore(elem.LLVMValue(), ptr)
+		}
 		b = llvm.Undef(i8slice)
 		b = c.builder.CreateInsertValue(b, c.builder.CreateBitCast(mem, i8ptr, ""), 0, "")
-		b = c.builder.CreateInsertValue(b, one, 1, "")
-		b = c.builder.CreateInsertValue(b, one, 2, "")
+		b = c.builder.CreateInsertValue(b, n, 1, "")
+		b = c.builder.CreateInsertValue(b, n, 2, "")
 	}
 
 	// Call runtime function, then coerce the result.
