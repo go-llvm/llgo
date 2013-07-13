@@ -20,7 +20,7 @@ func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
 }
 
 func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
-	strcat := c.NamedFunction("runtime.strcat", "func f(a, b _string) _string")
+	strcat := c.NamedFunction("runtime.strcat", "func(a, b _string) _string")
 	_string := strcat.Type().ElementType().ReturnType()
 	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
 	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
@@ -31,7 +31,7 @@ func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-	strcmp := c.NamedFunction("runtime.strcmp", "func f(a, b _string) int32")
+	strcmp := c.NamedFunction("runtime.strcmp", "func(a, b _string) int32")
 	_string := strcmp.Type().ElementType().ParamTypes()[0]
 	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
 	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
@@ -60,7 +60,7 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 }
 
 func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Value) {
-	strnext := c.NamedFunction("runtime.strnext", "func f(s _string, i int) (int, rune)")
+	strnext := c.NamedFunction("runtime.strnext", "func(s _string, i int) (int, rune)")
 	_string := strnext.Type().ElementType().ParamTypes()[0]
 	strval = c.coerceString(strval, _string)
 	args := []llvm.Value{strval, index}
@@ -72,7 +72,7 @@ func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Va
 
 func (v *LLVMValue) runeToString() *LLVMValue {
 	c := v.compiler
-	strrune := c.NamedFunction("runtime.strrune", "func f(n int64) _string")
+	strrune := c.NamedFunction("runtime.strrune", "func(n int64) _string")
 	args := []llvm.Value{v.Convert(types.Typ[types.Int64]).LLVMValue()}
 	result := c.builder.CreateCall(strrune, args, "")
 	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
@@ -81,7 +81,7 @@ func (v *LLVMValue) runeToString() *LLVMValue {
 
 func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
 	c := v.compiler
-	strtorunes := c.NamedFunction("runtime.strtorunes", "func f(_string) slice")
+	strtorunes := c.NamedFunction("runtime.strtorunes", "func(_string) slice")
 	_string := strtorunes.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
 	result := c.builder.CreateCall(strtorunes, args, "")
@@ -92,7 +92,7 @@ func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
 
 func (v *LLVMValue) runeSliceToString() *LLVMValue {
 	c := v.compiler
-	runestostr := c.NamedFunction("runtime.runestostr", "func f(slice) _string")
+	runestostr := c.NamedFunction("runtime.runestostr", "func(slice) _string")
 	i8slice := runestostr.Type().ElementType().ParamTypes()[0]
 	args := []llvm.Value{c.coerceSlice(v.LLVMValue(), i8slice)}
 	result := c.builder.CreateCall(runestostr, args, "")

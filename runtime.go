@@ -38,36 +38,34 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 		value := c.Resolve(c.objectdata[obj].Ident)
 		f = llvm.ConstExtractValue(value.LLVMValue(), []uint32{0})
 	} else {
-		fset := token.NewFileSet()
-		code := `package runtime;import("unsafe");` + signature + `{panic("")}`
-		file, err := parser.ParseFile(fset, "", code, 0)
+		if c.runtimetypespkg == nil {
+			// Parse the runtime package, since we may need to refer to
+			// its types.
+			buildpkg, err := build.Import("github.com/axw/llgo/pkg/runtime", "", 0)
+			if err != nil {
+				panic(err)
+			}
+
+			// All types visible to the compiler are in "types.go".
+			runtimefiles := []string{path.Join(buildpkg.Dir, "types.go")}
+
+			fset := token.NewFileSet()
+			files, err := parseFiles(fset, runtimefiles)
+			if err != nil {
+				panic(err)
+			}
+			c.runtimetypespkg, _, err = c.typecheck("runtime", fset, files)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		pkg := c.runtimetypespkg
+		scope := pkg.Scope().Child(0)
+		ftype, _, err := types.Eval(signature+"{panic()}", pkg, scope)
 		if err != nil {
 			panic(err)
 		}
-
-		// Parse the runtime package, since we may need to refer to
-		// its types. Can't be cached, because type-checking can't
-		// be done twice on the AST.
-		buildpkg, err := build.Import("github.com/axw/llgo/pkg/runtime", "", 0)
-		if err != nil {
-			panic(err)
-		}
-
-		// All types visible to the compiler are in "types.go".
-		runtimefiles := []string{path.Join(buildpkg.Dir, "types.go")}
-
-		files, err := parseFiles(fset, runtimefiles)
-		if err != nil {
-			panic(err)
-		}
-		files = append(files, file)
-		_, _, err = c.typecheck("runtime", fset, files)
-		if err != nil {
-			panic(err)
-		}
-
-		fdecl := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
-		ftype := c.objects[fdecl.Name].Type().(*types.Signature)
 		llvmfntyp := c.types.ToLLVM(ftype).StructElementTypes()[0].ElementType()
 		f = llvm.AddFunction(c.module.Module, name, llvmfntyp)
 	}
@@ -119,7 +117,7 @@ func (c *compiler) parseReflect() (*types.Package, error) {
 }
 
 func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
-	malloc := c.NamedFunction("runtime.malloc", "func f(uintptr) unsafe.Pointer")
+	malloc := c.NamedFunction("runtime.malloc", "func(uintptr) unsafe.Pointer")
 	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
 	case n < 0:
 		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
@@ -135,7 +133,7 @@ func (c *compiler) createTypeMalloc(t llvm.Type) llvm.Value {
 }
 
 func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
-	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size uintptr)")
+	memset := c.NamedFunction("runtime.memset", "func(dst unsafe.Pointer, fill byte, size uintptr)")
 	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
 	case n < 0:
 		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")

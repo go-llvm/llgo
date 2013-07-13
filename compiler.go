@@ -64,6 +64,10 @@ type compiler struct {
 	llvmtypes *LLVMTypeMap
 	types     *TypeMap
 
+	// runtimetypespkg is the type-checked runtime/types.go file,
+	// which is used for evaluating the types of runtime functions.
+	runtimetypespkg *types.Package
+
 	// pnacl is set to true if the target triple was originally
 	// specified as "pnacl". This is necessary, as the TargetTriple
 	// field will have been updated to the true triple used to
@@ -354,7 +358,7 @@ func (c *compiler) createMainFunction() error {
 		if !mainMain.IsNil() {
 			return fmt.Errorf("Found main.main")
 		}
-		pluginMain := c.NamedFunction("PpapiPluginMain", "func f() int32")
+		pluginMain := c.NamedFunction("PpapiPluginMain", "func() int32")
 
 		// Synthesise a main which has no return value. We could cast
 		// PpapiPluginMain, but this is potentially unsafe as its
@@ -376,8 +380,8 @@ func (c *compiler) createMainFunction() error {
 	// runtime.main is called by main, with argc, argv, argp,
 	// and a pointer to main.main, which must be a niladic
 	// function with no result.
-	runtimeMain := c.NamedFunction("runtime.main", "func f(int32, **byte, **byte, *int8) int32")
-	main := c.NamedFunction("main", "func f(int32, **byte, **byte) int32")
+	runtimeMain := c.NamedFunction("runtime.main", "func(int32, **byte, **byte, *int8) int32")
+	main := c.NamedFunction("main", "func(int32, **byte, **byte) int32")
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 	mainMain = c.builder.CreateBitCast(mainMain, runtimeMain.Type().ElementType().ParamTypes()[3], "")

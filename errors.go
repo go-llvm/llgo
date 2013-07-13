@@ -27,13 +27,13 @@ func (c *compiler) visitRecover() *LLVMValue {
 	}
 	eface := &types.Interface{}
 	err := c.builder.CreateAlloca(c.types.ToLLVM(eface), "")
-	r := c.NamedFunction("runtime.recover", "func f(int32, *interface{})")
+	r := c.NamedFunction("runtime.recover", "func(int32, *interface{})")
 	c.builder.CreateCall(r, []llvm.Value{indirect, err}, "")
 	return c.NewValue(c.builder.CreateLoad(err, ""), eface)
 }
 
 func (c *compiler) visitPanic(arg Value) {
-	panic_ := c.NamedFunction("runtime.panic_", "func f(interface{})")
+	panic_ := c.NamedFunction("runtime.panic_", "func(interface{})")
 	args := []llvm.Value{arg.Convert(&types.Interface{}).LLVMValue()}
 	if f := c.functions.top(); f != nil && !f.unwindblock.IsNil() {
 		c.builder.CreateInvoke(panic_, args, f.deferblock, f.unwindblock, "")

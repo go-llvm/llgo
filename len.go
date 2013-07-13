@@ -48,7 +48,7 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 		lenvalue = c.builder.CreateExtractValue(sliceval, 1, "")
 	case *types.Map:
 		mapval := value.LLVMValue()
-		f := c.NamedFunction("runtime.maplen", "func f(m uintptr) int")
+		f := c.NamedFunction("runtime.maplen", "func(m uintptr) int")
 		lenvalue = c.builder.CreateCall(f, []llvm.Value{mapval}, "")
 	case *types.Array:
 		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)

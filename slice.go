@@ -89,7 +89,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 		}
 	}
 
-	sliceappend := c.NamedFunction("runtime.sliceappend", "func f(t uintptr, dst, src slice) slice")
+	sliceappend := c.NamedFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
 	i8slice := sliceappend.Type().ElementType().ReturnType()
 	i8ptr := c.types.ToLLVM(types.NewPointer(types.Typ[types.Int8]))
 
@@ -135,7 +135,7 @@ func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
 	// If it's a string, convert it to a []byte first.
 	source = source.Convert(dest.Type())
 
-	slicecopy := c.NamedFunction("runtime.slicecopy", "func f(t uintptr, dst, src slice) int")
+	slicecopy := c.NamedFunction("runtime.slicecopy", "func(t uintptr, dst, src slice) int")
 	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
 
 	// Coerce first argument into an []int8.
@@ -175,7 +175,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 
 	switch typ := value.Type().Underlying().(type) {
 	case *types.Array:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int) slice")
+		sliceslice := c.NamedFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
 		arrayptr := value.(*LLVMValue).pointer.LLVMValue()
@@ -192,7 +192,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
 		return c.NewValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func f(t uintptr, s slice, low, high int) slice")
+		sliceslice := c.NamedFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := value.LLVMValue()
 		sliceTyp := sliceValue.Type()
@@ -203,7 +203,7 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewValue(c.coerceSlice(result, sliceTyp), value.Type())
 	case *types.Basic:
-		stringslice := c.NamedFunction("runtime.stringslice", "func f(a string, low, high int) string")
+		stringslice := c.NamedFunction("runtime.stringslice", "func(a string, low, high int) string")
 		args := []llvm.Value{value.LLVMValue(), low, high}
 		result := c.builder.CreateCall(stringslice, args, "")
 		return c.NewValue(result, value.Type())

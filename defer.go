@@ -102,10 +102,10 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 		lp.AddClause(llvm.ConstNull(i8ptr))
 
 		// Catch the exception.
-		begin_catch := c.NamedFunction("__cxa_begin_catch", "func f(*int8) *int8")
+		begin_catch := c.NamedFunction("__cxa_begin_catch", "func(*int8) *int8")
 		exception := c.builder.CreateExtractValue(llvm.Value(lp), 0, "")
 		c.builder.CreateCall(begin_catch, []llvm.Value{exception}, "")
-		end_catch := c.NamedFunction("__cxa_end_catch", "func f()")
+		end_catch := c.NamedFunction("__cxa_end_catch", "func()")
 		c.builder.CreateCall(end_catch, nil, "")
 
 		c.builder.CreateBr(f.deferblock)
@@ -113,7 +113,7 @@ func (c *compiler) makeDeferBlock(f *function, body *ast.BlockStmt) {
 
 	// Create a real return instruction.
 	c.builder.SetInsertPointAtEnd(f.deferblock)
-	rundefers := c.NamedFunction("runtime.rundefers", "func f()")
+	rundefers := c.NamedFunction("runtime.rundefers", "func()")
 	c.builder.CreateCall(rundefers, nil, "")
 
 	if f.results.Len() == 0 {
@@ -142,7 +142,7 @@ func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
 	args := c.evalCallArgs(fntype, stmt.Call.Args)
 
 	// Call "runtime.pushdefer" to add fn+argValues to the defer stack
-	pushdefer := c.NamedFunction("runtime.pushdefer", "func f(f_ func())")
+	pushdefer := c.NamedFunction("runtime.pushdefer", "func(f_ func())")
 	funcval := c.indirectFunction(fn, args, stmt.Call.Ellipsis.IsValid())
 	c.builder.CreateCall(pushdefer, []llvm.Value{funcval.LLVMValue()}, "")
 }

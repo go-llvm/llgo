@@ -127,7 +127,7 @@ func (v *LLVMValue) convertI2I(iface *types.Interface) (result *LLVMValue, succe
 	return result, success
 
 check_dynamic:
-	runtimeConvertI2I := c.NamedFunction("runtime.convertI2I", "func f(typ, from, to uintptr) bool")
+	runtimeConvertI2I := c.NamedFunction("runtime.convertI2I", "func(typ, from, to uintptr) bool")
 	llvmUintptr := runtimeConvertI2I.Type().ElementType().ParamTypes()[0]
 
 	var vptr llvm.Value
@@ -273,7 +273,7 @@ func (lhs *LLVMValue) interfaceTypeEquals(typ types.Type) *LLVMValue {
 	c, b := lhs.compiler, lhs.compiler.builder
 	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
 	rhsType := c.types.ToRuntime(typ)
-	f := c.NamedFunction("runtime.eqtyp", "func f(t1, t2 *rtype) bool")
+	f := c.NamedFunction("runtime.eqtyp", "func(t1, t2 *rtype) bool")
 	t := f.Type().ElementType().ParamTypes()[0]
 	lhsType = b.CreateBitCast(lhsType, t, "")
 	rhsType = b.CreateBitCast(rhsType, t, "")
@@ -300,7 +300,7 @@ func (lhs *LLVMValue) compareI2I(rhs *LLVMValue) Value {
 		c.builder.CreatePtrToInt(rhsValue, llvmUintptr, ""),
 	}
 
-	f := c.NamedFunction("runtime.compareI2I", "func f(t1, t2, v1, v2 uintptr) bool")
+	f := c.NamedFunction("runtime.compareI2I", "func(t1, t2, v1, v2 uintptr) bool")
 	result := c.builder.CreateCall(f, args, "")
 	return c.NewValue(result, types.Typ[types.Bool])
 }

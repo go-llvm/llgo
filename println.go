@@ -88,7 +88,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
 					fallthrough
 				case types.Float64:
-					printfloat := c.NamedFunction("runtime.printfloat", "func f(float64) string")
+					printfloat := c.NamedFunction("runtime.printfloat", "func(float64) string")
 					args := []llvm.Value{llvm_value}
 					llvm_value = c.builder.CreateCall(printfloat, args, "")
 					fallthrough
@@ -152,7 +152,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 	}
 	printf := getprintf(c.module.Module)
 	result := c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
-	fflush := c.NamedFunction("fflush", "func f(*int32) int32")
+	fflush := c.NamedFunction("fflush", "func(*int32) int32")
 	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
 	return result
 }

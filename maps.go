@@ -14,7 +14,7 @@ import (
 // does not exist in the map, it will be added with an uninitialised value.
 func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMValue, notnull *LLVMValue) {
 	mapType := m.Type().Underlying().(*types.Map)
-	maplookup := c.NamedFunction("runtime.maplookup", "func f(t, m, k uintptr, insert bool) uintptr")
+	maplookup := c.NamedFunction("runtime.maplookup", "func(t, m, k uintptr, insert bool) uintptr")
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 4)
 	args[0] = llvm.ConstPtrToInt(c.types.ToRuntime(mapType), ptrType)
@@ -47,7 +47,7 @@ func (c *compiler) mapLookup(m *LLVMValue, key Value, insert bool) (elem *LLVMVa
 }
 
 func (c *compiler) mapDelete(m *LLVMValue, key Value) {
-	mapdelete := c.NamedFunction("runtime.mapdelete", "func f(t, m, k uintptr)")
+	mapdelete := c.NamedFunction("runtime.mapdelete", "func(t, m, k uintptr)")
 	mapType := m.Type().Underlying().(*types.Map)
 	ptrType := c.target.IntPtrType()
 	args := make([]llvm.Value, 3)
@@ -67,7 +67,7 @@ func (c *compiler) mapDelete(m *LLVMValue, key Value) {
 // mapNext iterates through a map, accepting an iterator state value,
 // and returning a new state value, key pointer, and value pointer.
 func (c *compiler) mapNext(m *LLVMValue, nextin llvm.Value) (nextout, pk, pv llvm.Value) {
-	mapnext := c.NamedFunction("runtime.mapnext", "func f(t, m, n uintptr) (uintptr, uintptr, uintptr)")
+	mapnext := c.NamedFunction("runtime.mapnext", "func(t, m, n uintptr) (uintptr, uintptr, uintptr)")
 	mapType := m.Type().Underlying().(*types.Map)
 	ptrType := c.target.IntPtrType()
 
@@ -116,7 +116,7 @@ func (c *compiler) makeMapLiteral(typ types.Type, keys, values []Value) *LLVMVal
 		keysptr = c.builder.CreatePtrToInt(keysptr, c.target.IntPtrType(), "")
 		valuesptr = c.builder.CreatePtrToInt(valuesptr, c.target.IntPtrType(), "")
 	}
-	f := c.NamedFunction("runtime.makemap", "func f(t uintptr, n int, keys, values uintptr) uintptr")
+	f := c.NamedFunction("runtime.makemap", "func(t uintptr, n int, keys, values uintptr) uintptr")
 	mapval := c.builder.CreateCall(f, []llvm.Value{dyntyp, count, keysptr, valuesptr}, "")
 	return c.NewValue(mapval, typ)
 }

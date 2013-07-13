@@ -29,7 +29,7 @@ func (v *LLVMValue) chanSend(value Value) {
 		c.builder.CreateStore(value, ptr)
 	}
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-	f := c.NamedFunction("runtime.chansend", "func f(c, ptr uintptr)")
+	f := c.NamedFunction("runtime.chansend", "func(c, ptr uintptr)")
 	c.builder.CreateCall(f, []llvm.Value{v.LLVMValue(), uintptr_}, "")
 }
 
@@ -38,7 +38,7 @@ func (v *LLVMValue) chanRecv() *LLVMValue {
 	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-	f := c.NamedFunction("runtime.chanrecv", "func f(c, ptr uintptr)")
+	f := c.NamedFunction("runtime.chanrecv", "func(c, ptr uintptr)")
 	c.builder.CreateCall(f, []llvm.Value{v.LLVMValue(), uintptr_}, "")
 	value := c.builder.CreateLoad(ptr, "")
 	return c.NewValue(value, elttyp)

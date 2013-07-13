@@ -504,7 +504,7 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
 	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
 
-	const eqalgsig = "func f(uintptr, unsafe.Pointer, unsafe.Pointer) bool"
+	const eqalgsig = "func(uintptr, unsafe.Pointer, unsafe.Pointer) bool"
 	var equalAlg llvm.Value
 	switch t := t.(type) {
 	case *types.Basic:
@@ -947,6 +947,6 @@ func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 }
 
 func isGlobalObject(obj types.Object) bool {
-    pkg := obj.Pkg()
-    return pkg == nil || obj.Parent() == pkg.Scope()
+	pkg := obj.Pkg()
+	return pkg == nil || obj.Parent() == pkg.Scope()
 }
