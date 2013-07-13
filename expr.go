@@ -514,7 +514,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 				fieldValue = fieldValue.makePointee()
 			} else {
 				ptr := fieldValue.pointer.LLVMValue()
-				structTyp := fieldValue.typ.Deref().Underlying().(*types.Struct)
+				structTyp := deref(fieldValue.typ).Underlying().(*types.Struct)
 				field := structTyp.Field(i)
 				fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
 				fieldPtrTyp := types.NewPointer(field.Type())

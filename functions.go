@@ -105,7 +105,7 @@ func (c *compiler) methods(t types.Type) *methodset {
 	// original type is in the main package (otherwise just
 	// declaring them).
 	var curr []selectorCandidate
-	if typ, ok := t.Underlying().Deref().(*types.Struct); ok {
+	if typ, ok := deref(t.Underlying()).(*types.Struct); ok {
 		curr = append(curr, selectorCandidate{nil, typ})
 	}
 	for len(curr) > 0 {

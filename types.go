@@ -85,6 +85,13 @@ func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 	return false
 }
 
+func deref(t types.Type) types.Type {
+    if p, ok := t.(*types.Pointer); ok {
+        return p.Elem()
+    }
+    return t
+}
+
 func (c *compiler) exportRuntimeTypes() {
 	if c.pkg.Path() == "runtime" {
 		kinds := [...]types.BasicKind{

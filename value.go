@@ -722,7 +722,7 @@ func (v *LLVMValue) Type() types.Type {
 }
 
 func (v *LLVMValue) makePointee() *LLVMValue {
-	t := v.compiler.NewValue(llvm.Value{}, v.typ.Deref())
+	t := v.compiler.NewValue(llvm.Value{}, v.typ.Underlying().(*types.Pointer).Elem())
 	t.pointer = v
 	return t
 }
