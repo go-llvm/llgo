@@ -133,3 +133,16 @@ func (c *compiler) createTypeMalloc(t llvm.Type) llvm.Value {
 	ptr := c.createMalloc(llvm.SizeOf(t))
 	return c.builder.CreateIntToPtr(ptr, llvm.PointerType(t, 0), "")
 }
+
+func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
+	memset := c.NamedFunction("runtime.memset", "func f(dst unsafe.Pointer, fill byte, size uintptr)")
+	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
+	case n < 0:
+		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
+	case n > 0:
+		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
+	}
+	ptr = c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
+	fill := llvm.ConstNull(llvm.Int8Type())
+	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
+}

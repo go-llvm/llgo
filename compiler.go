@@ -284,12 +284,6 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		}
 	}
 
-	// Define intrinsics for use by the runtime: malloc, free, memcpy, etc.
-	// These could be defined in LLVM IR, and may be moved there later.
-	if importpath == "runtime" {
-		compiler.defineRuntimeIntrinsics()
-	}
-
 	// Export runtime type information.
 	compiler.exportRuntimeTypes()
 
