@@ -27,8 +27,6 @@ void pushdefer(struct Func)
 	__asm__("runtime.pushdefer") __attribute__((noinline));
 void rundefers(void)
 	__asm__("runtime.rundefers") __attribute__((noinline));
-void guardedcall0(struct Func f)
-	__asm__("runtime.guardedcall0");
 
 void panic(struct Eface error) {
 	struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));

@@ -60,7 +60,7 @@ func linkdeps(pkg *build.Package, output string) error {
 	// Finally, link with clang++ to get exception handling.
 	if !emitllvm || triple == "pnacl" {
 		clangxx := clang + "++"
-		args := []string{"-o", output, output}
+		args := []string{"-pthread", "-o", output, output}
 		if triple == "pnacl" {
 			args = append(args, "-l", "ppapi")
 		}

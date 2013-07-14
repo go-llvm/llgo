@@ -20,38 +20,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <alloca.h>
-#include <pthread.h>
-#include <string.h>
+#include "types.h"
+#include "panic.h"
 
-struct call_args_t
-{
-    void (*indirect_fn)(void*);
-    void *fn_arg;
-    size_t fn_argsize;
-    volatile int init : 1;
-};
+#include <pthread.h>
+#include <stdlib.h>
+
+void go(struct Func) __asm__("runtime.go");
 
 static void* call_gofunction(void *arg)
 {
-    struct call_args_t *call_args = (struct call_args_t*)arg;
-    void(*indirect_fn)(void*) = call_args->indirect_fn;
-    void *fn_arg = alloca(call_args->fn_argsize);
-    memcpy(fn_arg, call_args->fn_arg, call_args->fn_argsize);
-    call_args->init = 1;
-    indirect_fn(fn_arg);
+    struct Func *f = (struct Func*)arg;
+	guardedcall0(*f);
+    free(f);
     return NULL;
 }
 
-void llgo_newgoroutine(void (*indirect_fn)(void*), void *arg, size_t argsize)
-{
+void go(struct Func f) {
     pthread_t thread;
     pthread_attr_t attr;
-    struct call_args_t call_args = {indirect_fn, arg, argsize, 0};
+    struct Func *f_ = malloc(sizeof(struct Func));
+    *f_ = f;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&thread, &attr, &call_gofunction, &call_args);
-    while (!call_args.init)
-        /*Do-nothing*/;
+    pthread_create(&thread, &attr, &call_gofunction, f_);
 }
 

@@ -1,12 +1,7 @@
 #ifndef _LLGO_PANIC_H
 #define _LLGO_PANIC_H
 
-#include "inttypes.h"
-
-struct Func {
-    void (*f)(void);
-    void *data;
-};
+#include "types.h"
 
 struct Defer {
     // f represents the deferred function.
@@ -41,6 +36,11 @@ struct Panic* current_panic()
 // of frames to skip from the current location.
 uintptr_t runtime_caller_region(int skip)
 		__asm__("runtime.caller_region") __attribute__((noinline));
+
+// guardedcall0 calls the given niladic function,
+// preventing any panics from escaping.
+void guardedcall0(struct Func f)
+	__asm__("runtime.guardedcall0");
 
 #endif
 
