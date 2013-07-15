@@ -164,13 +164,15 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 	bcfile.Close()
 
 	cmd := exec.Command("llvm-link", "-o", bcpath, bcpath, runtimeModule)
+	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
 		return
 	}
 
 	exepath := filepath.Join(tempdir, "test")
-	cmd = exec.Command("clang++", "-g", "-o", exepath, bcpath)
+	cmd = exec.Command("clang++", "-pthread", "-g", "-o", exepath, bcpath)
+	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
 		return
