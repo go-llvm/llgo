@@ -120,11 +120,9 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	//
 	// Note: we do not handle unsafe.{Align,Offset,Size}of here,
 	// as they are evaluated during type-checking.
-	switch c.types.expr[expr.Fun].Type.(type) {
-	case *types.Named, *types.Signature:
-	default:
-		ident := expr.Fun.(*ast.Ident)
-		switch c.objects[ident].Name() {
+	switch t := c.types.expr[expr.Fun].Type.(type) {
+	case *types.Builtin:
+		switch t.Name() {
 		case "copy":
 			return c.VisitCopy(expr)
 		case "print":

@@ -58,7 +58,9 @@ func (c *compiler) VisitLen(expr *ast.CallExpr) Value {
 			lenvalue = c.builder.CreateExtractValue(value.LLVMValue(), 1, "")
 		}
 	case *types.Chan:
-		panic("len(chan) unimplemented")
+		chanval := value.LLVMValue()
+		f := c.NamedFunction("runtime.chanlen", "func(c uintptr) int")
+		lenvalue = c.builder.CreateCall(f, []llvm.Value{chanval}, "")
 	}
 	return c.NewValue(lenvalue, types.Typ[types.Int])
 }
