@@ -89,7 +89,7 @@ func (stackvar *LLVMValue) promoteStackVar() {
 
 // buildFunction takes a function Value, a list of parameters, and a body,
 // and generates code for the function.
-func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt, isvariadic bool) {
+func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.Tuple, body *ast.BlockStmt) {
 	if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {
 		defer c.builder.SetInsertPointAtEnd(currblock)
 	}
@@ -139,9 +139,6 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 		if name != "" {
 			value := llvm_fn.Param(i + paramoffset)
 			typ := v.Type()
-			if isvariadic && i == nparams-1 {
-				typ = types.NewSlice(typ)
-			}
 			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), name)
 			c.builder.CreateStore(value, stackvalue)
 			ptrvalue := c.NewValue(stackvalue, types.NewPointer(typ))
@@ -226,7 +223,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 		}
 	}
 	paramVarsTuple := types.NewTuple(paramVars...)
-	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body, ftyp.IsVariadic())
+	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body)
 
 	if f.Recv == nil && f.Name.Name == "init" {
 		// Is it an 'init' function? Then record it.

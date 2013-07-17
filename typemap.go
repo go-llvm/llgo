@@ -317,11 +317,7 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		params := f.Params()
 		nparams := int(params.Len())
 		for i := 0; i < nparams; i++ {
-			typ := params.At(i).Type()
-			if f.IsVariadic() && i == nparams-1 {
-				typ = types.NewSlice(typ)
-			}
-			llvmtyp := tm.ToLLVM(typ)
+			llvmtyp := tm.ToLLVM(params.At(i).Type())
 			param_types = append(param_types, llvmtyp)
 		}
 

@@ -188,13 +188,15 @@ func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVa
 	buf.WriteByte('(')
 	for i := 0; i < int(params.Len()); i++ {
 		par := params.At(i)
+		partyp := par.Type()
 		if i > 0 {
 			buf.WriteString(", ")
 		}
 		if isVariadic && i == int(params.Len()-1) {
 			buf.WriteString("...")
+			partyp = partyp.(*types.Slice).Elem()
 		}
-		ts.writeType(buf, par.Type(), unique)
+		ts.writeType(buf, partyp, unique)
 	}
 	buf.WriteByte(')')
 }

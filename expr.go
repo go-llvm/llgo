@@ -80,27 +80,43 @@ func (c *compiler) VisitUnaryExpr(expr *ast.UnaryExpr) Value {
 	return value.UnaryOp(expr.Op)
 }
 
-func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr) []Value {
+func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr, dotdotdot bool) []Value {
 	var argValues []Value
 	if len(args) == 0 {
 		return argValues
 	}
-	arg0 := args[0]
-	if _, ok := c.types.expr[arg0].Type.(*types.Tuple); ok {
+
+	var argtypes []types.Type
+	if t, ok := c.types.expr[args[0]].Type.(*types.Tuple); ok {
+		argtypes = make([]types.Type, t.Len())
+	} else {
+		argtypes = make([]types.Type, len(args))
+	}
+
+	params := ftype.Params()
+	for i := range argtypes {
+		if ftype.IsVariadic() && i >= int(params.Len()-1) {
+			argtypes[i] = params.At(int(params.Len() - 1)).Type()
+			argtypes[i] = argtypes[i].(*types.Slice).Elem()
+		} else {
+			argtypes[i] = params.At(i).Type()
+		}
+	}
+
+	if len(argtypes) > len(args) {
 		// f(g(...)), where g is multi-value return
 		argValues = c.destructureExpr(args[0])
 	} else {
 		argValues = make([]Value, len(args))
 		for i, x := range args {
-			var paramtyp types.Type
-			params := ftype.Params()
-			if ftype.IsVariadic() && i >= int(params.Len()-1) {
-				paramtyp = params.At(int(params.Len() - 1)).Type()
-			} else {
-				paramtyp = params.At(i).Type()
-			}
-			c.convertUntyped(x, paramtyp)
+			c.convertUntyped(x, argtypes[i])
 			argValues[i] = c.VisitExpr(x)
+		}
+	}
+
+	for i, v := range argValues {
+		if !dotdotdot || i < int(params.Len()-1) {
+			argValues[i] = v.Convert(argtypes[i])
 		}
 	}
 	return argValues
@@ -176,7 +192,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	fn_type := fn.Type().Underlying().(*types.Signature)
 
 	// Evaluate arguments.
-	argValues := c.evalCallArgs(fn_type, expr.Args)
+	dotdotdot := expr.Ellipsis.IsValid()
+	argValues := c.evalCallArgs(fn_type, expr.Args, dotdotdot)
 
 	// Depending on whether the function contains defer statements or not,
 	// we'll generate either a "call" or an "invoke" instruction.
@@ -184,7 +201,6 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	if f := c.functions.top(); f != nil && !f.deferblock.IsNil() {
 		invoke = true
 	}
-	dotdotdot := expr.Ellipsis.IsValid()
 	return c.createCall(fn, argValues, dotdotdot, invoke)
 }
 
@@ -204,8 +220,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 		}
 		for i := 0; i < nparams; i++ {
 			value := argValues[i]
-			param_type := params.At(i).Type()
-			args = append(args, value.Convert(param_type).LLVMValue())
+			args = append(args, value.LLVMValue())
 		}
 		if fn_type.IsVariadic() {
 			if dotdotdot {
@@ -213,12 +228,11 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []Value, dotdotdot, invok
 				slice_value := argValues[nparams].LLVMValue()
 				args = append(args, slice_value)
 			} else {
-				param_type := params.At(nparams).Type()
-				varargs := make([]llvm.Value, 0)
-				for _, value := range argValues[nparams:] {
-					value = value.Convert(param_type)
-					varargs = append(varargs, value.LLVMValue())
+				varargs := make([]llvm.Value, len(argValues)-nparams)
+				for i, value := range argValues[nparams:] {
+					varargs[i] = value.LLVMValue()
 				}
+				param_type := params.At(nparams).Type().(*types.Slice).Elem()
 				slice_value := c.makeLiteralSlice(varargs, param_type)
 				args = append(args, slice_value)
 			}

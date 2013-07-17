@@ -75,13 +75,6 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 		}
 	}
 
-	// Preprocess the types/objects recorded by go/types
-	// to make them suitable for consumption by llgo.
-	v := funcTypeVisitor{c, exprtypes}
-	for _, file := range files {
-		ast.Walk(v, file)
-	}
-
 	return pkg, exprtypes, nil
 }
 
@@ -97,64 +90,4 @@ func assocObjectPackages(pkg *types.Package, objectdata map[types.Object]*Object
 	for _, pkg := range pkg.Imports() {
 		assocObjectPackages(pkg, objectdata)
 	}
-}
-
-type funcTypeVisitor struct {
-	*compiler
-	exprtypes ExprTypeMap
-}
-
-func (v funcTypeVisitor) Visit(node ast.Node) ast.Visitor {
-	var sig *types.Signature
-	var noderecv *ast.FieldList
-	var astfunc *ast.FuncType
-
-	switch node := node.(type) {
-	case *ast.FuncDecl:
-		sig = v.objects[node.Name].Type().(*types.Signature)
-		astfunc = node.Type
-		noderecv = node.Recv
-	case *ast.FuncLit:
-		sig = v.exprtypes[node].Type.(*types.Signature)
-		astfunc = node.Type
-	default:
-		return v
-	}
-
-	// go/types creates a separate types.Var for
-	// internal and external usage. We need to
-	// associate them at the object data level.
-	paramIdents := fieldlistIdents(astfunc.Params)
-	resultIdents := fieldlistIdents(astfunc.Results)
-	if recv := sig.Recv(); recv != nil {
-		id := fieldlistIdents(noderecv)[0]
-		if obj, ok := v.objects[id]; ok {
-			v.objectdata[recv] = v.objectdata[obj]
-		}
-	}
-	for i, id := range paramIdents {
-		if obj, ok := v.objects[id]; ok {
-			v.objectdata[sig.Params().At(i)] = v.objectdata[obj]
-		}
-	}
-	for i, id := range resultIdents {
-		if obj, ok := v.objects[id]; ok {
-			v.objectdata[sig.Results().At(i)] = v.objectdata[obj]
-		}
-	}
-	return v
-}
-
-func fieldlistIdents(l *ast.FieldList) (idents []*ast.Ident) {
-	if l != nil {
-		for _, field := range l.List {
-			if field.Names == nil {
-				idents = append(idents, nil)
-			}
-			for _, name := range field.Names {
-				idents = append(idents, name)
-			}
-		}
-	}
-	return
 }

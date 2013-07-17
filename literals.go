@@ -96,7 +96,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 
 	f := c.NewValue(fnvalue, ftyp)
 	captureVars := types.NewTuple(v.captures...)
-	c.buildFunction(f, captureVars, paramVars, resultVars, lit.Body, ftyp.IsVariadic())
+	c.buildFunction(f, captureVars, paramVars, resultVars, lit.Body)
 
 	// Closure? Bind values to a context block.
 	if v.captures != nil {

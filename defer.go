@@ -139,10 +139,11 @@ func (c *compiler) VisitDeferStmt(stmt *ast.DeferStmt) {
 	fntype := fn.Type().Underlying().(*types.Signature)
 
 	// Evaluate args.
-	args := c.evalCallArgs(fntype, stmt.Call.Args)
+	dotdotdot := stmt.Call.Ellipsis.IsValid()
+	args := c.evalCallArgs(fntype, stmt.Call.Args, dotdotdot)
 
 	// Call "runtime.pushdefer" to add fn+argValues to the defer stack
 	pushdefer := c.NamedFunction("runtime.pushdefer", "func(f_ func())")
-	funcval := c.indirectFunction(fn, args, stmt.Call.Ellipsis.IsValid())
+	funcval := c.indirectFunction(fn, args, dotdotdot)
 	c.builder.CreateCall(pushdefer, []llvm.Value{funcval.LLVMValue()}, "")
 }

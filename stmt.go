@@ -405,9 +405,10 @@ func (c *compiler) VisitForStmt(stmt *ast.ForStmt) {
 func (c *compiler) VisitGoStmt(stmt *ast.GoStmt) {
 	fn := c.VisitExpr(stmt.Call.Fun).(*LLVMValue)
 	fntype := fn.Type().Underlying().(*types.Signature)
-	args := c.evalCallArgs(fntype, stmt.Call.Args)
+	dotdotdot := stmt.Call.Ellipsis.IsValid()
+	args := c.evalCallArgs(fntype, stmt.Call.Args, dotdotdot)
 	go_ := c.NamedFunction("runtime.go", "func(f_ func())")
-	funcval := c.indirectFunction(fn, args, stmt.Call.Ellipsis.IsValid())
+	funcval := c.indirectFunction(fn, args, dotdotdot)
 	c.builder.CreateCall(go_, []llvm.Value{funcval.LLVMValue()}, "")
 }
 
