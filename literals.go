@@ -21,7 +21,7 @@ type identVisitor struct {
 func (i *identVisitor) Visit(node ast.Node) ast.Visitor {
 	switch node := node.(type) {
 	case *ast.Ident:
-		if v, ok := i.objects[node].(*types.Var); ok {
+		if v, ok := i.typeinfo.Objects[node].(*types.Var); ok {
 			value := i.objectdata[v].Value
 			curfunc := i.functions.top()
 			// FIXME this needs review; this will currently
@@ -44,7 +44,7 @@ func (i *identVisitor) Visit(node ast.Node) ast.Visitor {
 }
 
 func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
-	ftyp := c.types.expr[lit].Type.(*types.Signature)
+	ftyp := c.typeinfo.Types[lit].(*types.Signature)
 
 	// Walk the function literal, promoting stack vars not defined
 	// in the function literal, and storing the ident's for non-const
@@ -71,12 +71,12 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 	fntyp := origfnpairtyp.StructElementTypes()[0].ElementType()
 	if v.captures != nil {
 		// Add the additional context param.
-		ctxfields := make([]*types.Field, len(v.captures))
+		ctxfields := make([]*types.Var, len(v.captures))
 		for i, capturevar := range v.captures {
 			p := capturevar.Pkg()
 			n := capturevar.Name()
 			t := types.NewPointer(capturevar.Type())
-			ctxfields[i] = types.NewField(token.NoPos, p, n, t, false)
+			ctxfields[i] = types.NewFieldVar(token.NoPos, p, n, t, false)
 		}
 		ctxtyp := types.NewPointer(types.NewStruct(ctxfields, nil))
 		llvmctxtyp := c.types.ToLLVM(ctxtyp)
@@ -127,7 +127,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 }
 
 func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
-	typ := c.types.expr[lit].Type
+	typ := c.typeinfo.Types[lit]
 	var valuemap map[interface{}]Value
 	var valuelist []Value
 
@@ -167,11 +167,11 @@ func (c *compiler) VisitCompositeLit(lit *ast.CompositeLit) (v *LLVMValue) {
 					typ := typ.Underlying().(*types.Struct)
 					elttyp = typ.Field(fieldIndex(typ, name)).Type()
 				case isarray:
-					key = c.types.expr[kv.Key].Value
+					key = c.typeinfo.Values[kv.Key]
 					typ := typ.Underlying().(*types.Array)
 					elttyp = typ.Elem()
 				case isslice:
-					key = c.types.expr[kv.Key].Value
+					key = c.typeinfo.Values[kv.Key]
 					typ := typ.Underlying().(*types.Slice)
 					elttyp = typ.Elem()
 				case ismap:

@@ -15,8 +15,11 @@ import (
 )
 
 func (c *compiler) isNilIdent(x ast.Expr) bool {
-	ident, ok := x.(*ast.Ident)
-	return ok && c.objects[ident] == types.Universe.Lookup(nil, "nil")
+	if _, ok := x.(*ast.Ident); ok {
+		typ := c.typeinfo.Types[x]
+		return typ == types.Typ[types.UntypedNil]
+	}
+	return false
 }
 
 // Binary logical operators are handled specially, outside of the Value
@@ -87,7 +90,7 @@ func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr, dotdotd
 	}
 
 	var argtypes []types.Type
-	if t, ok := c.types.expr[args[0]].Type.(*types.Tuple); ok {
+	if t, ok := c.typeinfo.Types[args[0]].(*types.Tuple); ok {
 		argtypes = make([]types.Type, t.Len())
 	} else {
 		argtypes = make([]types.Type, len(args))
@@ -125,7 +128,7 @@ func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr, dotdotd
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Is it a type conversion?
 	if len(expr.Args) == 1 && c.isType(expr.Fun) {
-		typ := c.types.expr[expr].Type
+		typ := c.typeinfo.Types[expr]
 		c.convertUntyped(expr.Args[0], typ)
 		value := c.VisitExpr(expr.Args[0])
 		return value.Convert(typ)
@@ -136,7 +139,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	//
 	// Note: we do not handle unsafe.{Align,Offset,Size}of here,
 	// as they are evaluated during type-checking.
-	switch t := c.types.expr[expr.Fun].Type.(type) {
+	switch t := c.typeinfo.Types[expr.Fun].(type) {
 	case *types.Builtin:
 		switch t.Name() {
 		case "copy":
@@ -178,7 +181,7 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 		case "complex":
 			r := c.VisitExpr(expr.Args[0]).LLVMValue()
 			i := c.VisitExpr(expr.Args[1]).LLVMValue()
-			typ := c.types.expr[expr].Type
+			typ := c.typeinfo.Types[expr]
 			cmplx := llvm.Undef(c.types.ToLLVM(typ))
 			cmplx = c.builder.CreateInsertValue(cmplx, r, 0, "")
 			cmplx = c.builder.CreateInsertValue(cmplx, i, 1, "")
@@ -400,14 +403,14 @@ type selectorCandidate struct {
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	// Imported package funcs/vars.
 	if ident, ok := expr.X.(*ast.Ident); ok {
-		if _, ok := c.objects[ident].(*types.Package); ok {
+		if _, ok := c.typeinfo.Objects[ident].(*types.Package); ok {
 			return c.Resolve(expr.Sel)
 		}
 	}
 
 	// Method expression. Returns an unbound function pointer.
 	if c.isType(expr.X) {
-		ftyp := c.types.expr[expr].Type.(*types.Signature)
+		ftyp := c.typeinfo.Types[expr].(*types.Signature)
 		recvtyp := ftyp.Params().At(0).Type()
 		var name *types.Named
 		var isptr bool
@@ -443,7 +446,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method.
-	if typ, ok := c.types.expr[expr].Type.(*types.Signature); ok && typ.Recv() != nil {
+	if typ, ok := c.typeinfo.Types[expr].(*types.Signature); ok && typ.Recv() != nil {
 		var isptr bool
 		typ := lhs.Type()
 		if ptr, ok := typ.(*types.Pointer); ok {
@@ -549,7 +552,7 @@ func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
-	typ := c.types.expr[expr].Type
+	typ := c.typeinfo.Types[expr]
 	lhs := c.VisitExpr(expr.X)
 	return lhs.Convert(typ)
 }
@@ -558,8 +561,8 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	// Before all else, check if we've got a constant expression.
 	// go/types performs constant folding, and we store the value
 	// alongside the expression's type.
-	if info := c.types.expr[expr]; info.Value != nil {
-		return c.NewConstValue(info.Value, info.Type)
+	if constval := c.typeinfo.Values[expr]; constval != nil {
+		return c.NewConstValue(constval, c.typeinfo.Types[expr])
 	}
 
 	switch x := expr.(type) {

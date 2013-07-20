@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
@@ -48,11 +49,10 @@ type compiler struct {
 	pkg            *types.Package
 	fileset        *token.FileSet
 
-	implicitobjects map[ast.Node]types.Object
-	objects         map[*ast.Ident]types.Object
-	objectdata      map[types.Object]*ObjectData
-	methodsets      map[types.Type]*methodset
-	exportedtypes   []types.Type
+	typeinfo      types.Info
+	objectdata    map[types.Object]*ObjectData
+	methodsets    map[types.Type]*methodset
+	exportedtypes []types.Type
 
 	// lastlabel, if non-nil, is a LabeledStmt immediately
 	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
@@ -86,7 +86,7 @@ func (c *compiler) archinfo() (intsize, ptrsize int64) {
 }
 
 func (c *compiler) Resolve(ident *ast.Ident) Value {
-	obj := c.objects[ident]
+	obj := c.typeinfo.Objects[ident]
 	data := c.objectdata[obj]
 	if data.Value != nil {
 		return data.Value
@@ -246,12 +246,14 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	}
 
 	// Type-check, and store object data.
-	compiler.implicitobjects = make(map[ast.Node]types.Object)
-	compiler.objects = make(map[*ast.Ident]types.Object)
+	compiler.typeinfo.Types = make(map[ast.Expr]types.Type)
+	compiler.typeinfo.Values = make(map[ast.Expr]exact.Value)
+	compiler.typeinfo.Objects = make(map[*ast.Ident]types.Object)
+	compiler.typeinfo.Implicits = make(map[ast.Node]types.Object)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
 	compiler.methodsets = make(map[types.Type]*methodset)
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
-	pkg, exprtypes, err := compiler.typecheck(importpath, fset, files)
+	pkg, err := compiler.typecheck(importpath, fset, files)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +277,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	// and to runtime/dynamic type values.
 	var resolver Resolver = compiler
 	compiler.FunctionCache = NewFunctionCache(compiler)
-	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, importpath, exprtypes, compiler.FunctionCache, resolver)
+	compiler.types = NewTypeMap(compiler.llvmtypes, compiler.module.Module, importpath, compiler.FunctionCache, resolver)
 
 	// Create a Builder, for building LLVM instructions.
 	compiler.builder = newBuilder(compiler.types)

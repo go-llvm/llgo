@@ -20,7 +20,7 @@ import (
 func (c *compiler) isType(x ast.Expr) bool {
 	switch t := x.(type) {
 	case *ast.Ident:
-		if obj, ok := c.objects[t]; ok {
+		if obj, ok := c.typeinfo.Objects[t]; ok {
 			_, ok = obj.(*types.TypeName)
 			return ok
 		}
@@ -29,7 +29,7 @@ func (c *compiler) isType(x ast.Expr) bool {
 	case *ast.SelectorExpr:
 		// qualified identifier
 		if ident, ok := t.X.(*ast.Ident); ok {
-			if obj, ok := c.objects[ident]; ok {
+			if obj, ok := c.typeinfo.Objects[ident]; ok {
 				if pkg, ok := obj.(*types.Package); ok {
 					obj := pkg.Scope().Lookup(nil, t.Sel.Name)
 					_, ok = obj.(*types.TypeName)
@@ -53,18 +53,17 @@ func (c *compiler) isType(x ast.Expr) bool {
 }
 
 func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
-	frominfo := c.types.expr[from]
-	if frominfo.Type != nil && isUntyped(frominfo.Type) {
+	fromtype := c.typeinfo.Types[from]
+	if fromtype != nil && isUntyped(fromtype) {
 		var newtype types.Type
 		switch to := to.(type) {
 		case types.Type:
 			newtype = to
 		case *ast.Ident:
-			obj := c.objects[to]
+			obj := c.typeinfo.Objects[to]
 			newtype = obj.Type()
 		case ast.Expr:
-			toinfo := c.types.expr[to]
-			newtype = toinfo.Type
+			newtype = c.typeinfo.Types[to]
 		default:
 			panic(fmt.Errorf("unexpected type: %T", to))
 		}
@@ -72,14 +71,13 @@ func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 		// If untyped constant is assigned to interface{},
 		// we'll change its type to the default type for
 		// the literal instead.
-		if frominfo.Type != types.Typ[types.UntypedNil] {
+		if fromtype != types.Typ[types.UntypedNil] {
 			if _, ok := newtype.(*types.Interface); ok {
-				newtype = defaultType(frominfo.Type)
+				newtype = defaultType(fromtype)
 			}
 		}
 
-		frominfo.Type = newtype
-		c.types.expr[from] = frominfo
+		c.typeinfo.Types[from] = newtype
 		return true
 	}
 	return false
@@ -203,8 +201,10 @@ func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVa
 
 func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature, unique bool) {
 	if recv := sig.Recv(); recv != nil {
-		ts.writeType(buf, recv.Type(), unique)
-		buf.WriteByte(' ')
+		if _, ok := recv.Type().Underlying().(*types.Interface); !ok {
+			ts.writeType(buf, recv.Type(), unique)
+			buf.WriteByte(' ')
+		}
 	}
 
 	ts.writeParams(buf, sig.Params(), sig.IsVariadic(), unique)

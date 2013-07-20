@@ -12,7 +12,7 @@ import (
 )
 
 func (c *compiler) VisitMake(expr *ast.CallExpr) Value {
-	typ := c.types.expr[expr].Type
+	typ := c.typeinfo.Types[expr]
 	switch utyp := typ.Underlying().(type) {
 	case *types.Slice:
 		var length, capacity Value

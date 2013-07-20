@@ -47,7 +47,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 				fname = ""
 			}
 		} else {
-			obj := c.objects[ident]
+			obj := c.typeinfo.Objects[ident]
 			pkgname = c.objectdata[obj].Package.Path()
 		}
 		if fname != "" {
@@ -239,12 +239,12 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 	globals := make([]*LLVMValue, len(idents))
 	for i, ident := range idents {
 		if ident.Name != "_" {
-			t := c.objects[ident].Type()
+			t := c.typeinfo.Objects[ident].Type()
 			llvmtyp := c.types.ToLLVM(t)
 			gv := llvm.AddGlobal(c.module.Module, llvmtyp, pkg+"."+ident.Name)
 			g := c.NewValue(gv, types.NewPointer(t)).makePointee()
 			globals[i] = g
-			c.objectdata[c.objects[ident]].Value = g
+			c.objectdata[c.typeinfo.Objects[ident]].Value = g
 		}
 	}
 
@@ -264,8 +264,7 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 		// below.
 		allconst := true
 		for i, expr := range values {
-			constinfo := c.types.expr[expr]
-			if constinfo.Value != nil {
+			if constval := c.typeinfo.Values[expr]; constval != nil {
 				if globals[i] != nil {
 					gv := globals[i].pointer.value
 					value := c.VisitExpr(expr)
@@ -303,8 +302,7 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 		}
 	} else {
 		for i, expr := range values {
-			constval := c.types.expr[expr].Value
-			if constval == nil {
+			if constval := c.typeinfo.Values[expr]; constval == nil {
 				// Must evaluate regardless of whether value is
 				// assigned, in event of side-effects.
 				v := c.VisitExpr(expr)
@@ -326,7 +324,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 	// before definition visited.)
 	for _, name := range valspec.Names {
 		if name != nil && name.Name != "_" {
-			obj := c.objects[name]
+			obj := c.typeinfo.Objects[name]
 			if c.objectdata[obj].Value != nil {
 				return
 			}
@@ -338,13 +336,13 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 			if name.Name == "" {
 				continue
 			}
-			typ := c.objects[name].Type()
+			typ := c.typeinfo.Objects[name].Type()
 			c.convertUntyped(valspec.Values[i], typ)
 		}
 	}
 
 	// If the ValueSpec exists at the package level, create globals.
-	if obj, ok := c.objects[valspec.Names[0]]; ok {
+	if obj, ok := c.typeinfo.Objects[valspec.Names[0]]; ok {
 		if c.pkg.Scope().Lookup(nil, valspec.Names[0].Name) == obj {
 			c.createGlobals(valspec.Names, valspec.Values, c.pkg.Path())
 			return
@@ -373,7 +371,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 		// Change this to allocate on the stack, and perform
 		// escape analysis to determine whether to promote.
 
-		obj := c.objects[name]
+		obj := c.typeinfo.Objects[name]
 		typ := obj.Type()
 		llvmtyp := c.types.ToLLVM(typ)
 		ptr := c.createTypeMalloc(llvmtyp)
@@ -387,7 +385,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 		}
 		stackvar := c.NewValue(ptr, types.NewPointer(typ)).makePointee()
 		stackvar.stack = c.functions.top().LLVMValue
-		c.objectdata[c.objects[name]].Value = stackvar
+		c.objectdata[c.typeinfo.Objects[name]].Value = stackvar
 	}
 }
 
@@ -400,7 +398,7 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 		// Export runtime type information.
 		for _, spec := range decl.Specs {
 			typspec := spec.(*ast.TypeSpec)
-			typ := c.objects[typspec.Name].Type()
+			typ := c.typeinfo.Objects[typspec.Name].Type()
 			c.types.ToRuntime(typ)
 		}
 	case token.CONST:
@@ -416,7 +414,7 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 			c.VisitValueSpec(valspec)
 			for _, attr := range attributes {
 				for _, name := range valspec.Names {
-					obj := c.objects[name]
+					obj := c.typeinfo.Objects[name]
 					attr.Apply(c.objectdata[obj].Value)
 				}
 			}

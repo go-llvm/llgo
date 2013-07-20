@@ -67,7 +67,7 @@ func (c *compiler) methodfunc(m *types.Func) *types.Func {
 	if data == nil {
 		ident := ast.NewIdent(m.Name())
 		data = &ObjectData{Ident: ident, Package: m.Pkg()}
-		c.objects[ident] = m
+		c.typeinfo.Objects[ident] = m
 		c.objectdata[m] = data
 	}
 	return m
@@ -227,7 +227,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func,
 		recv = ptr.Elem()
 	}
 
-	c.objects[ident] = f
+	c.typeinfo.Objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
 	if pkg == nil || pkg == c.pkg {
@@ -299,7 +299,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 		recv = ptr.Elem()
 	}
 
-	c.objects[ident] = f
+	c.typeinfo.Objects[ident] = f
 	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
 
 	if pkg == nil || pkg == c.pkg {

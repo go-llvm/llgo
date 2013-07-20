@@ -98,10 +98,8 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 
 	// Convert untyped values.
 	for i, expr := range stmt.Results {
-		info := c.types.expr[expr]
-		if isUntyped(info.Type) {
-			info.Type = ftyp.Results().At(i).Type()
-			c.types.expr[expr] = info
+		if typ := c.typeinfo.Types[expr]; isUntyped(typ) {
+			c.typeinfo.Types[expr] = ftyp.Results().At(i).Type()
 		}
 	}
 
@@ -209,7 +207,7 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 		}
 	case *ast.TypeAssertExpr:
 		lhs := c.VisitExpr(x.X).(*LLVMValue)
-		typ := c.types.expr[x.Type].Type
+		typ := c.typeinfo.Types[x.Type]
 		switch typ := typ.Underlying().(type) {
 		case *types.Interface:
 			value, ok := lhs.convertI2I(typ)
@@ -256,7 +254,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			if x.Name == "_" {
 				continue
 			}
-			obj := c.objects[x]
+			obj := c.typeinfo.Objects[x]
 			if stmt.Tok == token.DEFINE {
 				typ := obj.Type()
 				llvmtyp := c.types.ToLLVM(typ)
@@ -278,7 +276,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				c.functions = functions
 			}
 		case *ast.IndexExpr:
-			t := c.types.expr[x.X].Type
+			t := c.typeinfo.Types[x.X]
 			if _, ok := t.Underlying().(*types.Map); ok {
 				m := c.VisitExpr(x.X).(*LLVMValue)
 				index := c.VisitExpr(x.Index)
@@ -430,10 +428,8 @@ func (c *compiler) VisitSwitchStmt(stmt *ast.SwitchStmt) {
 	// Convert untyped constant clauses.
 	for _, clause := range stmt.Body.List {
 		for _, expr := range clause.(*ast.CaseClause).List {
-			exprinfo := c.types.expr[expr]
-			if isUntyped(exprinfo.Type) {
-				exprinfo.Type = tag.Type()
-				c.types.expr[expr] = exprinfo
+			if typ := c.typeinfo.Types[expr]; isUntyped(typ) {
+				c.typeinfo.Types[expr] = tag.Type()
 			}
 		}
 	}
@@ -557,7 +553,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	var keyPtr, valuePtr llvm.Value
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
-			keyobj := c.objects[key]
+			keyobj := c.typeinfo.Objects[key]
 			keyType := keyobj.Type()
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
 			stackvar := c.NewValue(keyPtr, types.NewPointer(keyType)).makePointee()
@@ -566,7 +562,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
-				valueobj := c.objects[value]
+				valueobj := c.typeinfo.Objects[value]
 				valueType := valueobj.Type()
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
 				stackvar := c.NewValue(valuePtr, types.NewPointer(valueType)).makePointee()
@@ -820,7 +816,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					isnil := c.builder.CreateIsNull(ifacetyp, "")
 					return c.NewValue(isnil, types.Typ[types.Bool])
 				}
-				typ := c.types.expr[caseClause.List[j]].Type
+				typ := c.typeinfo.Types[caseClause.List[j]]
 				switch typ := typ.Underlying().(type) {
 				case *types.Interface:
 					_, ok := iface.convertI2I(typ)
@@ -848,7 +844,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		if caseClause.List != nil {
 			block = stmtBlocks[i]
 			if len(caseClause.List) == 1 {
-				typ = c.types.expr[caseClause.List[0]].Type
+				typ = c.typeinfo.Types[caseClause.List[0]]
 			}
 			i++
 		} else {
@@ -857,7 +853,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
 			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
-				obj := c.implicitobjects[caseClause]
+				obj := c.typeinfo.Implicits[caseClause]
 				switch utyp := typ.Underlying().(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
@@ -867,7 +863,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					c.objectdata[obj].Value = iface.loadI2V(typ)
 				}
 			} else {
-				obj := c.objects[assignIdent]
+				obj := c.typeinfo.Objects[assignIdent]
 				c.objectdata[obj].Value = iface
 			}
 		}

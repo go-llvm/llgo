@@ -13,7 +13,7 @@ func (c *compiler) VisitNew(expr *ast.CallExpr) Value {
 	if len(expr.Args) > 1 {
 		panic("Expecting only one argument to new")
 	}
-	ptrtyp := c.types.expr[expr].Type.(*types.Pointer)
+	ptrtyp := c.typeinfo.Types[expr].(*types.Pointer)
 	typ := ptrtyp.Elem()
 	llvmtyp := c.types.ToLLVM(typ)
 	mem := c.createTypeMalloc(llvmtyp)

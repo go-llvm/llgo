@@ -54,7 +54,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 			if err != nil {
 				panic(err)
 			}
-			c.runtimetypespkg, _, err = c.typecheck("runtime", fset, files)
+			c.runtimetypespkg, err = c.typecheck("runtime", fset, files)
 			if err != nil {
 				panic(err)
 			}
@@ -108,7 +108,7 @@ func (c *compiler) parseReflect() (*types.Package, error) {
 		return nil, err
 	}
 
-	pkg, _, err := c.typecheck("reflect", fset, files)
+	pkg, err := c.typecheck("reflect", fset, files)
 	if err != nil {
 		return nil, err
 	}

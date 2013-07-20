@@ -20,8 +20,6 @@ type ExprTypeInfo struct {
 	Value exact.Value
 }
 
-type ExprTypeMap map[ast.Expr]ExprTypeInfo
-
 type LLVMTypeMap struct {
 	TypeStringer
 	target  llvm.TargetData
@@ -45,7 +43,6 @@ type TypeMap struct {
 	module    llvm.Module
 	pkgpath   string
 	types     map[string]runtimeTypeInfo
-	expr      ExprTypeMap
 	functions *FunctionCache
 	resolver  Resolver
 
@@ -84,13 +81,12 @@ func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 	}
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, exprTypes ExprTypeMap, c *FunctionCache, r Resolver) *TypeMap {
+func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *FunctionCache, r Resolver) *TypeMap {
 	tm := &TypeMap{
 		LLVMTypeMap: llvmtm,
 		module:      module,
 		pkgpath:     pkgpath,
 		types:       make(map[string]runtimeTypeInfo),
-		expr:        exprTypes,
 		functions:   c,
 		resolver:    r,
 	}
@@ -300,15 +296,17 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		// the resulting signature instead.
 		var param_types []llvm.Type
 		if recv := f.Recv(); recv != nil {
-			params := f.Params()
-			paramvars := make([]*types.Var, int(params.Len()+1))
-			paramvars[0] = recv
-			for i := 0; i < int(params.Len()); i++ {
-				paramvars[i+1] = params.At(i)
+			if _, ok := recv.Type().Underlying().(*types.Interface); !ok {
+				params := f.Params()
+				paramvars := make([]*types.Var, int(params.Len()+1))
+				paramvars[0] = recv
+				for i := 0; i < int(params.Len()); i++ {
+					paramvars[i+1] = params.At(i)
+				}
+				params = types.NewTuple(paramvars...)
+				f := types.NewSignature(nil, params, f.Results(), f.IsVariadic())
+				return tm.ToLLVM(f)
 			}
-			params = types.NewTuple(paramvars...)
-			f := types.NewSignature(nil, params, f.Results(), f.IsVariadic())
-			return tm.ToLLVM(f)
 		}
 
 		typ = llvm.GlobalContext().StructCreateNamed("")
@@ -435,7 +433,7 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 		if n == 0 {
 			return 0
 		}
-		fields := make([]*types.Field, n)
+		fields := make([]*types.Var, n)
 		for i := range fields {
 			fields[i] = typ.Field(i)
 		}
@@ -447,7 +445,7 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 	return int64(tm.target.PointerSize())
 }
 
-func (tm *LLVMTypeMap) Offsetsof(fields []*types.Field) []int64 {
+func (tm *LLVMTypeMap) Offsetsof(fields []*types.Var) []int64 {
 	offsets := make([]int64, len(fields))
 	var offset int64
 	for i, f := range fields {
