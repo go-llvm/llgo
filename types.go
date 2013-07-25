@@ -31,7 +31,7 @@ func (c *compiler) isType(x ast.Expr) bool {
 		if ident, ok := t.X.(*ast.Ident); ok {
 			if obj, ok := c.typeinfo.Objects[ident]; ok {
 				if pkg, ok := obj.(*types.Package); ok {
-					obj := pkg.Scope().Lookup(nil, t.Sel.Name)
+					obj := pkg.Scope().Lookup(t.Sel.Name)
 					_, ok = obj.(*types.TypeName)
 					return ok
 				}
@@ -115,7 +115,7 @@ func (c *compiler) exportRuntimeTypes() {
 		for _, kind := range kinds {
 			c.exportedtypes = append(c.exportedtypes, types.Typ[kind])
 		}
-		error_ := types.Universe.Lookup(nil, "error").Type()
+		error_ := types.Universe.Lookup("error").Type()
 		c.exportedtypes = append(c.exportedtypes, error_)
 	}
 	for _, typ := range c.exportedtypes {

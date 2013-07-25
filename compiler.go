@@ -252,6 +252,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.typeinfo.Implicits = make(map[ast.Node]types.Object)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
 	compiler.methodsets = make(map[types.Type]*methodset)
+	compiler.exportedtypes = nil
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 	pkg, err := compiler.typecheck(importpath, fset, files)
 	if err != nil {

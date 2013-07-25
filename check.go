@@ -25,9 +25,10 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	}
 
 	var info types.Info
+	objectdata := make(map[types.Object]*ObjectData)
 	info.Values = c.typeinfo.Values
 	info.Types = c.typeinfo.Types
-	info.Implicits = c.typeinfo.Implicits
+	info.Implicits = make(map[ast.Node]types.Object)
 	info.Objects = make(map[*ast.Ident]types.Object)
 	pkg, err := config.Check(pkgpath, fset, files, &info)
 	if err != nil {
@@ -35,15 +36,25 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	}
 
 	for id, obj := range info.Objects {
+		if obj == nil {
+			continue
+		}
 		c.typeinfo.Objects[id] = obj
-		c.objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
+		objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
+	}
+
+	for node, obj := range info.Implicits {
+		id := ast.NewIdent(obj.Name())
+		c.typeinfo.Objects[id] = obj
+		c.typeinfo.Implicits[node] = obj
+		objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
 	}
 
 	for _, pkg := range pkg.Imports() {
-		assocObjectPackages(pkg, c.objectdata)
+		assocObjectPackages(pkg, objectdata)
 	}
 
-	for object, data := range c.objectdata {
+	for object, data := range objectdata {
 		if object, ok := object.(*types.TypeName); ok {
 			// Add TypeNames to the LLVMTypeMap's TypeStringer.
 			c.llvmtypes.pkgmap[object] = data.Package
@@ -55,14 +66,16 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 				c.exportedtypes = append(c.exportedtypes, object.Type())
 			}
 		}
+		c.objectdata[object] = data
 	}
 
 	return pkg, nil
 }
 
 func assocObjectPackages(pkg *types.Package, objectdata map[types.Object]*ObjectData) {
-	for i := 0; i < pkg.Scope().NumEntries(); i++ {
-		obj := pkg.Scope().At(i)
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		obj := scope.Lookup(name)
 		if data, ok := objectdata[obj]; ok {
 			data.Package = pkg
 		} else {

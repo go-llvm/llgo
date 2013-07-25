@@ -14,6 +14,10 @@ import (
 	"reflect"
 )
 
+func isBlank(name string) bool {
+	return name == "" || name == "_"
+}
+
 func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue {
 	fname := ident.String()
 	if ftyp.Recv() == nil && fname == "init" {
@@ -136,7 +140,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	for i := 0; i < nparams; i++ {
 		v := params.At(i)
 		name := v.Name()
-		if name != "" {
+		if !isBlank(name) {
 			value := llvm_fn.Param(i + paramoffset)
 			typ := v.Type()
 			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), name)
@@ -156,7 +160,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	for i := 0; i < results.Len(); i++ {
 		v := results.At(i)
 		name := v.Name()
-		allocstack := name != ""
+		allocstack := !isBlank(name)
 		if !allocstack && hasdefer {
 			c.objectdata[v] = &ObjectData{}
 			allocstack = true
@@ -238,7 +242,7 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg string) {
 	globals := make([]*LLVMValue, len(idents))
 	for i, ident := range idents {
-		if ident.Name != "_" {
+		if !isBlank(ident.Name) {
 			t := c.typeinfo.Objects[ident].Type()
 			llvmtyp := c.types.ToLLVM(t)
 			gv := llvm.AddGlobal(c.module.Module, llvmtyp, pkg+"."+ident.Name)
@@ -323,7 +327,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 	// Check if the value-spec has already been visited (referenced
 	// before definition visited.)
 	for _, name := range valspec.Names {
-		if name != nil && name.Name != "_" {
+		if name != nil && !isBlank(name.Name) {
 			obj := c.typeinfo.Objects[name]
 			if c.objectdata[obj].Value != nil {
 				return
@@ -333,17 +337,16 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 
 	if len(valspec.Values) == len(valspec.Names) {
 		for i, name := range valspec.Names {
-			if name.Name == "" {
-				continue
+			if !isBlank(name.Name) {
+				typ := c.typeinfo.Objects[name].Type()
+				c.convertUntyped(valspec.Values[i], typ)
 			}
-			typ := c.typeinfo.Objects[name].Type()
-			c.convertUntyped(valspec.Values[i], typ)
 		}
 	}
 
 	// If the ValueSpec exists at the package level, create globals.
 	if obj, ok := c.typeinfo.Objects[valspec.Names[0]]; ok {
-		if c.pkg.Scope().Lookup(nil, valspec.Names[0].Name) == obj {
+		if c.pkg.Scope().Lookup(valspec.Names[0].Name) == obj {
 			c.createGlobals(valspec.Names, valspec.Values, c.pkg.Path())
 			return
 		}
@@ -360,7 +363,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 	}
 
 	for i, name := range valspec.Names {
-		if name.Name == "_" {
+		if isBlank(name.Name) {
 			continue
 		}
 

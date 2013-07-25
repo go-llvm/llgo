@@ -217,7 +217,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func,
 	}
 	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
-	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
+	sig = types.NewSignature(nil, recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
 	f := &synthFunc{Func: m, pkg: pkg, typ: sig}
 	ident := ast.NewIdent(f.Name())
 
@@ -289,7 +289,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	}
 	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
-	sig = types.NewSignature(recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
+	sig = types.NewSignature(nil, recvvar, sig.Params(), sig.Results(), sig.IsVariadic())
 	f := &synthFunc{Func: m, pkg: pkg, typ: sig}
 	ident := ast.NewIdent(f.Name())
 

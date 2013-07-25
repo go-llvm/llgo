@@ -31,7 +31,7 @@ func (c *FunctionCache) NamedFunction(name string, signature string) llvm.Value 
 	}
 
 	if strings.HasPrefix(name, c.module.Name+".") {
-		obj := c.pkg.Scope().Lookup(nil, name[len(c.module.Name)+1:])
+		obj := c.pkg.Scope().Lookup(name[len(c.module.Name)+1:])
 		if obj == nil {
 			panic("Missing function: " + name)
 		}

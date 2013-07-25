@@ -109,7 +109,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		// prepare return values.
 		for i := 0; i < int(f.results.Len()); i++ {
 			resultvar := f.results.At(i)
-			if resultvar.Name() != "" {
+			if !isBlank(resultvar.Name()) {
 				values[i] = c.objectdata[resultvar].Value.LLVMValue()
 			} else {
 				typ := c.types.ToLLVM(ftyp.Results().At(i).Type())
@@ -144,7 +144,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		if f.results != nil {
 			for i := 0; i < int(f.results.Len()); i++ {
 				resultvar := f.results.At(i)
-				if resultvar.Name() != "" {
+				if !isBlank(resultvar.Name()) {
 					resultptr := c.objectdata[resultvar].Value.pointer
 					c.builder.CreateStore(values[i], resultptr.LLVMValue())
 				}
@@ -251,7 +251,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	for i, expr := range stmt.Lhs {
 		switch x := expr.(type) {
 		case *ast.Ident:
-			if x.Name == "_" {
+			if isBlank(x.Name) {
 				continue
 			}
 			obj := c.typeinfo.Objects[x]
@@ -552,7 +552,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	// Is it a new var definition? Then allocate some memory on the stack.
 	var keyPtr, valuePtr llvm.Value
 	if stmt.Tok == token.DEFINE {
-		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
+		if key := stmt.Key.(*ast.Ident); !isBlank(key.Name) {
 			keyobj := c.typeinfo.Objects[key]
 			keyType := keyobj.Type()
 			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
@@ -561,7 +561,7 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			c.objectdata[keyobj].Value = stackvar
 		}
 		if stmt.Value != nil {
-			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
+			if value := stmt.Value.(*ast.Ident); !isBlank(value.Name) {
 				valueobj := c.typeinfo.Objects[value]
 				valueType := valueobj.Type()
 				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
@@ -572,11 +572,11 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 		}
 	} else {
 		// Simple assignment, resolve the key/value pointers.
-		if key := stmt.Key.(*ast.Ident); key.Name != "_" {
+		if key := stmt.Key.(*ast.Ident); !isBlank(key.Name) {
 			keyPtr = c.Resolve(key).(*LLVMValue).pointer.LLVMValue()
 		}
 		if stmt.Value != nil {
-			if value := stmt.Value.(*ast.Ident); value.Name != "_" {
+			if value := stmt.Value.(*ast.Ident); !isBlank(value.Name) {
 				valuePtr = c.Resolve(value).(*LLVMValue).pointer.LLVMValue()
 			}
 		}
@@ -852,8 +852,8 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 		}
 		c.builder.SetInsertPointAtEnd(block)
 		if assignIdent != nil {
+			obj := c.typeinfo.Implicits[caseClause]
 			if len(caseClause.List) == 1 && !c.isNilIdent(caseClause.List[0]) {
-				obj := c.typeinfo.Implicits[caseClause]
 				switch utyp := typ.Underlying().(type) {
 				case *types.Interface:
 					// FIXME Use value from convertI2I in the case
@@ -863,7 +863,6 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 					c.objectdata[obj].Value = iface.loadI2V(typ)
 				}
 			} else {
-				obj := c.typeinfo.Objects[assignIdent]
 				c.objectdata[obj].Value = iface
 			}
 		}

@@ -98,7 +98,7 @@ func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *Func
 		panic(err) // FIXME return err
 	}
 	reflectLLVMType := func(name string) llvm.Type {
-		obj := pkg.Scope().Lookup(nil, name)
+		obj := pkg.Scope().Lookup(name)
 		if obj == nil {
 			panic(fmt.Errorf("Failed to find type: %s", name))
 		}
@@ -304,7 +304,7 @@ func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 					paramvars[i+1] = params.At(i)
 				}
 				params = types.NewTuple(paramvars...)
-				f := types.NewSignature(nil, params, f.Results(), f.IsVariadic())
+				f := types.NewSignature(nil, nil, params, f.Results(), f.IsVariadic())
 				return tm.ToLLVM(f)
 			}
 		}
@@ -822,7 +822,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
 		// mtyp (method type, no receiver)
 		{
-			ftyp := types.NewSignature(nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
+			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
 			mtyp := tm.ToRuntime(ftyp)
 			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
 		}
