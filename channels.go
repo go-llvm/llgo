@@ -29,8 +29,10 @@ func (v *LLVMValue) chanSend(value Value) {
 		c.builder.CreateStore(value, ptr)
 	}
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-	f := c.NamedFunction("runtime.chansend", "func(c, ptr uintptr)")
-	c.builder.CreateCall(f, []llvm.Value{v.LLVMValue(), uintptr_}, "")
+	f := c.NamedFunction("runtime.chansend", "func(t *chanType, c, ptr uintptr)")
+	chantyp := c.types.ToRuntime(v.typ.Underlying())
+	chantyp = c.builder.CreateBitCast(chantyp, f.Type().ElementType().ParamTypes()[0], "")
+	c.builder.CreateCall(f, []llvm.Value{chantyp, v.LLVMValue(), uintptr_}, "")
 }
 
 func (v *LLVMValue) chanRecv() *LLVMValue {
@@ -38,8 +40,10 @@ func (v *LLVMValue) chanRecv() *LLVMValue {
 	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
-	f := c.NamedFunction("runtime.chanrecv", "func(c, ptr uintptr)")
-	c.builder.CreateCall(f, []llvm.Value{v.LLVMValue(), uintptr_}, "")
+	f := c.NamedFunction("runtime.chanrecv", "func(t *chanType, c, ptr uintptr)")
+	chantyp := c.types.ToRuntime(v.typ.Underlying())
+	chantyp = c.builder.CreateBitCast(chantyp, f.Type().ElementType().ParamTypes()[0], "")
+	c.builder.CreateCall(f, []llvm.Value{chantyp, v.LLVMValue(), uintptr_}, "")
 	value := c.builder.CreateLoad(ptr, "")
 	return c.NewValue(value, elttyp)
 }

@@ -6,19 +6,61 @@ package runtime
 
 import "unsafe"
 
-type _chanItem struct {
-	next  *_chanItem
-	value uint8
+type SudoG struct {
+	g *G // g and selgen constitute
+	//selgen      int32 // a weak pointer to g
+	link        *SudoG
+	releasetime int64
+	elem        *byte // data element
 }
 
-// XXX dumb implementation for now, will make it
-// a circular buffer later. If cap is zero, the
-// buffer will point to an item on the receiver's
-// stack.
-type _chan struct {
-	typ        *chanType
-	head, tail *_chanItem
-	cap        int
+type WaitQ struct {
+	first *SudoG
+	last  *SudoG
+}
+
+func (q *WaitQ) dequeue() *SudoG {
+	sgp := q.first
+	if sgp == nil {
+		return nil
+	}
+	q.first = sgp.link
+	return sgp
+}
+
+func (q *WaitQ) enqueue(sgp *SudoG) {
+	sgp.link = nil
+	if q.first == nil {
+		q.first = sgp
+		q.last = sgp
+	}
+	q.last.link = sgp
+	q.last = sgp
+}
+
+type Hchan struct {
+	qcount    uint // total data in the q
+	dataqsiz  uint // size of the circular q
+	elemsize  uint16
+	closed    bool
+	elemalign uint8
+	//Alg       *elemalg // interface for element type
+	sendx uint  // send index
+	recvx uint  // receive index
+	recvq WaitQ // list of recv waiters
+	sendq WaitQ // list of send waiters
+	lock
+}
+
+// Buffer follows Hchan immediately in memory.
+// chanbuf(c, i) is pointer to the i'th slot in the buffer.
+//#define chanbuf(c, i) ((byte*)((c)+1)+(uintptr)(c)->elemsize*(i))
+func (c *Hchan) chanbuf(i uint) unsafe.Pointer {
+	ptr := uintptr(unsafe.Pointer(c))
+	ptr += unsafe.Sizeof(*c)
+	ptr = align(ptr, uintptr(c.elemalign))
+	ptr += uintptr(c.elemsize) * uintptr(i)
+	return unsafe.Pointer(ptr)
 }
 
 // #llgo name: reflect.makechan
@@ -28,10 +70,17 @@ func reflect_makechan(t *rtype, cap_ int) unsafe.Pointer {
 
 func makechan(t unsafe.Pointer, cap_ int) *int8 {
 	typ := (*chanType)(t)
-	c := new(_chan)
-	c.typ = typ
-	c.cap = cap_
-	return (*int8)(unsafe.Pointer(c))
+	size := unsafe.Sizeof(Hchan{})
+	if cap_ > 0 {
+		size = align(size, uintptr(typ.elem.align))
+		size += uintptr(typ.elem.size) * uintptr(cap_)
+	}
+	mem := malloc(size)
+	c := (*Hchan)(mem)
+	c.elemsize = uint16(typ.elem.size)
+	c.elemalign = uint8(typ.elem.align)
+	c.dataqsiz = uint(cap_)
+	return (*int8)(mem)
 }
 
 // #llgo name: reflect.chancap
@@ -40,8 +89,11 @@ func reflect_chancap(c unsafe.Pointer) int32 {
 }
 
 func chancap(c_ unsafe.Pointer) int {
-	c := (*_chan)(c_)
-	return c.cap
+	c := (*Hchan)(c_)
+	if c == nil {
+		return 0
+	}
+	return int(c.dataqsiz)
 }
 
 // #llgo name: reflect.chanlen
@@ -49,9 +101,12 @@ func reflect_chanlen(c unsafe.Pointer) int32 {
 	return int32(chanlen(c))
 }
 
-func chanlen(c unsafe.Pointer) int {
-	// TODO
-	return 0
+func chanlen(c_ unsafe.Pointer) int {
+	c := (*Hchan)(c_)
+	if c == nil {
+		return 0
+	}
+	return int(c.qcount)
 }
 
 // #llgo name: reflect.chansend
@@ -60,18 +115,59 @@ func reflect_chansend(t *rtype, c unsafe.Pointer, val unsafe.Pointer, nb bool) b
 	return false
 }
 
-func chansend(c_, ptr unsafe.Pointer) {
-	c := (*_chan)(c_)
-	elemsize := c.typ.elem.size
-	m := malloc(uintptr(unsafe.Sizeof(_chanItem{}) + elemsize - 1))
-	item := (*_chanItem)(m)
-	if c.tail != nil {
-		c.tail.next = item
-	} else {
-		c.head = item
+func chansend(t *chanType, c_, ptr unsafe.Pointer) {
+	var mysg SudoG
+
+	c := (*Hchan)(c_)
+	if c == nil {
+		panic("unimplemented: send on nil chan should block forever")
 	}
-	c.tail = item
-	memcpy(unsafe.Pointer(&item.value), ptr, elemsize)
+
+	c.lock.lock()
+
+	if c.closed {
+		goto closed
+	}
+
+	if c.dataqsiz > 0 {
+		goto asynch
+	}
+
+	panic("synch send unimplemented")
+
+asynch:
+	if c.qcount >= c.dataqsiz {
+		g := myg()
+		mysg.g = g
+		mysg.elem = nil
+		c.sendq.enqueue(&mysg)
+		c.unlock()
+		g.park("chan send")
+		c.lock.lock()
+		goto asynch
+	}
+
+	// TODO use copy alg
+	memcpy(c.chanbuf(c.sendx), ptr, uintptr(c.elemsize))
+	c.sendx++
+	if c.sendx == c.dataqsiz {
+		c.sendx = 0
+	}
+	c.qcount++
+
+	sg := c.recvq.dequeue()
+	if sg != nil {
+		gp := sg.g
+		c.unlock()
+		gp.ready()
+	} else {
+		c.unlock()
+	}
+	return
+
+closed:
+	c.unlock()
+	panic("send on closed channel")
 }
 
 // #llgo name: reflect.chanrecv
@@ -80,15 +176,64 @@ func reflect_chanrecv(t *rtype, c unsafe.Pointer, nb bool) (val unsafe.Pointer, 
 	return
 }
 
-func chanrecv(c_, ptr unsafe.Pointer) {
-	c := (*_chan)(c_)
-	elemsize := c.typ.elem.size
-	// TODO wait if channel is empty, panic on deadlock.
-	if c.head != nil {
-		item := c.head
-		c.head = item.next
-		memcpy(ptr, unsafe.Pointer(&item.value), elemsize)
+func chanrecv(t *chanType, c_, ptr unsafe.Pointer) (received bool) {
+	c := (*Hchan)(c_)
+	if c == nil {
+		myg().park("chan receive (nil chan)")
 	}
+
+	c.lock.lock()
+	var mysg SudoG
+
+	if c.dataqsiz > 0 {
+		goto asynch
+	}
+
+	if c.closed {
+		goto closed
+	}
+
+	panic("synch receive not implemented")
+
+asynch:
+	if c.qcount <= 0 {
+		if c.closed {
+			goto closed
+		}
+		g := myg()
+		mysg.g = g
+		mysg.elem = nil
+		c.recvq.enqueue(&mysg)
+		c.unlock()
+		g.park("chan receive")
+		c.lock.lock()
+		goto asynch
+	}
+
+	if uintptr(ptr) != 0 {
+		// TODO use copy alg
+		memcpy(ptr, c.chanbuf(c.recvx), uintptr(c.elemsize))
+	}
+	bzero(c.chanbuf(c.recvx), uintptr(c.elemsize))
+	c.recvx++
+	if c.recvx == c.dataqsiz {
+		c.recvx = 0
+	}
+	c.qcount--
+
+	sg := c.sendq.dequeue()
+	if sg != nil {
+		gp := sg.g
+		c.unlock()
+		gp.ready()
+	} else {
+		c.unlock()
+	}
+	return true
+
+closed:
+	panic("unimplemented: receive on closed chan")
+	return false
 }
 
 // #llgo name: reflect.chanclose
@@ -98,4 +243,5 @@ func reflect_chanclose(c unsafe.Pointer) {
 
 func chanclose(c_ unsafe.Pointer) {
 	// TODO
+	panic("unimplemented: chanclose")
 }

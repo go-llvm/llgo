@@ -49,7 +49,12 @@ func parseAttribute(line string) Attribute {
 	}
 	line = strings.TrimSpace(line[len(AttributeCommentPrefix):])
 	colon := strings.IndexRune(line, ':')
-	key, value := line[:colon], line[colon+1:]
+	var key, value string
+	if colon == -1 {
+		key = line
+	} else {
+		key, value = line[:colon], line[colon+1:]
+	}
 	switch key {
 	case "linkage":
 		return parseLinkageAttribute(value)
@@ -57,6 +62,8 @@ func parseAttribute(line string) Attribute {
 		return nameAttribute(strings.TrimSpace(value))
 	case "attr":
 		return parseLLVMAttribute(strings.TrimSpace(value))
+	case "thread_local":
+		return tlsAttribute{}
 	default:
 		// FIXME decide what to do here. return error? log warning?
 		panic("unknown attribute key: " + key)
@@ -152,4 +159,11 @@ func (a llvmAttribute) Apply(v Value) {
 	} else {
 		v.LLVMValue().AddAttribute(llvm.Attribute(a))
 	}
+}
+
+type tlsAttribute struct{}
+
+func (tlsAttribute) Apply(v Value) {
+	global := v.(*LLVMValue).pointer.value
+	global.SetThreadLocal(true)
 }

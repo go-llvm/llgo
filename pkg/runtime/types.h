@@ -8,5 +8,9 @@ struct Func {
     void *data;
 };
 
+struct Lock {
+    uintptr_t key;
+};
+
 #endif
 
