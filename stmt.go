@@ -267,13 +267,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 				continue
 			}
 			if c.objectdata[obj].Value == nil {
-				// FIXME this is crap, going to need to revisit
-				// how decl's are visited (should be in data
-				// dependent order.)
-				functions := c.functions
-				c.functions = nil
-				c.VisitValueSpec(x.Obj.Decl.(*ast.ValueSpec))
-				c.functions = functions
+				c.Resolve(x)
 			}
 		case *ast.IndexExpr:
 			t := c.typeinfo.Types[x.X]

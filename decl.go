@@ -298,7 +298,6 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 		values := c.destructureExpr(values[0])
 		for i, v := range values {
 			if globals[i] != nil {
-				//v := values[i].Convert(ident.Obj.Type.(types.Type))
 				gv := globals[i].pointer.value
 				gv.SetInitializer(llvm.Undef(gv.Type().ElementType()))
 				c.builder.CreateStore(v.LLVMValue(), gv)

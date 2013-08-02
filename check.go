@@ -40,7 +40,12 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 			continue
 		}
 		c.typeinfo.Objects[id] = obj
-		objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
+		data := objectdata[obj]
+		if data == nil {
+			objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
+		} else if data.Ident.Obj == nil {
+			data.Ident = id
+		}
 	}
 
 	for node, obj := range info.Implicits {
