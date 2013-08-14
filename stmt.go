@@ -216,6 +216,11 @@ func (c *compiler) destructureExpr(x ast.Expr) []Value {
 			value, ok := lhs.convertI2V(typ)
 			values = []Value{value, ok}
 		}
+	case *ast.UnaryExpr:
+		// comma-ok chan receive
+		channel := c.VisitExpr(x.X).(*LLVMValue)
+		value, received := channel.chanRecv(true)
+		values = []Value{value, received}
 	}
 	return values
 }
@@ -235,6 +240,7 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 	}
 
 	// a, b, ... [:]= x, y, ...
+	// item, ok [:]= <-ch
 	var values []Value
 	if len(stmt.Rhs) == 1 && len(stmt.Lhs) > 1 {
 		values = c.destructureExpr(stmt.Rhs[0])

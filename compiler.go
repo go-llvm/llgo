@@ -250,6 +250,7 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.typeinfo.Values = make(map[ast.Expr]exact.Value)
 	compiler.typeinfo.Objects = make(map[*ast.Ident]types.Object)
 	compiler.typeinfo.Implicits = make(map[ast.Node]types.Object)
+	compiler.typeinfo.Selections = make(map[*ast.SelectorExpr]*types.Selection)
 	compiler.objectdata = make(map[types.Object]*ObjectData)
 	compiler.methodsets = make(map[types.Type]*methodset)
 	compiler.exportedtypes = nil

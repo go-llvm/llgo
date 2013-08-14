@@ -479,7 +479,8 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewValue(value, v.typ)
 	case token.ARROW:
-		return v.chanRecv()
+		value, _ := v.chanRecv(false)
+		return value
 	default:
 		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
@@ -734,4 +735,13 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 		return v.compiler.NewValue(component, types.Typ[types.Float32])
 	}
 	return v.compiler.NewValue(component, types.Typ[types.Float64])
+}
+
+func boolLLVMValue(v bool) (lv llvm.Value) {
+	if v {
+		lv = llvm.ConstAllOnes(llvm.Int1Type())
+	} else {
+		lv = llvm.ConstNull(llvm.Int1Type())
+	}
+	return lv
 }

@@ -39,6 +39,7 @@ func (q *WaitQ) enqueue(sgp *SudoG) {
 	if q.first == nil {
 		q.first = sgp
 		q.last = sgp
+		return
 	}
 	q.last.link = sgp
 	q.last = sgp
@@ -117,15 +118,17 @@ func chanlen(c_ unsafe.Pointer) int {
 
 // #llgo name: reflect.chansend
 func reflect_chansend(t *rtype, c unsafe.Pointer, val unsafe.Pointer, nb bool) bool {
-	// TODO
-	return false
+	return chansend((*chanType)(unsafe.Pointer(t)), c, val, nb)
 }
 
-func chansend(t *chanType, c_, ptr unsafe.Pointer) {
+func chansend(t *chanType, c_, ptr unsafe.Pointer, nb bool) bool {
 	var mysg SudoG
 
 	c := (*Hchan)(c_)
 	if c == nil {
+		if nb {
+			return false
+		}
 		panic("unimplemented: send on nil chan should block forever")
 	}
 
@@ -148,13 +151,18 @@ func chansend(t *chanType, c_, ptr unsafe.Pointer) {
 			memcpy(sg.elem, ptr, uintptr(c.elemsize))
 		}
 		gp.ready()
-		return
+		return true
+	}
+
+	if nb {
+		c.lock.unlock()
+		return false
 	}
 
 	mysg.elem = ptr
 	mysg.g = myg()
-	mysg.selgen = _NOSELGEN
 	mysg.g.param = nil
+	mysg.selgen = _NOSELGEN
 	c.sendq.enqueue(&mysg)
 	c.lock.unlock()
 	mysg.g.park("chan send")
@@ -165,13 +173,18 @@ func chansend(t *chanType, c_, ptr unsafe.Pointer) {
 		}
 		goto closed
 	}
-	return
+	return true
 
 asynch:
 	if c.qcount >= c.dataqsiz {
+		if nb {
+			c.lock.unlock()
+			return false
+		}
 		g := myg()
 		mysg.g = g
 		mysg.elem = nil
+		mysg.selgen = _NOSELGEN
 		c.sendq.enqueue(&mysg)
 		c.lock.unlock()
 		g.park("chan send")
@@ -195,7 +208,7 @@ asynch:
 	} else {
 		c.lock.unlock()
 	}
-	return
+	return true
 
 closed:
 	c.lock.unlock()
@@ -208,9 +221,15 @@ func reflect_chanrecv(t *rtype, c unsafe.Pointer, nb bool) (val unsafe.Pointer, 
 	return
 }
 
-func chanrecv(t *chanType, c_, ptr unsafe.Pointer) (received bool) {
+func chanrecv(t *chanType, c_, ptr unsafe.Pointer, nb bool) (received bool) {
 	c := (*Hchan)(c_)
 	if c == nil {
+		if nb {
+			if ptr != nil {
+				bzero(ptr, uintptr(c.elemsize))
+			}
+			return false
+		}
 		myg().park("chan receive (nil chan)")
 	}
 
@@ -237,6 +256,14 @@ func chanrecv(t *chanType, c_, ptr unsafe.Pointer) (received bool) {
 		return true
 	}
 
+	if nb {
+		c.lock.unlock()
+		if ptr != nil {
+			bzero(ptr, uintptr(c.elemsize))
+		}
+		return false
+	}
+
 	mysg.elem = ptr
 	mysg.g = myg()
 	mysg.selgen = _NOSELGEN
@@ -258,9 +285,17 @@ asynch:
 		if c.closed {
 			goto closed
 		}
+		if nb {
+			c.lock.unlock()
+			if ptr != nil {
+				bzero(ptr, uintptr(c.elemsize))
+			}
+			return false
+		}
 		g := myg()
 		mysg.g = g
 		mysg.elem = nil
+		mysg.selgen = _NOSELGEN
 		c.recvq.enqueue(&mysg)
 		c.lock.unlock()
 		g.park("chan receive")
@@ -268,7 +303,7 @@ asynch:
 		goto asynch
 	}
 
-	if uintptr(ptr) != 0 {
+	if ptr != nil {
 		// TODO use copy alg
 		memcpy(ptr, c.chanbuf(c.recvx), uintptr(c.elemsize))
 	}
@@ -290,7 +325,10 @@ asynch:
 	return true
 
 closed:
-	panic("unimplemented: receive on closed chan")
+	c.lock.unlock()
+	if ptr != nil {
+		bzero(ptr, uintptr(c.elemsize))
+	}
 	return false
 }
 

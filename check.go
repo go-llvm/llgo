@@ -28,6 +28,7 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	objectdata := make(map[types.Object]*ObjectData)
 	info.Values = c.typeinfo.Values
 	info.Types = c.typeinfo.Types
+	info.Selections = c.typeinfo.Selections
 	info.Implicits = make(map[ast.Node]types.Object)
 	info.Objects = make(map[*ast.Ident]types.Object)
 	pkg, err := config.Check(pkgpath, fset, files, &info)

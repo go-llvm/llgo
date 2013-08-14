@@ -142,6 +142,9 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	switch t := c.typeinfo.Types[expr.Fun].(type) {
 	case *types.Builtin:
 		switch t.Name() {
+		case "close":
+			c.visitClose(expr)
+			return nil
 		case "copy":
 			return c.VisitCopy(expr)
 		case "print":
@@ -401,15 +404,15 @@ type selectorCandidate struct {
 }
 
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
+	selection := c.typeinfo.Selections[expr]
+
 	// Imported package funcs/vars.
-	if ident, ok := expr.X.(*ast.Ident); ok {
-		if _, ok := c.typeinfo.Objects[ident].(*types.Package); ok {
-			return c.Resolve(expr.Sel)
-		}
+	if selection.Kind() == types.PackageObj {
+		return c.Resolve(expr.Sel)
 	}
 
 	// Method expression. Returns an unbound function pointer.
-	if c.isType(expr.X) {
+	if selection.Kind() == types.MethodExpr {
 		ftyp := c.typeinfo.Types[expr].(*types.Signature)
 		recvtyp := ftyp.Params().At(0).Type()
 		var name *types.Named
@@ -429,6 +432,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	lhs := c.VisitExpr(expr.X)
 	name := expr.Sel.Name
 	if iface, ok := lhs.Type().Underlying().(*types.Interface); ok {
+		// TODO use selection.Index() when interface methods are sorted.
 		methods := sortedMethods(iface)
 		i := sort.Search(len(methods), func(i int) bool {
 			return methods[i].Name() >= name
@@ -446,7 +450,7 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	}
 
 	// Method.
-	if typ, ok := c.typeinfo.Types[expr].(*types.Signature); ok && typ.Recv() != nil {
+	if selection.Kind() == types.MethodVal {
 		var isptr bool
 		typ := lhs.Type()
 		if ptr, ok := typ.(*types.Pointer); ok {
