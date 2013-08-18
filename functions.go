@@ -104,6 +104,10 @@ func (c *compiler) methods(t types.Type) *methodset {
 	// Traverse embedded types, build forwarding methods if
 	// original type is in the main package (otherwise just
 	// declaring them).
+	type selectorCandidate struct {
+		Indices []int
+		Type    types.Type
+	}
 	var curr []selectorCandidate
 	if typ, ok := deref(t.Underlying()).(*types.Struct); ok {
 		curr = append(curr, selectorCandidate{nil, typ})

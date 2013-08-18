@@ -398,11 +398,6 @@ func (c *compiler) VisitIndexExpr(expr *ast.IndexExpr) Value {
 	panic(fmt.Sprintf("unreachable (%s)", typ))
 }
 
-type selectorCandidate struct {
-	Indices []int
-	Type    types.Type
-}
-
 func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 	selection := c.typeinfo.Selections[expr]
 
@@ -481,65 +476,27 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		}
 	}
 
-	// Otherwise, search for field, recursing through embedded types.
-	var result selectorCandidate
-	curr := []selectorCandidate{{nil, lhs.Type()}}
-	for result.Type == nil && len(curr) > 0 {
-		var next []selectorCandidate
-		for _, candidate := range curr {
-			indices := candidate.Indices[:]
-			t := candidate.Type
-			if ptr, ok := t.(*types.Pointer); ok {
-				indices = append(indices, -1)
-				t = ptr.Elem()
-			}
-			if t, ok := t.Underlying().(*types.Struct); ok {
-				if i := fieldIndex(t, name); i != -1 {
-					result.Indices = append(indices, i)
-					result.Type = t.Field(i).Type()
-					break
-				} else {
-					// Add embedded types to the next set of types to check.
-					for i := 0; i < t.NumFields(); i++ {
-						field := t.Field(i)
-						if field.Anonymous() {
-							indices := append(indices[:], i)
-							t := field.Type()
-							candidate := selectorCandidate{indices, t}
-							next = append(next, candidate)
-						}
-					}
-				}
-			}
-		}
-		curr = next
-	}
-
 	// Get a pointer to the field.
 	fieldValue := lhs.(*LLVMValue)
-	if len(result.Indices) > 0 {
-		if fieldValue.pointer == nil {
-			// If we've got a temporary (i.e. no pointer),
-			// then load the value onto the stack.
-			v := fieldValue.value
-			stackptr := c.builder.CreateAlloca(v.Type(), "")
-			c.builder.CreateStore(v, stackptr)
-			ptrtyp := types.NewPointer(fieldValue.Type())
-			fieldValue = c.NewValue(stackptr, ptrtyp).makePointee()
+	if fieldValue.pointer == nil {
+		// If we've got a temporary (i.e. no pointer),
+		// then load the value onto the stack.
+		v := fieldValue.value
+		stackptr := c.builder.CreateAlloca(v.Type(), "")
+		c.builder.CreateStore(v, stackptr)
+		ptrtyp := types.NewPointer(fieldValue.Type())
+		fieldValue = c.NewValue(stackptr, ptrtyp).makePointee()
+	}
+	for _, i := range selection.Index() {
+		if _, ok := fieldValue.Type().(*types.Pointer); ok {
+			fieldValue = fieldValue.makePointee()
 		}
-
-		for _, i := range result.Indices {
-			if i == -1 {
-				fieldValue = fieldValue.makePointee()
-			} else {
-				ptr := fieldValue.pointer.LLVMValue()
-				structTyp := deref(fieldValue.typ).Underlying().(*types.Struct)
-				field := structTyp.Field(i)
-				fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
-				fieldPtrTyp := types.NewPointer(field.Type())
-				fieldValue = c.NewValue(fieldPtr, fieldPtrTyp).makePointee()
-			}
-		}
+		ptr := fieldValue.pointer.LLVMValue()
+		structTyp := deref(fieldValue.typ).Underlying().(*types.Struct)
+		field := structTyp.Field(i)
+		fieldPtr := c.builder.CreateStructGEP(ptr, i, "")
+		fieldPtrTyp := types.NewPointer(field.Type())
+		fieldValue = c.NewValue(fieldPtr, fieldPtrTyp).makePointee()
 	}
 	return fieldValue
 }
@@ -597,5 +554,3 @@ func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	}
 	panic(fmt.Sprintf("Unhandled Expr node: %s", reflect.TypeOf(expr)))
 }
-
-// vim: set ft=go :
