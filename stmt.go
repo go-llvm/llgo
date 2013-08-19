@@ -144,7 +144,7 @@ func (c *compiler) VisitReturnStmt(stmt *ast.ReturnStmt) {
 		if f.results != nil {
 			for i := 0; i < int(f.results.Len()); i++ {
 				resultvar := f.results.At(i)
-				if !isBlank(resultvar.Name()) {
+				if !isBlank(resultvar.Name()) || !f.deferblock.IsNil() {
 					resultptr := c.objectdata[resultvar].Value.pointer
 					c.builder.CreateStore(values[i], resultptr.LLVMValue())
 				}
