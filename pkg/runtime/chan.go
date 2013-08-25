@@ -20,6 +20,30 @@ type SudoG struct {
 	elem        unsafe.Pointer // data element
 }
 
+type CaseKind uint16
+
+const (
+	CaseRecv CaseKind = iota
+	CaseSend
+	CaseDefault
+)
+
+type Scase struct {
+	sg        SudoG // must be first member (cast to Scase)
+	chan_     *Hchan
+	blockaddr unsafe.Pointer
+	kind      CaseKind
+	receivedp *bool // pointer to received bool (recv2)
+}
+
+type Select struct {
+	tcase     uint16   // total count of scase
+	ncase     uint16   // currently filled scase
+	pollorder *uint16  // case poll order
+	lockorder **Hchan  // channel lock order
+	scase     [1]Scase // one per case (in order of appearance)
+}
+
 type WaitQ struct {
 	first *SudoG
 	last  *SudoG
@@ -372,4 +396,77 @@ func chanclose(c_ unsafe.Pointer) {
 	}
 
 	c.lock.unlock()
+}
+
+// #llgo name: runtime.selectsize
+func selectsize(size int32) uintptr {
+	var n int32
+	if size > 1 {
+		n = size - 1
+	}
+	return unsafe.Sizeof(Select{}) +
+		uintptr(n)*unsafe.Sizeof(Scase{}) +
+		uintptr(size)*unsafe.Sizeof(&Hchan{}) +
+		uintptr(size)*unsafe.Sizeof(uint16(0))
+}
+
+// #llgo name: runtime.initselect
+func initselect(size int32, ptr unsafe.Pointer) {
+	sel := (*Select)(ptr)
+	sel.tcase = uint16(size)
+	ptr = unsafe.Pointer(&sel.scase[0])
+	ptr = unsafe.Pointer(uintptr(ptr) + uintptr(size)*unsafe.Sizeof(Scase{}))
+	sel.lockorder = (**Hchan)(ptr)
+	ptr = unsafe.Pointer(uintptr(ptr) + uintptr(size)*unsafe.Sizeof(*sel.lockorder))
+	sel.pollorder = (*uint16)(ptr)
+}
+
+// #llgo name: runtime.selectdefault
+func selectdefault(selectp_, blockaddr, elem unsafe.Pointer) {
+	selectp := (*Select)(selectp_)
+	i := selectp.ncase
+	if i > selectp.tcase {
+		panic("selectdefault: too many cases")
+	}
+	selectp.ncase++
+	cas := &selectp.scase[i]
+	cas.blockaddr = blockaddr
+	cas.kind = CaseDefault
+}
+
+// #llgo name: runtime.selectsend
+func selectsend(selectp_, blockaddr, ch, elem unsafe.Pointer) {
+	selectp := (*Select)(selectp_)
+	i := selectp.ncase
+	if i > selectp.tcase {
+		panic("selectsend: too many cases")
+	}
+	selectp.ncase++
+	cas := &selectp.scase[i]
+	cas.blockaddr = blockaddr
+	cas.kind = CaseSend
+	cas.chan_ = (*Hchan)(ch)
+	cas.sg.elem = elem
+}
+
+// #llgo name: runtime.selectrecv
+func selectrecv(selectp_, blockaddr, ch, elem unsafe.Pointer, received *bool) {
+	selectp := (*Select)(selectp_)
+	i := selectp.ncase
+	if i > selectp.tcase {
+		panic("selectrecv: too many cases")
+	}
+	selectp.ncase++
+	cas := &selectp.scase[i]
+	cas.blockaddr = blockaddr
+	cas.kind = CaseRecv
+	cas.chan_ = (*Hchan)(ch)
+	cas.sg.elem = elem
+	cas.receivedp = received
+}
+
+// #llgo name: runtime.selectgo
+func selectgo(selectp_ unsafe.Pointer) unsafe.Pointer {
+	selectp := (*Select)(selectp_)
+	return nil
 }

@@ -873,17 +873,6 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 	}
 }
 
-func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
-	// TODO
-	/*
-		if c.lastlabel != nil {
-			labelData := c.labelData(c.lastlabel)
-			labelData.Break = doneBlock
-			c.lastlabel = nil
-		}
-	*/
-}
-
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
 	if c.Logger != nil {
 		c.Logger.Println("Compile statement:", reflect.TypeOf(stmt),
