@@ -71,6 +71,9 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 	//     2. Single recv, and default clause: runtime.selectnbrecv
 	//     2. Single send, and default clause: runtime.selectnbsend
 
+	// FIXME check if channels are nil, and don't allocate for them
+	//       any memory, blocks, etc.
+
 	startBlock := c.builder.GetInsertBlock()
 	function := startBlock.Parent()
 	endBlock := llvm.AddBasicBlock(function, "end")
@@ -83,6 +86,8 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 	selectp := c.builder.CreateArrayAlloca(llvm.Int8Type(), selectsize, "selectp")
 	c.memsetZero(selectp, selectsize)
 	selectp = c.builder.CreatePtrToInt(selectp, c.target.IntPtrType(), "")
+	f = c.NamedFunction("runtime.initselect", "func(size int32, ptr unsafe.Pointer)")
+	c.builder.CreateCall(f, []llvm.Value{size, selectp}, "")
 
 	// Cache runtime functions
 	var selectrecv, selectsend llvm.Value
@@ -99,10 +104,12 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		return selectrecv
 	}
 
-	for _, stmt := range stmt.Body.List {
+	blocks := make([]llvm.BasicBlock, len(stmt.Body.List))
+	for i, stmt := range stmt.Body.List {
 		clause := stmt.(*ast.CommClause)
 		block := llvm.InsertBasicBlock(endBlock, "")
 		c.builder.SetInsertPointAtEnd(block)
+		blocks[i] = block
 		// TODO set Value for case's assigned variables, if any.
 		for _, stmt := range clause.Body {
 			c.VisitStmt(stmt)
@@ -119,19 +126,28 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr}, "")
 
 		case *ast.SendStmt:
-			// c<- val
+			// c <- val
 			ch := c.VisitExpr(comm.Chan).LLVMValue()
-			elem := c.VisitExpr(comm.Value).LLVMValue()
+			var elemptr llvm.Value
+			elem := c.VisitExpr(comm.Value).(*LLVMValue)
+			if elem.pointer == nil {
+				value := elem.LLVMValue()
+				elemptr = c.builder.CreateAlloca(value.Type(), "")
+				c.builder.CreateStore(value, elemptr)
+			} else {
+				elemptr = elem.pointer.LLVMValue()
+			}
+			elemptr = c.builder.CreatePtrToInt(elemptr, c.target.IntPtrType(), "")
 			f := getselectsend()
-			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elem}, "")
+			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elemptr}, "")
 
 		case *ast.ExprStmt:
 			// <-c
 			ch := c.VisitExpr(comm.X.(*ast.UnaryExpr).X).LLVMValue()
 			f := getselectrecv()
 			paramtypes := f.Type().ElementType().ParamTypes()
-			elem := llvm.ConstNull(paramtypes[2])
-			received := llvm.ConstNull(paramtypes[3])
+			elem := llvm.ConstNull(paramtypes[3])
+			received := llvm.ConstNull(paramtypes[4])
 			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elem, received}, "")
 
 		case *ast.AssignStmt:
@@ -155,5 +171,8 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 	f = c.NamedFunction("runtime.selectgo", "func(selectp unsafe.Pointer) unsafe.Pointer")
 	blockaddr := c.builder.CreateCall(f, []llvm.Value{selectp}, "")
 	blockaddr = c.builder.CreateIntToPtr(blockaddr, llvm.PointerType(llvm.Int8Type(), 0), "")
-	c.builder.CreateIndirectBr(blockaddr, len(stmt.Body.List))
+	ibr := c.builder.CreateIndirectBr(blockaddr, len(stmt.Body.List))
+	for _, block := range blocks {
+		ibr.AddDest(block)
+	}
 }

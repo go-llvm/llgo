@@ -9,6 +9,7 @@ import "unsafe"
 type G struct {
 	parklock lock
 	param    unsafe.Pointer
+	selgen   uint32
 }
 
 func (g *G) park(reason string) {

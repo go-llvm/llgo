@@ -13,8 +13,8 @@ import "unsafe"
 const _NOSELGEN = 1
 
 type SudoG struct {
-	g           *G    // g and selgen constitute
-	selgen      int32 // a weak pointer to g
+	g           *G     // g and selgen constitute
+	selgen      uint32 // a weak pointer to g
 	link        *SudoG
 	releasetime int64
 	elem        unsafe.Pointer // data element
@@ -37,11 +37,11 @@ type Scase struct {
 }
 
 type Select struct {
-	tcase     uint16   // total count of scase
-	ncase     uint16   // currently filled scase
-	pollorder *uint16  // case poll order
-	lockorder **Hchan  // channel lock order
-	scase     [1]Scase // one per case (in order of appearance)
+	tcase      uint16   // total count of scase
+	ncase      uint16   // currently filled scase
+	pollorder_ *uint16  // case poll order
+	lockorder_ *uintptr // channel lock order
+	scase      [1]Scase // one per case (in order of appearance)
 }
 
 type WaitQ struct {
@@ -49,12 +49,40 @@ type WaitQ struct {
 	last  *SudoG
 }
 
+// removeg removes the current G from the WaitQ.
+func (q *WaitQ) removeg() {
+	g := myg()
+	var prevsgp *SudoG
+	l := &q.first
+	for *l != nil {
+		sgp := *l
+		if sgp.g == g {
+			*l = sgp.link
+			if q.last == sgp {
+				q.last = prevsgp
+			}
+			break
+		}
+		l, prevsgp = &sgp.link, sgp
+	}
+}
+
 func (q *WaitQ) dequeue() *SudoG {
+loop:
 	sgp := q.first
 	if sgp == nil {
 		return nil
 	}
 	q.first = sgp.link
+
+	// if sgp is stale, ignore it
+	if sgp.selgen != _NOSELGEN &&
+		(sgp.selgen != sgp.g.selgen ||
+			!cas(&sgp.g.selgen, sgp.selgen, sgp.selgen+2)) {
+		//println("INVALID PSEUDOG POINTER")
+		goto loop
+	}
+
 	return sgp
 }
 
@@ -218,8 +246,7 @@ asynch:
 
 	// TODO use copy alg
 	memcpy(c.chanbuf(c.sendx), ptr, uintptr(c.elemsize))
-	c.sendx++
-	if c.sendx == c.dataqsiz {
+	if c.sendx++; c.sendx == c.dataqsiz {
 		c.sendx = 0
 	}
 	c.qcount++
@@ -332,8 +359,7 @@ asynch:
 		memcpy(ptr, c.chanbuf(c.recvx), uintptr(c.elemsize))
 	}
 	bzero(c.chanbuf(c.recvx), uintptr(c.elemsize))
-	c.recvx++
-	if c.recvx == c.dataqsiz {
+	if c.recvx++; c.recvx == c.dataqsiz {
 		c.recvx = 0
 	}
 	c.qcount--
@@ -416,9 +442,9 @@ func initselect(size int32, ptr unsafe.Pointer) {
 	sel.tcase = uint16(size)
 	ptr = unsafe.Pointer(&sel.scase[0])
 	ptr = unsafe.Pointer(uintptr(ptr) + uintptr(size)*unsafe.Sizeof(Scase{}))
-	sel.lockorder = (**Hchan)(ptr)
-	ptr = unsafe.Pointer(uintptr(ptr) + uintptr(size)*unsafe.Sizeof(*sel.lockorder))
-	sel.pollorder = (*uint16)(ptr)
+	sel.lockorder_ = (*uintptr)(ptr)
+	ptr = unsafe.Pointer(uintptr(ptr) + uintptr(size)*unsafe.Sizeof(*sel.lockorder_))
+	sel.pollorder_ = (*uint16)(ptr)
 }
 
 // #llgo name: runtime.selectdefault
@@ -465,8 +491,298 @@ func selectrecv(selectp_, blockaddr, ch, elem unsafe.Pointer, received *bool) {
 	cas.receivedp = received
 }
 
+func (s *Select) lockorder(i uint16) (ret uintptr) {
+	ptr := uintptr(unsafe.Pointer(s.lockorder_))
+	ptr += uintptr(i) * unsafe.Sizeof(ret)
+	return *(*uintptr)(unsafe.Pointer(ptr))
+}
+
+func (s *Select) setlockorder(i uint16, val uintptr) {
+	ptr := uintptr(unsafe.Pointer(s.lockorder_))
+	ptr += uintptr(i) * unsafe.Sizeof(val)
+	*(*uintptr)(unsafe.Pointer(ptr)) = val
+}
+
+func (s *Select) pollorder(i uint16) (ret uint16) {
+	ptr := uintptr(unsafe.Pointer(s.pollorder_))
+	ptr += uintptr(i) * unsafe.Sizeof(ret)
+	return *(*uint16)(unsafe.Pointer(ptr))
+}
+
+func (s *Select) setpollorder(i, val uint16) {
+	ptr := uintptr(unsafe.Pointer(s.pollorder_))
+	ptr += uintptr(i) * unsafe.Sizeof(val)
+	*(*uint16)(unsafe.Pointer(ptr)) = val
+}
+
+func (s *Select) lock() {
+	var c uintptr
+	for i := uint16(0); i < s.ncase; i++ {
+		c0 := s.lockorder(i)
+		if c0 != 0 && c0 != c {
+			c = c0
+			(*Hchan)(unsafe.Pointer(c)).lock.lock()
+		}
+	}
+}
+
+func (s *Select) unlock() {
+	n := int32(s.ncase)
+	r := int32(0)
+	if n > 0 && s.lockorder(0) == 0 {
+		// skip the default case
+		r = 1
+	}
+	for i := int32(n - 1); i >= r; i-- {
+		c := s.lockorder(uint16(i))
+		if i > 0 && s.lockorder(uint16(i-1)) == c {
+			continue
+		}
+		(*Hchan)(unsafe.Pointer(c)).lock.unlock()
+	}
+}
+
 // #llgo name: runtime.selectgo
 func selectgo(selectp_ unsafe.Pointer) unsafe.Pointer {
-	selectp := (*Select)(selectp_)
-	return nil
+	sel := (*Select)(selectp_)
+	for i := uint16(0); i < sel.ncase; i++ {
+		sel.setpollorder(i, i)
+	}
+	// TODO shuffle poll order
+
+	// sort the cases by Hchan address to get the locking order.
+	// simple heap sort, to guarantee n log n time and constant stack footprint.
+	for i := uint16(0); i < sel.ncase; i++ {
+		j := i
+		c := uintptr(unsafe.Pointer(sel.scase[j].chan_))
+		for j > 0 {
+			k := (j - 1) / 2
+			if sel.lockorder(k) >= uintptr(unsafe.Pointer(c)) {
+				break
+			}
+			sel.setlockorder(j, sel.lockorder(k))
+			j = k
+		}
+		sel.setlockorder(j, c)
+	}
+	for i := uint16(sel.ncase); i > 0; {
+		i--
+		c := sel.lockorder(i)
+		sel.setlockorder(i, sel.lockorder(0))
+		j := uint16(0)
+		for {
+			k := j*2 + 1
+			if k >= i {
+				break
+			}
+			if k+1 < i && sel.lockorder(k) < sel.lockorder(k+1) {
+				k++
+			}
+			if c < sel.lockorder(k) {
+				sel.setlockorder(j, sel.lockorder(k))
+				j = k
+				continue
+			}
+			break
+		}
+		sel.setlockorder(j, c)
+	}
+	for i := uint16(0); i+1 < sel.ncase; i++ {
+		if sel.lockorder(i) > sel.lockorder(i+1) {
+			println("i=", i, sel.lockorder(i), sel.lockorder(i+1))
+			panic("select: broken sort")
+		}
+	}
+	sel.lock()
+
+	// Common variables used in labeled sections.
+	var cas *Scase
+	var sg *SudoG
+	var c *Hchan
+
+loop:
+	// pass 1 - look for something already waiting
+	var defaultCase *Scase
+	for i := uint16(0); i < sel.ncase; i++ {
+		o := sel.pollorder(i)
+		cas = &sel.scase[o]
+		c = cas.chan_
+		switch cas.kind {
+		case CaseRecv:
+			if c.dataqsiz > 0 {
+				if c.qcount > 0 {
+					goto asyncrecv
+				}
+			} else {
+				if sg = c.sendq.dequeue(); sg != nil {
+					goto syncrecv
+				}
+			}
+			if c.closed {
+				goto rclose
+			}
+		case CaseSend:
+			if c.closed {
+				goto sclose
+			}
+			if c.dataqsiz > 0 {
+				if c.qcount < c.dataqsiz {
+					goto asyncsend
+				}
+			} else {
+				// FIXME
+				//if sg = c.recvq.dequeue(); sg != nil {
+				//	goto syncsend
+				//}
+			}
+		case CaseDefault:
+			defaultCase = cas
+		}
+	}
+
+	if defaultCase != nil {
+		sel.unlock()
+		cas = defaultCase
+		goto retc
+	}
+
+	// pass 2 - enqueue on all chans
+	for i := uint16(0); i < sel.ncase; i++ {
+		o := sel.pollorder(i)
+		cas = &sel.scase[o]
+		c = cas.chan_
+		sg = &cas.sg
+		sg.g = myg()
+		sg.selgen = sg.g.selgen
+		switch cas.kind {
+		case CaseRecv:
+			c.recvq.enqueue(sg)
+		case CaseSend:
+			c.sendq.enqueue(sg)
+		}
+	}
+
+	g := myg()
+	g.param = nil
+	sel.unlock()
+	g.park("select")
+	sel.lock()
+	sg = (*SudoG)(g.param)
+
+	// pass 3 - dequeue from unsuccessful chans
+	// otherwise they stack up on quiet channels
+	for i := uint16(0); i < sel.ncase; i++ {
+		cas := sel.scase[i]
+		if &cas.sg != sg {
+			c = cas.chan_
+			if cas.kind == CaseSend {
+				c.sendq.removeg()
+			} else {
+				c.recvq.removeg()
+			}
+		}
+	}
+
+	if sg == nil {
+		goto loop
+	}
+	cas = (*Scase)(unsafe.Pointer(sg))
+	c = cas.chan_
+
+	if c.dataqsiz > 0 {
+		panic("selectgo: shouldn't happen")
+	}
+
+	if /*cas.kind == CaseRecv &&*/ cas.receivedp != nil {
+		*cas.receivedp = true
+	}
+	sel.unlock()
+	goto retc
+
+asyncrecv:
+	// can receive from buffer
+	if cas.receivedp != nil {
+		*cas.receivedp = true
+	}
+	if cas.sg.elem != nil {
+		// TODO use copy alg
+		memcpy(cas.sg.elem, c.chanbuf(c.recvx), uintptr(c.elemsize))
+	}
+	bzero(c.chanbuf(c.recvx), uintptr(c.elemsize))
+	if c.recvx++; c.recvx == c.dataqsiz {
+		c.recvx = 0
+	}
+	c.qcount--
+	if sg = c.sendq.dequeue(); sg != nil {
+		gp := sg.g
+		sel.unlock()
+		gp.ready()
+	} else {
+		sel.unlock()
+	}
+	goto retc
+
+asyncsend:
+	// can send to buffer
+	// TODO use copy alg
+	memcpy(c.chanbuf(c.sendx), cas.sg.elem, uintptr(c.elemsize))
+	if c.sendx++; c.sendx == c.dataqsiz {
+		c.sendx = 0
+	}
+	c.qcount++
+	if sg = c.recvq.dequeue(); sg != nil {
+		gp := sg.g
+		sel.unlock()
+		gp.ready()
+	} else {
+		sel.unlock()
+	}
+	goto retc
+
+syncrecv:
+	// can receive from sleeping sender (sg)
+	sel.unlock()
+	if cas.receivedp != nil {
+		*cas.receivedp = true
+	}
+	if cas.sg.elem != nil {
+		// TODO use copy alg
+		memcpy(cas.sg.elem, sg.elem, uintptr(c.elemsize))
+	}
+	gp := sg.g
+	gp.param = unsafe.Pointer(sg)
+	gp.ready()
+	goto retc
+
+rclose:
+	// read at end of closed channel
+	sel.unlock()
+	if cas.receivedp != nil {
+		*cas.receivedp = false
+	}
+	if cas.sg.elem != nil {
+		bzero(cas.sg.elem, uintptr(c.elemsize))
+	}
+	goto retc
+
+syncsend:
+	// can send to sleeping receiver (sg)
+	sel.unlock()
+	if sg.elem != nil {
+		// TODO use copy alg
+		memcpy(sg.elem, cas.sg.elem, uintptr(c.elemsize))
+	}
+	gp = sg.g
+	gp.param = unsafe.Pointer(sg)
+	gp.ready()
+	goto retc
+
+retc:
+	//println("gots teh case: ", cas.blockaddr)
+	return cas.blockaddr
+
+sclose:
+	// send on closed channel
+	sel.unlock()
+	panic("send on closed channel")
 }
