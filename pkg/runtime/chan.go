@@ -630,10 +630,9 @@ loop:
 					goto asyncsend
 				}
 			} else {
-				// FIXME
-				//if sg = c.recvq.dequeue(); sg != nil {
-				//	goto syncsend
-				//}
+				if sg = c.recvq.dequeue(); sg != nil {
+					goto syncsend
+				}
 			}
 		case CaseDefault:
 			defaultCase = cas
@@ -749,9 +748,8 @@ syncrecv:
 		// TODO use copy alg
 		memcpy(cas.sg.elem, sg.elem, uintptr(c.elemsize))
 	}
-	gp := sg.g
-	gp.param = unsafe.Pointer(sg)
-	gp.ready()
+	sg.g.param = unsafe.Pointer(sg)
+	sg.g.ready()
 	goto retc
 
 rclose:
@@ -772,9 +770,8 @@ syncsend:
 		// TODO use copy alg
 		memcpy(sg.elem, cas.sg.elem, uintptr(c.elemsize))
 	}
-	gp = sg.g
-	gp.param = unsafe.Pointer(sg)
-	gp.ready()
+	sg.g.param = unsafe.Pointer(sg)
+	sg.g.ready()
 	goto retc
 
 retc:

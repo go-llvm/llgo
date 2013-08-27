@@ -717,6 +717,9 @@ arrayrange:
 }
 
 func (c *compiler) VisitBranchStmt(stmt *ast.BranchStmt) {
+	// BUG(axw) branches don't check if variable declarations
+	// are jumped over, leading instead to difficult to follow
+	// LLVM instruction domination errors.
 	switch stmt.Tok {
 	case token.BREAK:
 		var block llvm.BasicBlock

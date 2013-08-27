@@ -377,6 +377,7 @@ func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
 		typ := obj.Type()
 		llvmtyp := c.types.ToLLVM(typ)
 		ptr := c.createTypeMalloc(llvmtyp)
+		ptr.SetName(name.Name)
 		if values != nil && values[i] != nil {
 			// FIXME we need to revisit how aggregate types
 			// are initialised/copied/etc. A CreateStore will
