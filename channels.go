@@ -106,6 +106,8 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 
 	blocks := make([]llvm.BasicBlock, len(stmt.Body.List))
 	for i, stmt := range stmt.Body.List {
+		currBlock := c.builder.GetInsertBlock()
+
 		clause := stmt.(*ast.CommClause)
 		block := llvm.InsertBasicBlock(endBlock, "")
 		c.builder.SetInsertPointAtEnd(block)
@@ -118,7 +120,7 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		blockaddr := llvm.BlockAddress(function, block)
 		blockaddr = c.builder.CreatePtrToInt(blockaddr, c.target.IntPtrType(), "")
 
-		c.builder.SetInsertPointAtEnd(startBlock)
+		c.builder.SetInsertPointAtEnd(currBlock)
 		switch comm := clause.Comm.(type) {
 		case nil:
 			// default clause
