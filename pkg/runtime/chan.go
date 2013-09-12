@@ -692,7 +692,7 @@ loop:
 		panic("selectgo: shouldn't happen")
 	}
 
-	if /*cas.kind == CaseRecv &&*/ cas.receivedp != nil {
+	if cas.kind == CaseRecv && cas.receivedp != nil {
 		*cas.receivedp = true
 	}
 	sel.unlock()

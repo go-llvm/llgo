@@ -6,7 +6,7 @@ func f1() {
 		select {
 		case <-c:
 			println("received") //, n)
-			//c = nil
+			c = nil
 		case c <- 123:
 			println("sent a value")
 		default:

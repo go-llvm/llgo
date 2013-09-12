@@ -71,23 +71,11 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 	//     2. Single recv, and default clause: runtime.selectnbrecv
 	//     2. Single send, and default clause: runtime.selectnbsend
 
-	// FIXME check if channels are nil, and don't allocate for them
-	//       any memory, blocks, etc.
-
 	startBlock := c.builder.GetInsertBlock()
 	function := startBlock.Parent()
 	endBlock := llvm.AddBasicBlock(function, "end")
 	endBlock.MoveAfter(startBlock)
 	defer c.builder.SetInsertPointAtEnd(endBlock)
-
-	f := c.NamedFunction("runtime.selectsize", "func(size int32) uintptr")
-	size := llvm.ConstInt(llvm.Int32Type(), uint64(len(stmt.Body.List)), false)
-	selectsize := c.builder.CreateCall(f, []llvm.Value{size}, "")
-	selectp := c.builder.CreateArrayAlloca(llvm.Int8Type(), selectsize, "selectp")
-	c.memsetZero(selectp, selectsize)
-	selectp = c.builder.CreatePtrToInt(selectp, c.target.IntPtrType(), "")
-	f = c.NamedFunction("runtime.initselect", "func(size int32, ptr unsafe.Pointer)")
-	c.builder.CreateCall(f, []llvm.Value{size, selectp}, "")
 
 	// Cache runtime functions
 	var selectrecv, selectsend llvm.Value
@@ -104,11 +92,15 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		return selectrecv
 	}
 
+	// Create clause basic blocks.
 	blocks := make([]llvm.BasicBlock, len(stmt.Body.List))
+	var basesize uint64
 	for i, stmt := range stmt.Body.List {
-		currBlock := c.builder.GetInsertBlock()
-
 		clause := stmt.(*ast.CommClause)
+		if clause.Comm == nil {
+			basesize++
+		}
+		currBlock := c.builder.GetInsertBlock()
 		block := llvm.InsertBasicBlock(endBlock, "")
 		c.builder.SetInsertPointAtEnd(block)
 		blocks[i] = block
@@ -117,21 +109,70 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 			c.VisitStmt(stmt)
 		}
 		c.maybeImplicitBranch(endBlock)
-		blockaddr := llvm.BlockAddress(function, block)
-		blockaddr = c.builder.CreatePtrToInt(blockaddr, c.target.IntPtrType(), "")
-
 		c.builder.SetInsertPointAtEnd(currBlock)
+	}
+
+	// We need to make an initial pass through the cases,
+	// discarding those where the channel is nil.
+	size := llvm.ConstInt(llvm.Int32Type(), basesize, false)
+	channels := make([]Value, len(stmt.Body.List))
+	rhs := make([]*LLVMValue, len(stmt.Body.List))
+	for i, stmt := range stmt.Body.List {
+		clause := stmt.(*ast.CommClause)
 		switch comm := clause.Comm.(type) {
 		case nil:
+		case *ast.SendStmt:
+			channels[i] = c.VisitExpr(comm.Chan)
+			rhs[i] = c.VisitExpr(comm.Value).(*LLVMValue)
+		case *ast.ExprStmt:
+			channels[i] = c.VisitExpr(comm.X.(*ast.UnaryExpr).X)
+		case *ast.AssignStmt:
+			channels[i] = c.VisitExpr(comm.Rhs[0].(*ast.UnaryExpr).X)
+		default:
+			panic(fmt.Errorf("unhandled: %T", comm))
+		}
+		if channels[i] != nil {
+			nonnil := c.builder.CreateIsNotNull(channels[i].LLVMValue(), "")
+			zero := llvm.ConstInt(llvm.Int32Type(), 0, false)
+			one := llvm.ConstInt(llvm.Int32Type(), 1, false)
+			addend := c.builder.CreateSelect(nonnil, one, zero, "")
+			size = c.builder.CreateAdd(size, addend, "")
+		}
+	}
+
+	f := c.NamedFunction("runtime.selectsize", "func(size int32) uintptr")
+	selectsize := c.builder.CreateCall(f, []llvm.Value{size}, "")
+	selectp := c.builder.CreateArrayAlloca(llvm.Int8Type(), selectsize, "selectp")
+	c.memsetZero(selectp, selectsize)
+	selectp = c.builder.CreatePtrToInt(selectp, c.target.IntPtrType(), "")
+	f = c.NamedFunction("runtime.initselect", "func(size int32, ptr unsafe.Pointer)")
+	c.builder.CreateCall(f, []llvm.Value{size, selectp}, "")
+
+	for i, stmt := range stmt.Body.List {
+		clause := stmt.(*ast.CommClause)
+		blockaddr := llvm.BlockAddress(function, blocks[i])
+		blockaddr = c.builder.CreatePtrToInt(blockaddr, c.target.IntPtrType(), "")
+		if clause.Comm == nil {
 			// default clause
 			f := c.NamedFunction("runtime.selectdefault", "func(selectp, blockaddr unsafe.Pointer)")
 			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr}, "")
+			continue
+		}
 
+		currBlock := c.builder.GetInsertBlock()
+		nextBlock := llvm.InsertBasicBlock(currBlock, "")
+		nextBlock.MoveAfter(currBlock)
+		block := llvm.InsertBasicBlock(endBlock, "")
+		chanval := channels[i].LLVMValue()
+		nonnilchan := c.builder.CreateIsNotNull(chanval, "")
+		c.builder.CreateCondBr(nonnilchan, block, nextBlock)
+		c.builder.SetInsertPointAtEnd(block)
+
+		switch comm := clause.Comm.(type) {
 		case *ast.SendStmt:
 			// c <- val
-			ch := c.VisitExpr(comm.Chan).LLVMValue()
+			elem := rhs[i]
 			var elemptr llvm.Value
-			elem := c.VisitExpr(comm.Value).(*LLVMValue)
 			if elem.pointer == nil {
 				value := elem.LLVMValue()
 				elemptr = c.builder.CreateAlloca(value.Type(), "")
@@ -141,16 +182,15 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 			}
 			elemptr = c.builder.CreatePtrToInt(elemptr, c.target.IntPtrType(), "")
 			f := getselectsend()
-			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elemptr}, "")
+			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, chanval, elemptr}, "")
 
 		case *ast.ExprStmt:
 			// <-c
-			ch := c.VisitExpr(comm.X.(*ast.UnaryExpr).X).LLVMValue()
 			f := getselectrecv()
 			paramtypes := f.Type().ElementType().ParamTypes()
 			elem := llvm.ConstNull(paramtypes[3])
 			received := llvm.ConstNull(paramtypes[4])
-			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elem, received}, "")
+			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, chanval, elem, received}, "")
 
 		case *ast.AssignStmt:
 			// val := <-c
@@ -161,13 +201,12 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 			if len(comm.Lhs) == 2 {
 				received = c.VisitExpr(comm.Lhs[1]).(*LLVMValue).pointer.LLVMValue()
 			}
-			ch := c.VisitExpr(comm.Rhs[0].(*ast.UnaryExpr).X).LLVMValue()
 			f := getselectrecv()
-			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, ch, elem, received}, "")
-
-		default:
-			panic(fmt.Errorf("unhandled: %T", comm))
+			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, chanval, elem, received}, "")
 		}
+
+		c.builder.CreateBr(nextBlock)
+		c.builder.SetInsertPointAtEnd(nextBlock)
 	}
 
 	f = c.NamedFunction("runtime.selectgo", "func(selectp unsafe.Pointer) unsafe.Pointer")
