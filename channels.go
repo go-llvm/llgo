@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
+	"go/token"
 )
 
 func (c *compiler) VisitSendStmt(stmt *ast.SendStmt) {
@@ -92,6 +93,26 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		return selectrecv
 	}
 
+	// We create a pointer-pointer for each newly defined var on the
+	// lhs of receive expressions, which will be assigned to when the
+	// expressions are (conditionally) evaluated.
+	lhsptrs := make([][]llvm.Value, len(stmt.Body.List))
+	for i, stmt := range stmt.Body.List {
+		clause := stmt.(*ast.CommClause)
+		if stmt, ok := clause.Comm.(*ast.AssignStmt); ok && stmt.Tok == token.DEFINE {
+			lhs := make([]llvm.Value, len(stmt.Lhs))
+			for i, expr := range stmt.Lhs {
+				ident := expr.(*ast.Ident)
+				if !isBlank(ident.Name) {
+					typ := c.target.IntPtrType()
+					lhs[i] = c.builder.CreateAlloca(typ, "")
+					c.builder.CreateStore(llvm.ConstNull(typ), lhs[i])
+				}
+			}
+			lhsptrs[i] = lhs
+		}
+	}
+
 	// Create clause basic blocks.
 	blocks := make([]llvm.BasicBlock, len(stmt.Body.List))
 	var basesize uint64
@@ -104,7 +125,20 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		block := llvm.InsertBasicBlock(endBlock, "")
 		c.builder.SetInsertPointAtEnd(block)
 		blocks[i] = block
-		// TODO set Value for case's assigned variables, if any.
+		lhs := lhsptrs[i]
+		if stmt, ok := clause.Comm.(*ast.AssignStmt); ok {
+			for i, expr := range stmt.Lhs {
+				ident := expr.(*ast.Ident)
+				if !isBlank(ident.Name) {
+					ptr := c.builder.CreateLoad(lhs[i], "")
+					obj := c.typeinfo.Objects[ident]
+					ptrtyp := types.NewPointer(obj.Type())
+					ptr = c.builder.CreateIntToPtr(ptr, c.types.ToLLVM(ptrtyp), "")
+					value := c.NewValue(ptr, ptrtyp).makePointee()
+					c.objectdata[obj].Value = value
+				}
+			}
+		}
 		for _, stmt := range clause.Body {
 			c.VisitStmt(stmt)
 		}
@@ -195,13 +229,29 @@ func (c *compiler) VisitSelectStmt(stmt *ast.SelectStmt) {
 		case *ast.AssignStmt:
 			// val := <-c
 			// val, ok = <-c
-			// FIXME handle "_"
-			elem := c.VisitExpr(comm.Lhs[0]).(*LLVMValue).pointer.LLVMValue()
-			var received llvm.Value
-			if len(comm.Lhs) == 2 {
-				received = c.VisitExpr(comm.Lhs[1]).(*LLVMValue).pointer.LLVMValue()
-			}
 			f := getselectrecv()
+			lhs := c.assignees(comm)
+			paramtypes := f.Type().ElementType().ParamTypes()
+			var elem llvm.Value
+			if lhs[0] != nil {
+				elem = lhs[0].pointer.LLVMValue()
+				elem = c.builder.CreatePtrToInt(elem, paramtypes[3], "")
+				if !lhsptrs[i][0].IsNil() {
+					c.builder.CreateStore(elem, lhsptrs[i][0])
+				}
+			} else {
+				elem = llvm.ConstNull(paramtypes[3])
+			}
+			var received llvm.Value
+			if len(lhs) == 2 && lhs[1] != nil {
+				received = lhs[1].pointer.LLVMValue()
+				received = c.builder.CreatePtrToInt(received, paramtypes[4], "")
+				if !lhsptrs[i][1].IsNil() {
+					c.builder.CreateStore(received, lhsptrs[i][1])
+				}
+			} else {
+				received = llvm.ConstNull(paramtypes[4])
+			}
 			c.builder.CreateCall(f, []llvm.Value{selectp, blockaddr, chanval, elem, received}, "")
 		}
 

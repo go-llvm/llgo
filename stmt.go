@@ -254,43 +254,12 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 
 	// FIXME must evaluate lhs before evaluating rhs.
 	lhsptrs := make([]llvm.Value, len(stmt.Lhs))
-	for i, expr := range stmt.Lhs {
-		switch x := expr.(type) {
-		case *ast.Ident:
-			if isBlank(x.Name) {
-				continue
-			}
-			obj := c.typeinfo.Objects[x]
-			if stmt.Tok == token.DEFINE {
-				typ := obj.Type()
-				llvmtyp := c.types.ToLLVM(typ)
-				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
-				ptrtyp := types.NewPointer(typ)
-				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
-				stackvar.stack = c.functions.top().LLVMValue
-				c.objectdata[obj].Value = stackvar
-				lhsptrs[i] = ptr
-				continue
-			}
-			if c.objectdata[obj].Value == nil {
-				c.Resolve(x)
-			}
-		case *ast.IndexExpr:
-			t := c.typeinfo.Types[x.X]
-			if _, ok := t.Underlying().(*types.Map); ok {
-				m := c.VisitExpr(x.X).(*LLVMValue)
-				index := c.VisitExpr(x.Index)
-				elem, _ := c.mapLookup(m, index, true)
-				lhsptrs[i] = elem.pointer.LLVMValue()
-				values[i] = values[i].Convert(elem.Type())
-				continue
-			}
+	for i, assignee := range c.assignees(stmt) {
+		if assignee == nil {
+			continue
 		}
-
-		// default (since we can't fallthrough in non-map index exprs)
-		lhs := c.VisitExpr(expr).(*LLVMValue)
-		lhsptrs[i] = lhs.pointer.LLVMValue()
-		values[i] = values[i].Convert(lhs.Type())
+		lhsptrs[i] = assignee.pointer.LLVMValue()
+		values[i] = values[i].Convert(assignee.Type())
 	}
 
 	// Must evaluate all of rhs values before assigning.
@@ -306,6 +275,47 @@ func (c *compiler) VisitAssignStmt(stmt *ast.AssignStmt) {
 			c.builder.CreateStore(v, ptr)
 		}
 	}
+}
+
+// assignees returns the lhs vars that each rhs value
+// will be assigned to.
+func (c *compiler) assignees(stmt *ast.AssignStmt) []*LLVMValue {
+	lhs := make([]*LLVMValue, len(stmt.Lhs))
+	for i, expr := range stmt.Lhs {
+		switch x := expr.(type) {
+		case *ast.Ident:
+			if isBlank(x.Name) {
+				continue
+			}
+			obj := c.typeinfo.Objects[x]
+			if stmt.Tok == token.DEFINE {
+				typ := obj.Type()
+				llvmtyp := c.types.ToLLVM(typ)
+				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
+				ptrtyp := types.NewPointer(typ)
+				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
+				stackvar.stack = c.functions.top().LLVMValue
+				c.objectdata[obj].Value = stackvar
+				lhs[i] = stackvar
+				continue
+			}
+			if c.objectdata[obj].Value == nil {
+				c.Resolve(x)
+			}
+		case *ast.IndexExpr:
+			t := c.typeinfo.Types[x.X]
+			if _, ok := t.Underlying().(*types.Map); ok {
+				m := c.VisitExpr(x.X).(*LLVMValue)
+				index := c.VisitExpr(x.Index)
+				elem, _ := c.mapLookup(m, index, true)
+				lhs[i] = elem
+				continue
+			}
+		}
+		// default (since we can't fallthrough in non-map index exprs)
+		lhs[i] = c.VisitExpr(expr).(*LLVMValue)
+	}
+	return lhs
 }
 
 func (c *compiler) VisitIfStmt(stmt *ast.IfStmt) {
