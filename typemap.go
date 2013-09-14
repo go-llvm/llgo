@@ -354,8 +354,10 @@ func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 		elements := make([]llvm.Type, 2+i.NumMethods())
 		elements[0] = typptr_type // type
 		elements[1] = valptr_type // value
-		for n, m := range sortedMethods(i) {
-			fntype := m.Type()
+
+		methods := i.MethodSet()
+		for n := 0; n < methods.Len(); n++ {
+			fntype := methods.At(n).Type()
 			elements[n+2] = tm.ToLLVM(fntype).StructElementTypes()[0]
 		}
 		typ.StructSetBody(elements, false)
@@ -731,8 +733,10 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 	interfaceType := llvm.ConstNull(tm.runtimeInterfaceType)
 	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
 
-	imethods := make([]llvm.Value, i.NumMethods())
-	for index, method := range sortedMethods(i) {
+	methodset := i.MethodSet()
+	imethods := make([]llvm.Value, methodset.Len())
+	for index := 0; index < methodset.Len(); index++ {
+		method := methodset.At(index).Obj()
 		//name, pkgPath, type
 		imethod := llvm.ConstNull(tm.runtimeImethod)
 		name := tm.globalStringPtr(method.Name())
@@ -755,7 +759,7 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 		imethodsGlobalPtr = llvm.ConstNull(imethodPtrType)
 	}
 
-	len_ := llvm.ConstInt(tm.inttype, uint64(i.NumMethods()), false)
+	len_ := llvm.ConstInt(tm.inttype, uint64(len(imethods)), false)
 	imethodsSliceType := tm.runtimeInterfaceType.StructElementTypes()[1]
 	imethodsSlice := llvm.ConstNull(imethodsSliceType)
 	imethodsSlice = llvm.ConstInsertValue(imethodsSlice, imethodsGlobalPtr, []uint32{0})

@@ -151,7 +151,9 @@ func (c *compiler) methods(t types.Type) *methodset {
 
 			switch typ := typ.(type) {
 			case *types.Interface:
-				for i, m := range sortedMethods(typ) {
+				methodset := typ.MethodSet()
+				for i := 0; i < methodset.Len(); i++ {
+					m := methodset.At(i).Obj().(*types.Func)
 					if methods.lookup(m.Name(), true) == nil {
 						indices := candidate.Indices[:]
 						indices = append(indices, -1) // always load
