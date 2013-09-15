@@ -27,15 +27,9 @@ func (c *compiler) isType(x ast.Expr) bool {
 		return c.isType(t.X)
 	case *ast.SelectorExpr:
 		// qualified identifier
-		if ident, ok := t.X.(*ast.Ident); ok {
-			if obj, ok := c.typeinfo.Objects[ident]; ok {
-				if pkg, ok := obj.(*types.Package); ok {
-					obj := pkg.Scope().Lookup(t.Sel.Name)
-					_, ok = obj.(*types.TypeName)
-					return ok
-				}
-				return false
-			}
+		if sel := c.typeinfo.Selections[t]; sel.Kind() == types.PackageObj {
+			_, isType := sel.Obj().(*types.TypeName)
+			return isType
 		}
 		return false
 	case *ast.StarExpr:
