@@ -20,13 +20,13 @@ void __cxa_throw(void *exc, void *typeinfo, void (*dest)(void*)) __attribute__((
 
 // runtime functions
 void panic(struct Eface error)
-		__asm__("runtime.panic_") __attribute__((noreturn));
+		LLGO_ASM_EXPORT("runtime.panic_") __attribute__((noreturn));
 void recover(int32_t indirect, struct Eface *error)
-	__asm__("runtime.recover") __attribute__((noinline));
+	LLGO_ASM_EXPORT("runtime.recover") __attribute__((noinline));
 void pushdefer(struct Func)
-	__asm__("runtime.pushdefer") __attribute__((noinline));
+	LLGO_ASM_EXPORT("runtime.pushdefer") __attribute__((noinline));
 void rundefers(void)
-	__asm__("runtime.rundefers") __attribute__((noinline));
+	LLGO_ASM_EXPORT("runtime.rundefers") __attribute__((noinline));
 
 void panic(struct Eface error) {
 	struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));
