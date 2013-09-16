@@ -5,3 +5,5 @@
 _obj
 bin
 cmd/llgo/llgo
+cmd/llgo-dist/llgo-dist
+cmd/llgo-build/llgo-build
