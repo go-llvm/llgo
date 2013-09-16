@@ -62,7 +62,8 @@ func initPepper() error {
 
 	newlibDir := filepath.Join(pnaclToolchainDir, "newlib")
 	newlibBinDir := filepath.Join(newlibDir, "bin")
-	if runtime.GOARCH == "amd64" {
+	if runtime.GOARCH == "amd64" && runtime.GOOS != "darwin" {
+		// Only 64 bit binaries available on darwin? They are 64 bit but reside in the regular "bin" directory.
 		newlibBinDir += "64"
 	}
 

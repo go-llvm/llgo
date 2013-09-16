@@ -26,11 +26,12 @@ var (
 	llvmldflags string
 	llvmbindir  string
 
-	x           bool
-	triple      string
-	buildctx    *build.Context
-	sharedllvm  bool
-	alwaysbuild bool
+	x                 bool
+	triple            string
+	buildctx          *build.Context
+	sharedllvm        bool
+	alwaysbuild       bool
+	install_name_tool bool
 )
 
 func errorf(format string, args ...interface{}) {
@@ -47,6 +48,12 @@ func init() {
 	// We default this to true, as the eventually intended usage
 	// of llgo-dist is for building binary distributions.
 	flag.BoolVar(&alwaysbuild, "a", true, "Force rebuilding packages that are already up-to-date")
+	if runtime.GOOS == "darwin" {
+		// Default to true on darwin for now. I don't know how to make the resulting llgo
+		// use the full absolute path to libLLVM-<version>.dylib at link time, so
+		// we use install_name_tool to change it after linking instead.
+		flag.BoolVar(&install_name_tool, "install_name_tool", true, "Change path of dynamic libLLVM with install_name_tool (darwin only)")
+	}
 	flag.BoolVar(&x, "x", x, "Print commands as they are run")
 }
 
