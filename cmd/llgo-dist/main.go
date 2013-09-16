@@ -1,4 +1,4 @@
-// Copyright 2012 The llgo Authors.
+// Copyright 2012-2013 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -25,6 +26,7 @@ var (
 	llvmldflags string
 	llvmbindir  string
 
+	x           bool
 	triple      string
 	buildctx    *build.Context
 	sharedllvm  bool
@@ -45,10 +47,21 @@ func init() {
 	// We default this to true, as the eventually intended usage
 	// of llgo-dist is for building binary distributions.
 	flag.BoolVar(&alwaysbuild, "a", true, "Force rebuilding packages that are already up-to-date")
+	flag.BoolVar(&x, "x", x, "Print commands as they are run")
+}
+
+func command(name string, arg ...string) *exec.Cmd {
+	if x {
+		if name == llgobuildbin {
+			arg = append([]string{"-x"}, arg...)
+		}
+		log.Println(name, arg)
+	}
+	return exec.Command(name, arg...)
 }
 
 func llvmconfigValue(option string) (string, error) {
-	output, err := exec.Command(llvmconfig, option).CombinedOutput()
+	output, err := command(llvmconfig, option).CombinedOutput()
 	if err != nil {
 		return "", err
 	}

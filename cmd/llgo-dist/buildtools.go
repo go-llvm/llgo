@@ -9,7 +9,6 @@ import (
 	"go/build"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 )
@@ -45,7 +44,7 @@ func buildLlgoTools() error {
 	}
 
 	args := []string{"install", "-ldflags", strings.Join(ldflags, " "), llgoBuildPath}
-	output, err := exec.Command("go", args...).CombinedOutput()
+	output, err := command("go", args...).CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
 		return err

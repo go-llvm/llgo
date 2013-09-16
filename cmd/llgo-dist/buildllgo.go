@@ -1,4 +1,4 @@
-// Copyright 2012 The llgo Authors.
+// Copyright 2012-2013 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,6 @@ import (
 	gobuild "go/build"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 )
@@ -26,7 +25,7 @@ var (
 func buildLlgo() error {
 	log.Println("Building llgo")
 
-	cmd := exec.Command("go", "get", "-d", gollvmpkgpath)
+	cmd := command("go", "get", "-d", gollvmpkgpath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
@@ -62,7 +61,7 @@ func buildLlgo() error {
 	args = append(args, []string{"-tags", llvmtag}...)
 	args = append(args, llgopkgpath)
 
-	cmd = exec.Command("go", args...)
+	cmd = command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CGO_CFLAGS="+cgoCflags)
 	cmd.Env = append(cmd.Env, "CGO_LDFLAGS="+cgoLdflags)
@@ -81,7 +80,7 @@ func buildLlgo() error {
 	// If the user did not specify -triple on the command
 	// line, ask llgo for it now.
 	if triple == "" {
-		output, err = exec.Command(llgobin, "-print-triple").CombinedOutput()
+		output, err = command(llgobin, "-print-triple").CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", string(output))
 			return err

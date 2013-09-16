@@ -9,7 +9,6 @@ import (
 	"go/build"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -70,7 +69,7 @@ func initPepper() error {
 	// Get the clang version, using which we'll
 	// determine the lib/clang directory.
 	clang := filepath.Join(hostBinDir, "clang")
-	output, err := exec.Command(clang, "--version").CombinedOutput()
+	output, err := command(clang, "--version").CombinedOutput()
 	if err != nil {
 		return err
 	}
@@ -139,7 +138,7 @@ func (t *pnaclToolchain) makeSyscall() error {
 	fmt.Fprintln(f, "// +build pnacl")
 	fmt.Fprintln(f)
 
-	cmd := exec.Command("go", args...)
+	cmd := command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CC="+t.clang)
 	cmd.Env = append(cmd.Env, "GOARCH=386")

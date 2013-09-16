@@ -1,4 +1,4 @@
-// Copyright 2012 The llgo Authors.
+// Copyright 2012-2013 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 )
 
 func buildRuntime() error {
@@ -32,7 +31,7 @@ func buildRuntime() error {
 	}
 	for _, pkg := range runtimePackages {
 		log.Printf("- %s", pkg)
-		output, err := exec.Command(llgobuildbin, pkg).CombinedOutput()
+		output, err := command(llgobuildbin, pkg).CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", string(output))
 			return err
