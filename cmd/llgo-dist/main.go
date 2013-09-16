@@ -26,6 +26,7 @@ var (
 	llvmldflags string
 	llvmbindir  string
 
+	verbose           bool
 	x                 bool
 	triple            string
 	buildctx          *build.Context
@@ -55,16 +56,29 @@ func init() {
 		flag.BoolVar(&install_name_tool, "install_name_tool", true, "Change path of dynamic libLLVM with install_name_tool (darwin only)")
 	}
 	flag.BoolVar(&x, "x", x, "Print commands as they are run")
+	flag.BoolVar(&verbose, "v", verbose, "Be verbose")
 }
 
-func command(name string, arg ...string) *exec.Cmd {
+type mycommand struct {
+	*exec.Cmd
+}
+
+func (m mycommand) CombinedOutput() ([]byte, error) {
+	d, err := m.Cmd.CombinedOutput()
+	if verbose {
+		log.Println(string(d))
+	}
+	return d, err
+}
+
+func command(name string, arg ...string) mycommand {
 	if x {
 		if name == llgobuildbin {
 			arg = append([]string{"-x"}, arg...)
 		}
 		log.Println(name, arg)
 	}
-	return exec.Command(name, arg...)
+	return mycommand{exec.Command(name, arg...)}
 }
 
 func llvmconfigValue(option string) (string, error) {
