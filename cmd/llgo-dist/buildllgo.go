@@ -10,7 +10,6 @@ import (
 	gobuild "go/build"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 )
@@ -26,7 +25,7 @@ var (
 func buildLlgo() error {
 	log.Println("Building llgo")
 
-	cmd := exec.Command("go", "get", "-d", gollvmpkgpath)
+	cmd := command("go", "get", "-d", gollvmpkgpath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
@@ -62,7 +61,7 @@ func buildLlgo() error {
 	args = append(args, []string{"-tags", llvmtag}...)
 	args = append(args, llgopkgpath)
 
-	cmd = exec.Command("go", args...)
+	cmd = command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CGO_CFLAGS="+cgoCflags)
 	cmd.Env = append(cmd.Env, "CGO_LDFLAGS="+cgoLdflags)
@@ -81,7 +80,7 @@ func buildLlgo() error {
 	// If the user did not specify -triple on the command
 	// line, ask llgo for it now.
 	if triple == "" {
-		output, err = exec.Command(llgobin, "-print-triple").CombinedOutput()
+		output, err = command(llgobin, "-print-triple").CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", string(output))
 			return err
@@ -94,5 +93,16 @@ func buildLlgo() error {
 	}
 	log.Printf("GOARCH = %s, GOOS = %s", buildctx.GOARCH, buildctx.GOOS)
 	log.Printf("Built %s", llgobin)
+	if install_name_tool && sharedllvm {
+		// TODO: this was with the LLVM shipped with the pnacl sdk and might not be true of *all* libLLVM-xxx.dylibs.
+		//       Is there a link time commandline option that has the same effect?
+		cmd = command("install_name_tool", "-change", fmt.Sprintf("@executable_path/../lib/libLLVM-%s.dylib", llvmversion), fmt.Sprintf("%s/libLLVM-%s.dylib", llvmlibdir, llvmversion), llgobin)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", string(output))
+			return err
+		}
+		log.Printf("Successfully changed shared libLLVM path")
+	}
 	return nil
 }
