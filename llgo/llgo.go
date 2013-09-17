@@ -219,6 +219,11 @@ func computeTriple() string {
 	switch targetOS {
 	case "windows":
 		targetOS = "win32"
+	case "darwin":
+		// Using darwin11 rather than just darwin enables TLS support,
+		// making llgo-dist run without manually specifying a target
+		// triple
+		targetOS = "darwin11"
 	}
 
 	tripleArch := getTripleArchName(targetArch)
