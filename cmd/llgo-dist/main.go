@@ -1,4 +1,4 @@
-// Copyright 2012-2013 The llgo Authors.
+// Copyright 2012 The llgo Authors.
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
@@ -27,7 +27,7 @@ var (
 	llvmbindir  string
 
 	verbose           bool
-	x                 bool
+	printcommands     bool
 	triple            string
 	buildctx          *build.Context
 	sharedllvm        bool
@@ -55,7 +55,7 @@ func init() {
 		// we use install_name_tool to change it after linking instead.
 		flag.BoolVar(&install_name_tool, "install_name_tool", true, "Change path of dynamic libLLVM with install_name_tool (darwin only)")
 	}
-	flag.BoolVar(&x, "x", x, "Print commands as they are run")
+	flag.BoolVar(&printcommands, "x", printcommands, "Print commands as they are run")
 	flag.BoolVar(&verbose, "v", verbose, "Be verbose")
 }
 
@@ -72,7 +72,7 @@ func (m mycommand) CombinedOutput() ([]byte, error) {
 }
 
 func command(name string, arg ...string) mycommand {
-	if x {
+	if printcommands {
 		if name == llgobuildbin {
 			arg = append([]string{"-x"}, arg...)
 		}

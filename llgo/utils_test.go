@@ -121,10 +121,10 @@ func getRuntimeModuleFile() (string, error) {
 
 	for i, cfile := range cfiles {
 		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
-		args := []string{"-g", "-c", "-emit-llvm", "-o", bcfile, cfile}
-		if runtime.GOOS == "darwin" {
-			// TODO(q): -g breaks badly on my system at the moment, so disabling for now
-			args = args[1:]
+		args := []string{"-c", "-emit-llvm", "-o", bcfile, cfile}
+		if runtime.GOOS != "darwin" {
+			// TODO(q): -g breaks badly on my system at the moment, so is not enabled on darwin for now
+			args = append([]string{"-g"}, args...)
 		}
 		cmd := exec.Command("clang", args...)
 		cmd.Stderr = os.Stderr
