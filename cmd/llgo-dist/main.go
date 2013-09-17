@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -25,10 +26,13 @@ var (
 	llvmldflags string
 	llvmbindir  string
 
-	triple      string
-	buildctx    *build.Context
-	sharedllvm  bool
-	alwaysbuild bool
+	verbose           bool
+	printcommands     bool
+	triple            string
+	buildctx          *build.Context
+	sharedllvm        bool
+	alwaysbuild       bool
+	install_name_tool bool
 )
 
 func errorf(format string, args ...interface{}) {
@@ -45,10 +49,40 @@ func init() {
 	// We default this to true, as the eventually intended usage
 	// of llgo-dist is for building binary distributions.
 	flag.BoolVar(&alwaysbuild, "a", true, "Force rebuilding packages that are already up-to-date")
+	if runtime.GOOS == "darwin" {
+		// Default to true on darwin for now. I don't know how to make the resulting llgo
+		// use the full absolute path to libLLVM-<version>.dylib at link time, so
+		// we use install_name_tool to change it after linking instead.
+		flag.BoolVar(&install_name_tool, "install_name_tool", true, "Change path of dynamic libLLVM with install_name_tool (darwin only)")
+	}
+	flag.BoolVar(&printcommands, "x", printcommands, "Print commands as they are run")
+	flag.BoolVar(&verbose, "v", verbose, "Be verbose")
+}
+
+type mycommand struct {
+	*exec.Cmd
+}
+
+func (m mycommand) CombinedOutput() ([]byte, error) {
+	d, err := m.Cmd.CombinedOutput()
+	if verbose {
+		log.Println(string(d))
+	}
+	return d, err
+}
+
+func command(name string, arg ...string) mycommand {
+	if printcommands {
+		if name == llgobuildbin {
+			arg = append([]string{"-x"}, arg...)
+		}
+		log.Println(name, arg)
+	}
+	return mycommand{exec.Command(name, arg...)}
 }
 
 func llvmconfigValue(option string) (string, error) {
-	output, err := exec.Command(llvmconfig, option).CombinedOutput()
+	output, err := command(llvmconfig, option).CombinedOutput()
 	if err != nil {
 		return "", err
 	}

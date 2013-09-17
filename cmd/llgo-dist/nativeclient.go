@@ -9,7 +9,6 @@ import (
 	"go/build"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -63,14 +62,15 @@ func initPepper() error {
 
 	newlibDir := filepath.Join(pnaclToolchainDir, "newlib")
 	newlibBinDir := filepath.Join(newlibDir, "bin")
-	if runtime.GOARCH == "amd64" {
+	if runtime.GOARCH == "amd64" && runtime.GOOS != "darwin" {
+		// Only 64 bit binaries available on darwin? They are 64 bit but reside in the regular "bin" directory.
 		newlibBinDir += "64"
 	}
 
 	// Get the clang version, using which we'll
 	// determine the lib/clang directory.
 	clang := filepath.Join(hostBinDir, "clang")
-	output, err := exec.Command(clang, "--version").CombinedOutput()
+	output, err := command(clang, "--version").CombinedOutput()
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (t *pnaclToolchain) makeSyscall() error {
 	fmt.Fprintln(f, "// +build pnacl")
 	fmt.Fprintln(f)
 
-	cmd := exec.Command("go", args...)
+	cmd := command("go", args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "CC="+t.clang)
 	cmd.Env = append(cmd.Env, "GOARCH=386")

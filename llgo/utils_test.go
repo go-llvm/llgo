@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -120,7 +121,12 @@ func getRuntimeModuleFile() (string, error) {
 
 	for i, cfile := range cfiles {
 		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
-		cmd := exec.Command("clang", "-g", "-c", "-emit-llvm", "-o", bcfile, cfile)
+		args := []string{"-c", "-emit-llvm", "-o", bcfile, cfile}
+		if runtime.GOOS != "darwin" {
+			// TODO(q): -g breaks badly on my system at the moment, so is not enabled on darwin for now
+			args = append([]string{"-g"}, args...)
+		}
+		cmd := exec.Command("clang", args...)
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("clang failed: %s", err)
