@@ -47,12 +47,13 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 			// TODO speed this up by iterating through in lockstep.
 			found := false
 			for j, sm := range dyntyp.methods {
-				// TODO check method types are equal.
 				if *sm.name == *tm.name {
-					fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
-					fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
-					*fnptrslot = uintptr(sm.ifn)
-					found = true
+					if eqtyp(sm.typ, tm.typ) {
+						fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
+						fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
+						*fnptrslot = uintptr(sm.ifn)
+						found = true
+					}
 					break
 				}
 			}

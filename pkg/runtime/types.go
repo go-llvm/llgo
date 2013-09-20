@@ -148,6 +148,24 @@ func eqtyp(t1, t2 *rtype) bool {
 		case arrayKind:
 		case chanKind:
 		case funcKind:
+			t1 := (*funcType)(unsafe.Pointer(t1))
+			t2 := (*funcType)(unsafe.Pointer(t2))
+			if t1.dotdotdot == t2.dotdotdot {
+				nin, nout := len(t1.in), len(t1.out)
+				if nin == len(t2.in) && nout == len(t2.out) {
+					for i := 0; i < nin; i++ {
+						if !eqtyp(t1.in[i], t2.in[i]) {
+							return false
+						}
+					}
+					for i := 0; i < nout; i++ {
+						if !eqtyp(t1.out[i], t2.out[i]) {
+							return false
+						}
+					}
+					return true
+				}
+			}
 		case interfaceKind:
 		case mapKind:
 		case ptrKind:
