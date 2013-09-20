@@ -16,7 +16,4 @@ func time_stopTimer(*int8) (stopped bool) {
 }
 
 // #llgo name: time.now
-func time_now() (sec int64, nsec int32) {
-	// TODO
-	return
-}
+func time_now() (sec int64, nsec int32)
