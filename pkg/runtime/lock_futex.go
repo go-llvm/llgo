@@ -54,13 +54,11 @@ func osyield()
 // Note that there can be spinning threads during all states - they do not
 // affect mutex's state.
 func (l *lock) lock() {
-	var i, v, wait uint32
-
 	//if(m->locks++ < 0)
 	//	runtime·throw("runtime·lock: lock count");
 
 	// Speculative grab for lock.
-	v = xchg((*uint32)(unsafe.Pointer(&l.key)), _MUTEX_LOCKED)
+	v := xchg((*uint32)(unsafe.Pointer(&l.key)), _MUTEX_LOCKED)
 	if v == _MUTEX_UNLOCKED {
 		return
 	}
@@ -72,7 +70,7 @@ func (l *lock) lock() {
 	// careful to change it back to MUTEX_SLEEPING before
 	// returning, to ensure that the sleeping thread gets
 	// its wakeup call.
-	wait = v
+	wait := v
 
 	// On uniprocessor's, no point spinning.
 	// On multiprocessors, spin for ACTIVE_SPIN attempts.

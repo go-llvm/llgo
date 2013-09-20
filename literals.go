@@ -76,7 +76,7 @@ func (c *compiler) VisitFuncLit(lit *ast.FuncLit) Value {
 			p := capturevar.Pkg()
 			n := capturevar.Name()
 			t := types.NewPointer(capturevar.Type())
-			ctxfields[i] = types.NewFieldVar(token.NoPos, p, n, t, false)
+			ctxfields[i] = types.NewParam(token.NoPos, p, n, t)
 		}
 		ctxtyp := types.NewPointer(types.NewStruct(ctxfields, nil))
 		llvmctxtyp := c.types.ToLLVM(ctxtyp)

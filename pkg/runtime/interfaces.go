@@ -46,7 +46,7 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 		for i, tm := range targettyp.methods {
 			// TODO speed this up by iterating through in lockstep.
 			found := false
-			for j, sm := range dyntyp.methods {
+			for _, sm := range dyntyp.methods {
 				if *sm.name == *tm.name {
 					if eqtyp(sm.typ, tm.typ) {
 						fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)

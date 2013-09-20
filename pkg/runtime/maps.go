@@ -182,7 +182,6 @@ func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv 
 		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
 		keysize := uintptr(maptyp.key.size)
 		keyoffset := align(ptrsize, uintptr(maptyp.key.align))
-		elemsize := uintptr(maptyp.elem.size)
 		elemoffset := align(keyoffset+keysize, uintptr(maptyp.elem.align))
 		nextout = unsafe.Pointer(ptr)
 		pk = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)

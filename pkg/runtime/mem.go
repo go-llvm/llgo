@@ -4,8 +4,6 @@
 
 package runtime
 
-import "unsafe"
-
 // A MemStats records statistics about the memory allocator.
 type MemStats struct {
 	// General statistics.
