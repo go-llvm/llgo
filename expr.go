@@ -508,14 +508,11 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 }
 
 func (c *compiler) VisitStarExpr(expr *ast.StarExpr) Value {
-	switch operand := c.VisitExpr(expr.X).(type) {
-	case *LLVMValue:
-		// We don't want to immediately load the value, as we might be doing an
-		// assignment rather than an evaluation. Instead, we return the pointer
-		// and tell the caller to load it on demand.
-		return operand.makePointee()
-	}
-	panic("unreachable")
+	operand := c.VisitExpr(expr.X).(*LLVMValue)
+	// We don't want to immediately load the value, as we might be doing an
+	// assignment rather than an evaluation. Instead, we return the pointer
+	// and tell the caller to load it on demand.
+	return operand.makePointee()
 }
 
 func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {

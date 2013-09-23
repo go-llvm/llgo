@@ -280,14 +280,15 @@ func (tm *LLVMTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
-	if p.Elem().Underlying() == p {
+	elem := p.Elem()
+	if p, ok := elem.Underlying().(*types.Pointer); ok && p.Elem() == elem {
 		// Recursive pointers must be handled specially, as
 		// LLVM does not permit recursive types except via
 		// named structs.
 		if tm.ptrstandin.IsNil() {
 			ctx := llvm.GlobalContext()
 			unique := ctx.StructCreateNamed("")
-			tm.ptrstandin = llvm.PointerType(unique, 0)
+			tm.ptrstandin = unique
 		}
 		return llvm.PointerType(tm.ptrstandin, 0)
 	}

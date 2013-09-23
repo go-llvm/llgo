@@ -21,27 +21,25 @@ func newBuilder(tm *TypeMap) *Builder {
 }
 
 func (b *Builder) CreateLoad(v llvm.Value, name string) llvm.Value {
-	result := b.Builder.CreateLoad(v, name)
-	if !b.types.ptrstandin.IsNil() && result.Type() == b.types.ptrstandin {
+	if v.Type().ElementType() == b.types.ptrstandin {
 		// We represent recursive pointer types (T = *T)
 		// in LLVM as a pointer to "ptrstdin", where
-		// ptrstandin is a pointer to a unique named struct.
+		// ptrstandin is a unique named struct.
 		//
-		// Cast the result of loading the pointer back to
-		// the same type as the pointer loaded from.
-		result = b.CreateBitCast(result, v.Type(), "")
+		// Cast the the pointer to a pointer to its own type first.
+		v = b.CreateBitCast(v, llvm.PointerType(v.Type(), 0), "")
 	}
-	return result
+	return b.Builder.CreateLoad(v, name)
 }
 
 func (b *Builder) CreateStore(v, ptr llvm.Value) {
 	if !b.types.ptrstandin.IsNil() {
 		vtyp, ptrtyp := v.Type(), ptr.Type()
-		if vtyp == ptrtyp || ptrtyp.ElementType() == b.types.ptrstandin {
+		if vtyp == ptrtyp {
 			// We must be dealing with a pointer to a recursive pointer
-			// type, so bitcast the value to the pointer's base, opaque
-			// pointer type.
-			v = b.CreateBitCast(v, ptrtyp.ElementType(), "")
+			// type, so bitcast the pointer to a pointer to its own
+			// type first.
+			ptr = b.CreateBitCast(ptr, llvm.PointerType(ptrtyp, 0), "")
 		}
 	}
 	b.Builder.CreateStore(v, ptr)
