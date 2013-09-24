@@ -26,7 +26,7 @@ SOFTWARE.
 #include <pthread.h>
 #include <stdlib.h>
 
-void go(struct Func) __asm__("runtime.go");
+void go(struct Func) LLGO_ASM_EXPORT("runtime.go");
 
 static void* call_gofunction(void *arg)
 {
