@@ -45,6 +45,13 @@ func (c *compiler) isType(x ast.Expr) bool {
 	return false
 }
 
+func unparen(x ast.Expr) ast.Expr {
+	if p, ok := x.(*ast.ParenExpr); ok {
+		return unparen(p.X)
+	}
+	return x
+}
+
 func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
 	fromtype := c.typeinfo.Types[from]
 	if fromtype != nil && isUntyped(fromtype) {

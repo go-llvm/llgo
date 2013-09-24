@@ -124,6 +124,19 @@ func (c *compiler) evalCallArgs(ftype *types.Signature, args []ast.Expr, dotdotd
 	return argValues
 }
 
+// maybeBuiltin returns the *types.Builtin corresponding
+// to the identifier, or nil if it is not a builtin
+// function.
+func (c *compiler) maybeBuiltin(x ast.Expr) *types.Builtin {
+	if ident, ok := unparen(x).(*ast.Ident); ok {
+		obj := c.typeinfo.Objects[ident]
+		if b, ok := obj.(*types.Builtin); ok {
+			return b
+		}
+	}
+	return nil
+}
+
 func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	// Is it a type conversion?
 	if len(expr.Args) == 1 && c.isType(expr.Fun) {
@@ -138,9 +151,8 @@ func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
 	//
 	// Note: we do not handle unsafe.{Align,Offset,Size}of here,
 	// as they are evaluated during type-checking.
-	switch t := c.typeinfo.Types[expr.Fun].(type) {
-	case *types.Builtin:
-		switch t.Name() {
+	if builtin := c.maybeBuiltin(expr.Fun); builtin != nil {
+		switch builtin.Name() {
 		case "close":
 			c.visitClose(expr)
 			return nil
