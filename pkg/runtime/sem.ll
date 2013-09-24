@@ -12,3 +12,17 @@ define void @sync.runtime_Semrelease(i32*) {
 	ret void
 }
 
+define void @sync.runtime_Syncsemacquire(i32*) {
+	; TODO
+	ret void
+}
+
+define void @sync.runtime_Syncsemrelease(i32*) {
+	; TODO
+	ret void
+}
+
+define void @sync.runtime_Syncsemcheck(i32*) {
+	; TODO
+	ret void
+}
