@@ -9,9 +9,9 @@ package runtime
 type lock struct{}
 
 func (l *lock) lock() {
-	panic("not implemented")
+	panic("lock.lock not implemented")
 }
 
 func (l *lock) unlock() {
-	panic("not implemented")
+	panic("lock.unlock not implemented")
 }
