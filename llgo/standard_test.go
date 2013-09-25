@@ -510,25 +510,28 @@ func (t *test) run() {
 	switch action {
 	default:
 		t.err = fmt.Errorf("unimplemented action %q", action)
+	case "errorcheck":
+		// This one kind of works in that many tests do indeed report errors on the expected error lines, but then
+		// it fails because the error message doesn't match what gc is reporting.
+		t.err = fmt.Errorf("errorcheck tests disabled")
 		/*
-			case "errorcheck":
-				cmdline := []string{"go", "tool", gc, "-e", "-o", "a." + letter}
-				cmdline = append(cmdline, flags...)
-				cmdline = append(cmdline, long)
-				out, err := runcmd(cmdline...)
-				if wantError {
-					if err == nil {
-						t.err = fmt.Errorf("compilation succeeded unexpectedly\n%s", out)
-						return
-					}
-				} else {
-					if err != nil {
-						t.err = err
-						return
-					}
+			cmdline := []string{"llgo", "-c", "-o", "a." + letter}
+			cmdline = append(cmdline, flags...)
+			cmdline = append(cmdline, long)
+			out, err := runcmd(cmdline...)
+			if wantError {
+				if err == nil {
+					t.err = fmt.Errorf("compilation succeeded unexpectedly\n%s", out)
+					return
 				}
-				t.err = t.errorCheck(string(out), long, t.gofile)
-				return
+			} else {
+				if err != nil {
+					t.err = err
+					return
+				}
+			}
+			t.err = t.errorCheck(string(out), long, t.gofile)
+			return
 		*/
 	case "compile":
 		_, t.err = compileFile(runcmd, long)
@@ -621,7 +624,7 @@ func (t *test) run() {
 		}
 	case "run":
 		useTmp = false
-		tfile := filepath.Join(t.tempDir, "llgo.test")
+		tfile := filepath.Join(t.tempDir, "llgo.tmp")
 
 		_, err := runcmd(append([]string{"llgo-build", "-o", tfile}, t.goFileName())...)
 		if err != nil {
@@ -636,30 +639,46 @@ func (t *test) run() {
 		if strings.Replace(string(out), "\r\n", "\n", -1) != t.expectedOutput() {
 			t.err = fmt.Errorf("incorrect output\n%s", out)
 		}
-		/*
-			case "runoutput":
-				rungatec <- true
-				defer func() {
-					<-rungatec
-				}()
-				useTmp = false
-				out, err := runcmd(append([]string{"go", "run", t.goFileName()}, args...)...)
-				if err != nil {
-					t.err = err
-				}
-				tfile := filepath.Join(t.tempDir, "tmp__.go")
-				if err := ioutil.WriteFile(tfile, out, 0666); err != nil {
-					t.err = fmt.Errorf("write tempfile:%s", err)
-					return
-				}
-				out, err = runcmd("go", "run", tfile)
-				if err != nil {
-					t.err = err
-				}
-				if string(out) != t.expectedOutput() {
-					t.err = fmt.Errorf("incorrect output\n%s", out)
-				}
+	case "runoutput":
+		rungatec <- true
+		defer func() {
+			<-rungatec
+		}()
+		useTmp = false
+		tfile := filepath.Join(t.tempDir, "llgo.tmp")
+		cmd := append([]string{"llgo-build", "-o", tfile}, t.goFileName())
+		log.Println(cmd)
+		_, err := runcmd(cmd...)
+		if err != nil {
+			t.err = err
+			return
+		}
+		out, err := runcmd(append([]string{tfile}, args...)...)
+		if err != nil {
+			t.err = err
+			panic(err)
+			return
+		}
+		tfile2 := filepath.Join(t.tempDir, "tmp__.go")
+		if err := ioutil.WriteFile(tfile2, out, 0666); err != nil {
+			t.err = fmt.Errorf("write tempfile:%s", err)
+			return
+		}
+		out, err = runcmd("llgo-build", "-o", tfile, tfile2)
+		if err != nil {
+			t.err = err
+			return
+		}
+		out, err = runcmd(tfile)
+		if err != nil {
+			t.err = err
+			return
+		}
 
+		if string(out) != t.expectedOutput() {
+			t.err = fmt.Errorf("incorrect output\n%s", out)
+		}
+		/*
 			case "errorcheckoutput":
 				useTmp = false
 				out, err := runcmd(append([]string{"go", "run", t.goFileName()}, args...)...)
