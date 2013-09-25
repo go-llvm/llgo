@@ -110,6 +110,9 @@ func compileFiles(compiler llgo.Compiler, filenames []string, importpath string)
 	}
 	fset := token.NewFileSet()
 	files := parseFiles(fset, filenames[0:i])
+	if files == nil {
+		return nil, errors.New("No files parsed")
+	}
 	return compiler.Compile(fset, files, importpath)
 }
 
