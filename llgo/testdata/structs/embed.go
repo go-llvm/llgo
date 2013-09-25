@@ -40,6 +40,7 @@ func main() {
 	b.testA2()
 
 	var c C
+	c.B = &b
 	c.cval = 3
 	c.testA()
 	//c.testA2()
