@@ -267,7 +267,10 @@ func buildPackage(pkg *build.Package, output string) error {
 
 	// If it's a command, link in the dependencies.
 	if pkg.IsCommand() {
-		linkdeps(pkg, tempfile)
+		err = linkdeps(pkg, tempfile)
+		if err != nil {
+			return err
+		}
 	}
 	return moveFile(tempfile, output)
 }

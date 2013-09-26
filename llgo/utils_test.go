@@ -157,8 +157,7 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 
 	err = llvm.VerifyModule(m.Module, llvm.ReturnStatusAction)
 	if err != nil {
-		err = fmt.Errorf("Verification failed: %v", err)
-		return
+		return nil, fmt.Errorf("Verification failed: %v", err)
 	}
 
 	bcpath := filepath.Join(tempdir, "test.bc")
@@ -170,27 +169,24 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 	bcfile.Close()
 
 	cmd := exec.Command("llvm-link", "-o", bcpath, bcpath, runtimeModule)
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	data, err := cmd.CombinedOutput()
 	if err != nil {
-		return
+		output = strings.Split(strings.TrimSpace(string(data)), "\n")
+		return output, fmt.Errorf("llvm-link failed: %v", err)
 	}
 
 	exepath := filepath.Join(tempdir, "test")
 	cmd = exec.Command("clang++", "-pthread", "-g", "-o", exepath, bcpath)
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	data, err = cmd.CombinedOutput()
 	if err != nil {
-		return
+		output = strings.Split(strings.TrimSpace(string(data)), "\n")
+		return output, fmt.Errorf("clang++ failed: %v", err)
 	}
 
 	cmd = exec.Command(exepath)
-	data, err := cmd.Output()
-	if err != nil {
-		return
-	}
+	data, err = cmd.CombinedOutput()
 	output = strings.Split(strings.TrimSpace(string(data)), "\n")
-	return
+	return output, err
 }
 
 func checkStringsEqual(out, expectedOut []string) error {
@@ -226,20 +222,22 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go run failed: %s", err)
-	}
 	expected := strings.Split(strings.TrimSpace(string(gorun_out)), "\n")
+	if err != nil {
+		return fmt.Errorf("go run failed: \n\t%s\n\t", err, strings.Join(expected, "\n\t"))
+	}
 
 	// Now compile to and interpret the LLVM bitcode, comparing the output to
 	// the output of "go run" above.
 	m, err := compileFiles(testCompiler, files, "main")
 	if err != nil {
-		return err
+		return fmt.Errorf("compileFiles failed: %s", err)
 	}
 	output, err := runMainFunction(m)
 	if err == nil {
 		err = check(output, expected)
+	} else {
+		return fmt.Errorf("runMainFunction failed: \n\t%s\n\t%s", err, strings.Join(output, "\n\t"))
 	}
 	return err
 }
