@@ -31,7 +31,6 @@ func buildRuntime() (reterr error) {
 		"runtime/cgo",         // Issue #73
 	}
 
-	// TODO just use "go list std"
 	output, err := command("go", "list", "std").CombinedOutput()
 	if err != nil {
 		return err
