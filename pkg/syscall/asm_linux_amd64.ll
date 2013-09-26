@@ -3,6 +3,15 @@
 ; license that can be found in the LICENSE file.
 ;
 ; Defines low-level Syscall functions.
+; References: http://www.x86-64.org/documentation/abi.pdf
+;
+; Notes:
+; 	1.	The syscall convention differs from the "normal" call convention
+; 		and the registers used here are indeed intentional. See abi.pdf@A.2.1 list item 1.
+;
+; 	2.	A return value in the range between -4095 and -1 indicates an error. See abi.pdf@A.2.1 list item 5.
+;
+; 	3.	That error value is -errno. See abi.pdf@A.2.1 list item 5.
 
 target datalayout = "e-p:64:64:64-S128-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f16:16:16-f32:32:32-f64:64:64-f128:128:128-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-unknown-linux"
@@ -14,15 +23,15 @@ target triple = "x86_64-unknown-linux"
 ; to RawSyscall6 with constant zero arguments.
 define %syscallres @syscall.RawSyscall(i64, i64, i64, i64) {
 entry:
-	; Note that the syscall convention differs from the regular System V X86_64 call convention, and the registers used here are intentional
+	; See note 1
 	%4 = call {i64, i64} asm sideeffect "syscall\0A", "={ax},={dx},{ax},{di},{si},{dx},{r10},{r8},{r9}"(i64 %0, i64 %1, i64 %2, i64 %3, i64 0, i64 0, i64 0) nounwind
 	%5 = extractvalue {i64, i64} %4, 0
 	%6 = extractvalue {i64, i64} %4, 1
-	; -4095 chosen as an error cut off as values of -1 to -4094 or their uint64 equivalent are
-	; unlikely to mean nothing other than an error
+	; See note 2
 	%7 = icmp ult i64 %5, -4095
 	br i1 %7, label %ok, label %error
 error:
+	; See note 3
 	%8 = sub i64 0, %5
 	%9 = insertvalue %syscallres undef, i64 -1, 0
 	%10 = insertvalue %syscallres %9, i64 0, 1
@@ -37,15 +46,15 @@ ok:
 
 define %syscallres @syscall.RawSyscall6(i64, i64, i64, i64, i64, i64, i64) {
 entry:
-	; Note that the syscall convention differs from the regular System V X86_64 call convention, and the registers used here are intentional
+	; See note 1
 	%7 = call {i64, i64} asm sideeffect "syscall\0A", "={ax},={dx},{ax},{di},{si},{dx},{r10},{r8},{r9}"(i64 %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6) nounwind
 	%8 = extractvalue {i64, i64} %7, 0
 	%9 = extractvalue {i64, i64} %7, 1
-	; -4095 chosen as an error cut off as values of -1 to -4094 or their uint64 equivalent are
-	; unlikely to mean nothing other than an error
+	; See note 2
 	%10 = icmp ult i64 %8, -4095
 	br i1 %10, label %ok, label %error
 error:
+	; See note 3
 	%11 = sub i64 0, %8
 	%12 = insertvalue %syscallres undef, i64 -1, 0
 	%13 = insertvalue %syscallres %12, i64 0, 1
