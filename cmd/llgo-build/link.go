@@ -49,6 +49,13 @@ func linkdeps(pkg *build.Package, output string) error {
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
 	for _, path := range depslist {
 		bcfile := filepath.Join(pkgroot, path+".bc")
+		if buildDeps {
+			if _, err := os.Stat(bcfile); err != nil {
+				if err = buildPackages([]string{path}); err != nil {
+					return err
+				}
+			}
+		}
 		cmd := exec.Command(llvmlink, "-o", output, output, bcfile)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
