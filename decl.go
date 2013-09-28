@@ -291,6 +291,8 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 	}
 	llvmfntype := llvm.FunctionType(llvm.VoidType(), nil, false)
 	fn := llvm.AddFunction(c.module.Module, "", llvmfntype)
+	// Pushing nil, children don't need access to a "real" init function handle
+	c.functions.push(nil)
 	entry := llvm.AddBasicBlock(fn, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 
@@ -320,6 +322,7 @@ func (c *compiler) createGlobals(idents []*ast.Ident, values []ast.Expr, pkg str
 	}
 	c.builder.CreateRetVoid()
 	c.varinitfuncs = append(c.varinitfuncs, fn)
+	c.functions.pop()
 }
 
 func (c *compiler) VisitValueSpec(valspec *ast.ValueSpec) {
