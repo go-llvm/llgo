@@ -15,7 +15,6 @@ func buildRuntime() (reterr error) {
 	log.Println("Building runtime")
 
 	badPackages := []string{
-		"appengine",           // keep drone.io happy
 		"compress/flate",      // Issue #61
 		"crypto/tls",          // Issue #63
 		"crypto/x509",         // Issue #70
@@ -41,6 +40,12 @@ outer:
 		if strings.HasPrefix(pkg, "cmd/") {
 			continue
 		}
+        // drone.io keeps various appengine packages in std,
+        // which fail due to required third-party dependencies.
+        // this is a kludge. FIXME
+        if strings.HasPrefix(pkg, "appengine") {
+            continue
+        }
 		for _, bad := range badPackages {
 			if pkg == bad {
 				continue outer
