@@ -28,6 +28,18 @@ func buildRuntime() error {
 		"errors",
 		"reflect",
 		"unicode/utf8",
+		"bufio",
+		"strings",
+		"bytes",
+		"unicode",
+		"math/rand",
+		"go/ast",
+		"crypto/md5",
+		"crypto",
+		"runtime/pprof",
+		"text/tabwriter",
+		"flag",
+		"sort",
 	}
 	for _, pkg := range runtimePackages {
 		log.Printf("- %s", pkg)

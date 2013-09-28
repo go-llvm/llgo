@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
+	"fmt"
 	"go/ast"
 	"go/token"
 )
@@ -17,10 +18,17 @@ type ObjectData struct {
 }
 
 func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.File) (*types.Package, error) {
+	var errors string
 	config := &types.Config{
 		Sizeof:    c.llvmtypes.Sizeof,
 		Alignof:   c.llvmtypes.Alignof,
 		Offsetsof: c.llvmtypes.Offsetsof,
+		Error: func(err error) {
+			if errors != "" {
+				errors += "\n"
+			}
+			errors += err.Error()
+		},
 	}
 
 	var info types.Info
@@ -32,7 +40,7 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	info.Objects = make(map[*ast.Ident]types.Object)
 	pkg, err := config.Check(pkgpath, fset, files, &info)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s", errors)
 	}
 
 	for id, obj := range info.Objects {
