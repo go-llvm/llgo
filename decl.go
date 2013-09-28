@@ -32,13 +32,13 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 				if named, ok := recvtyp.Elem().(*types.Named); ok {
 					obj := named.Obj()
 					recvname = "*" + obj.Name()
-					pkgname = c.objectdata[obj].Package.Path()
+					pkgname = obj.Pkg().Path()
 				}
 			case *types.Named:
 				named := recvtyp
 				obj := named.Obj()
 				recvname = obj.Name()
-				pkgname = c.objectdata[obj].Package.Path()
+				pkgname = obj.Pkg().Path()
 			}
 
 			if recvname != "" {
@@ -52,7 +52,7 @@ func (c *compiler) makeFunc(ident *ast.Ident, ftyp *types.Signature) *LLVMValue 
 			}
 		} else {
 			obj := c.typeinfo.Objects[ident]
-			pkgname = c.objectdata[obj].Package.Path()
+			pkgname = obj.Pkg().Path()
 		}
 		if fname != "" {
 			fname = pkgname + "." + fname

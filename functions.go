@@ -66,7 +66,7 @@ func (c *compiler) methodfunc(m *types.Func) *types.Func {
 	data := c.objectdata[m]
 	if data == nil {
 		ident := ast.NewIdent(m.Name())
-		data = &ObjectData{Ident: ident, Package: m.Pkg()}
+		data = &ObjectData{Ident: ident}
 		c.typeinfo.Objects[ident] = m
 		c.objectdata[m] = data
 	}
@@ -219,7 +219,7 @@ func (*synthFunc) Pos() token.Pos {
 func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func, methodIndex int, recv types.Type, indices []int) types.Object {
 	var pkg *types.Package
 	if recv, ok := recv.(*types.Named); ok {
-		pkg = c.objectdata[recv.Obj()].Package
+		pkg = recv.Obj().Pkg()
 	}
 	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
@@ -234,7 +234,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func,
 	}
 
 	c.typeinfo.Objects[ident] = f
-	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
+	c.objectdata[f] = &ObjectData{Ident: ident}
 
 	if pkg == nil || pkg == c.pkg {
 		if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {
@@ -291,7 +291,7 @@ func (c *compiler) promoteInterfaceMethod(iface *types.Interface, m *types.Func,
 func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) types.Object {
 	var pkg *types.Package
 	if recv, ok := recv.(*types.Named); ok {
-		pkg = c.objectdata[recv.Obj()].Package
+		pkg = recv.Obj().Pkg()
 	}
 	recvvar := types.NewVar(token.NoPos, pkg, "", recv)
 	sig := m.Type().(*types.Signature)
@@ -306,7 +306,7 @@ func (c *compiler) promoteMethod(m *types.Func, recv types.Type, indices []int) 
 	}
 
 	c.typeinfo.Objects[ident] = f
-	c.objectdata[f] = &ObjectData{Ident: ident, Package: pkg}
+	c.objectdata[f] = &ObjectData{Ident: ident}
 
 	if pkg == nil || pkg == c.pkg {
 		if currblock := c.builder.GetInsertBlock(); !currblock.IsNil() {

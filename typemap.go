@@ -80,10 +80,9 @@ func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 		inttype = llvm.Int32Type()
 	}
 	return &LLVMTypeMap{
-		TypeStringer: TypeStringer{make(map[*types.TypeName]*types.Package)},
-		target:       target,
-		types:        make(map[string]llvm.Type),
-		inttype:      inttype,
+		target:  target,
+		types:   make(map[string]llvm.Type),
+		inttype: inttype,
 	}
 }
 
@@ -666,8 +665,8 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 			return global, global
 		}
 	case *types.Named:
-		path := tm.functions.objectdata[elem.Obj()].Package.Path()
-		globalname = "__llgo.type.*" + path + "." + elem.Obj().Name()
+		qname, path := tm.qualifiedName(elem)
+		globalname = "__llgo.type.*" + qname
 		if path != tm.pkgpath {
 			global := llvm.AddGlobal(tm.module, tm.runtimeType, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtimeType))
@@ -812,7 +811,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 	namePtr := tm.globalStringPtr(n.Obj().Name())
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, namePtr, []uint32{0})
 
-	path := tm.functions.objectdata[n.Obj()].Package.Path()
+	_, path := tm.qualifiedName(n)
 	pkgpathPtr := tm.globalStringPtr(path)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 
@@ -868,9 +867,18 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 	return uncommonTypeInit
 }
 
+func (tm *TypeMap) qualifiedName(n *types.Named) (qname, path string) {
+	pkg := n.Obj().Pkg()
+	if pkg == nil {
+		return n.Obj().Name(), ""
+	}
+	path = pkg.Path()
+	return path + "." + n.Obj().Name(), path
+}
+
 func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
-	path := tm.functions.objectdata[n.Obj()].Package.Path()
-	globalname := "__llgo.type." + path + "." + n.Obj().Name()
+	qname, path := tm.qualifiedName(n)
+	globalname := "__llgo.type." + qname
 	if path != tm.pkgpath {
 		// We're not compiling the package from whence the type came,
 		// so we'll just create a pointer to it here.

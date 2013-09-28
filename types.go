@@ -148,9 +148,7 @@ func (o objectsByName) Swap(i, j int) {
 	o[i], o[j] = o[j], o[i]
 }
 
-type TypeStringer struct {
-	pkgmap map[*types.TypeName]*types.Package
-}
+type TypeStringer struct{}
 
 func (ts *TypeStringer) TypeKey(typ types.Type) string {
 	var buf bytes.Buffer
@@ -289,7 +287,7 @@ func (ts *TypeStringer) writeType(buf *bytes.Buffer, typ types.Type, unique bool
 
 	case *types.Named:
 		obj := t.Obj()
-		if pkg := ts.pkgmap[obj]; pkg != nil && pkg.Path() != "" {
+		if pkg := obj.Pkg(); pkg != nil && pkg.Path() != "" {
 			buf.WriteString(pkg.Path())
 			buf.WriteByte('.')
 		}

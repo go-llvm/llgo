@@ -12,9 +12,8 @@ import (
 
 // ObjectData stores information for a types.Object
 type ObjectData struct {
-	Ident   *ast.Ident
-	Package *types.Package
-	Value   *LLVMValue
+	Ident *ast.Ident
+	Value *LLVMValue
 }
 
 func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.File) (*types.Package, error) {
@@ -43,7 +42,7 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 		c.typeinfo.Objects[id] = obj
 		data := objectdata[obj]
 		if data == nil {
-			objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
+			objectdata[obj] = &ObjectData{Ident: id}
 		} else if data.Ident.Obj == nil {
 			data.Ident = id
 		}
@@ -53,18 +52,11 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 		id := ast.NewIdent(obj.Name())
 		c.typeinfo.Objects[id] = obj
 		c.typeinfo.Implicits[node] = obj
-		objectdata[obj] = &ObjectData{Ident: id, Package: pkg}
-	}
-
-	for _, pkg := range pkg.Imports() {
-		assocObjectPackages(pkg, objectdata)
+		objectdata[obj] = &ObjectData{Ident: id}
 	}
 
 	for object, data := range objectdata {
 		if object, ok := object.(*types.TypeName); ok {
-			// Add TypeNames to the LLVMTypeMap's TypeStringer.
-			c.llvmtypes.pkgmap[object] = data.Package
-
 			// Record exported types for generating runtime type information.
 			// c.pkg is nil iff the package being checked is the package
 			// being compiled.
@@ -76,19 +68,4 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	}
 
 	return pkg, nil
-}
-
-func assocObjectPackages(pkg *types.Package, objectdata map[types.Object]*ObjectData) {
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		obj := scope.Lookup(name)
-		if data, ok := objectdata[obj]; ok {
-			data.Package = pkg
-		} else {
-			objectdata[obj] = &ObjectData{Package: pkg}
-		}
-	}
-	for _, pkg := range pkg.Imports() {
-		assocObjectPackages(pkg, objectdata)
-	}
 }

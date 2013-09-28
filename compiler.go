@@ -121,7 +121,7 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 		if value == nil {
 			module := c.module.Module
 			t := obj.Type()
-			name := data.Package.Path() + "." + obj.Name()
+			name := obj.Pkg().Path() + "." + obj.Name()
 			g := module.NamedGlobal(name)
 			if g.IsNil() {
 				g = llvm.AddGlobal(module, c.types.ToLLVM(t), name)
