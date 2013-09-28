@@ -15,6 +15,7 @@ func buildRuntime() (reterr error) {
 	log.Println("Building runtime")
 
 	badPackages := []string{
+		"appengine",           // keep drone.io happy
 		"compress/flate",      // Issue #61
 		"crypto/tls",          // Issue #63
 		"crypto/x509",         // Issue #70
@@ -22,11 +23,9 @@ func buildRuntime() (reterr error) {
 		"database/sql/driver", // Issue #65
 		"encoding/json",       // Issue #66
 		"go/parser",           // Issue #67
-		"hash",                // Issue #56
 		"net",                 // Issue #71
 		"net/http",            // Issue #68
 		"net/rpc",             // Issue #69 cap(chan) not implemented
-		"os/exec",             // Issue #62
 		"os/user",             // Issue #72
 		"runtime/cgo",         // Issue #73
 	}
