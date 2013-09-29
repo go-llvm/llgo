@@ -16,16 +16,16 @@ func buildRuntime() (reterr error) {
 
 	badPackages := []string{
 		"compress/flate",
-		"crypto/tls",  // Issue #63
-		"crypto/x509", // Issue #70
-		//"database/sql",        // Issue #64
+		"crypto/tls",          // Issue #63
+		"crypto/x509",         // Issue #70
+		"database/sql",        // Issue #64
 		"database/sql/driver", // Issue #65
-		//"encoding/json",       // Issue #66
-		"go/parser",   // Issue #67
-		"net",         // Issue #71
-		"net/http",    // Issue #68
-		"os/user",     // Issue #72
-		"runtime/cgo", // Issue #73
+		"encoding/json",       // Issue #66
+		"go/parser",           // Issue #67
+		"net",                 // Issue #71
+		"net/http",            // Issue #68
+		"os/user",             // Issue #72
+		"runtime/cgo",         // Issue #73
 	}
 
 	output, err := command("go", "list", "std").CombinedOutput()
