@@ -626,7 +626,9 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 			if x_, ok := x.(*LLVMValue); ok && x_.pointer != nil {
 				x = x_.pointer
 			} else {
-				// TODO load value onto stack for indexing?
+				ptr := c.builder.CreateAlloca(c.types.ToLLVM(x.Type()), "")
+				c.builder.CreateStore(x.LLVMValue(), ptr)
+				x = c.NewValue(ptr, types.NewPointer(x.Type()))
 			}
 		}
 		base = x.LLVMValue()
