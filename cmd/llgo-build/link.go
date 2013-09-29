@@ -47,6 +47,7 @@ func linkdeps(pkg *build.Package, output string) error {
 	}
 
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
+	args := []string{"-o", output, output}
 	for _, path := range depslist {
 		bcfile := filepath.Join(pkgroot, path+".bc")
 		if buildDeps {
@@ -56,12 +57,13 @@ func linkdeps(pkg *build.Package, output string) error {
 				}
 			}
 		}
-		cmd := exec.Command(llvmlink, "-o", output, output, bcfile)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err = runCmd(cmd); err != nil {
-			return err
-		}
+		args = append(args, bcfile)
+	}
+	cmd := exec.Command(llvmlink, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err = runCmd(cmd); err != nil {
+		return err
 	}
 
 	// Finally, link with clang++ to get exception handling.
