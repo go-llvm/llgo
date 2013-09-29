@@ -28,6 +28,7 @@ var (
 	emitllvm      bool
 	buildctx      *build.Context
 	workdir       string
+	buildDeps     bool = true
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	flag.StringVar(&output, "o", "", "Output file")
 	flag.BoolVar(&emitllvm, "emit-llvm", false, "Emit LLVM bitcode instead of a native binary")
 	flag.BoolVar(&printcommands, "x", false, "Print the commands")
+	flag.BoolVar(&buildDeps, "build-deps", buildDeps, "Whether to also build dependency packages or not")
 }
 
 func main() {
