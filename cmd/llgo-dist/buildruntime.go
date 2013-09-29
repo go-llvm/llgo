@@ -15,18 +15,17 @@ func buildRuntime() (reterr error) {
 	log.Println("Building runtime")
 
 	badPackages := []string{
-		"compress/flate",      // Issue #61
-		"crypto/tls",          // Issue #63
-		"crypto/x509",         // Issue #70
-		"database/sql",        // Issue #64
+		"compress/flate",
+		"crypto/tls",  // Issue #63
+		"crypto/x509", // Issue #70
+		//"database/sql",        // Issue #64
 		"database/sql/driver", // Issue #65
-		"encoding/json",       // Issue #66
-		"go/parser",           // Issue #67
-		"net",                 // Issue #71
-		"net/http",            // Issue #68
-		"net/rpc",             // Issue #69 cap(chan) not implemented
-		"os/user",             // Issue #72
-		"runtime/cgo",         // Issue #73
+		//"encoding/json",       // Issue #66
+		"go/parser",   // Issue #67
+		"net",         // Issue #71
+		"net/http",    // Issue #68
+		"os/user",     // Issue #72
+		"runtime/cgo", // Issue #73
 	}
 
 	output, err := command("go", "list", "std").CombinedOutput()
@@ -40,12 +39,12 @@ outer:
 		if strings.HasPrefix(pkg, "cmd/") {
 			continue
 		}
-        // drone.io keeps various appengine packages in std,
-        // which fail due to required third-party dependencies.
-        // this is a kludge. FIXME
-        if strings.HasPrefix(pkg, "appengine") {
-            continue
-        }
+		// drone.io keeps various appengine packages in std,
+		// which fail due to required third-party dependencies.
+		// this is a kludge. FIXME
+		if strings.HasPrefix(pkg, "appengine") {
+			continue
+		}
 		for _, bad := range badPackages {
 			if pkg == bad {
 				continue outer

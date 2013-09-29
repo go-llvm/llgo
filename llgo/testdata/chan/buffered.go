@@ -2,7 +2,9 @@ package main
 
 func main() {
 	c := make(chan int)
+	println(len(c), cap(c))
 	c1 := make(chan int, 1)
+	println(len(c1), cap(c1))
 	f := func() {
 		n, ok := <-c
 		if ok {

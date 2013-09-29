@@ -27,7 +27,9 @@ func (c *compiler) VisitCap(expr *ast.CallExpr) Value {
 		sliceval := value.LLVMValue()
 		capvalue = c.builder.CreateExtractValue(sliceval, 2, "")
 	case *types.Chan:
-		panic("cap(chan) unimplemented")
+		chanval := value.LLVMValue()
+		f := c.NamedFunction("runtime.chancap", "func(c uintptr) int")
+		capvalue = c.builder.CreateCall(f, []llvm.Value{chanval}, "")
 	}
 	return c.NewValue(capvalue, types.Typ[types.Int])
 }
