@@ -73,6 +73,10 @@ type compiler struct {
 	// field will have been updated to the true triple used to
 	// compile PNaCl modules.
 	pnacl bool
+
+	debug_context []llvm.DebugDescriptor
+	compile_unit  *llvm.CompileUnitDescriptor
+	debug_info    *llvm.DebugInfo
 }
 
 func (c *compiler) archinfo() (intsize, ptrsize int64) {
@@ -285,11 +289,25 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.builder = newBuilder(compiler.types)
 	defer compiler.builder.Dispose()
 
+	compiler.debug_info = &llvm.DebugInfo{}
 	// Compile each file in the package.
 	for _, file := range files {
+		compiler.compile_unit = &llvm.CompileUnitDescriptor{
+			Language: llvm.DW_LANG_Go,
+			Path:     llvm.FileDescriptor(fset.File(file.Pos()).Name()),
+			Producer: LLGOProducer,
+			Runtime:  LLGORuntimeVersion,
+		}
+		compiler.pushDebugContext(&compiler.compile_unit.Path)
+
 		for _, decl := range file.Decls {
 			compiler.VisitDecl(decl)
 		}
+		compiler.popDebugContext()
+		if len(compiler.debug_context) > 0 {
+			log.Panicln(compiler.debug_context)
+		}
+		compiler.module.AddNamedMetadataOperand("llvm.dbg.cu", compiler.debug_info.MDNode(compiler.compile_unit))
 	}
 
 	// Export runtime type information.
@@ -386,6 +404,7 @@ func (c *compiler) createMainFunction() error {
 	// function with no result.
 	runtimeMain := c.NamedFunction("runtime.main", "func(int32, **byte, **byte, *int8) int32")
 	main := c.NamedFunction("main", "func(int32, **byte, **byte) int32")
+	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(nil))
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 	mainMain = c.builder.CreateBitCast(mainMain, runtimeMain.Type().ElementType().ParamTypes()[3], "")
