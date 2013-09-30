@@ -15,7 +15,6 @@ func buildRuntime() (reterr error) {
 	log.Println("Building runtime")
 
 	badPackages := []string{
-		"compress/flate",
 		"crypto/tls",          // Issue #63
 		"crypto/x509",         // Issue #70
 		"database/sql",        // Issue #64
