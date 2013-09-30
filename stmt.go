@@ -615,6 +615,8 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	switch typ := typ.Underlying().(type) {
 	case *types.Map:
 		goto maprange
+	case *types.Chan:
+		goto chanrange
 	case *types.Basic:
 		stringvalue := x.LLVMValue()
 		length = c.builder.CreateExtractValue(stringvalue, 1, "")
@@ -724,6 +726,23 @@ arrayrange:
 		newindex := c.builder.CreateAdd(index, llvm.ConstInt(c.types.inttype, 1, false), "")
 		c.builder.CreateBr(condBlock)
 		index.AddIncoming([]llvm.Value{zero, newindex}, []llvm.BasicBlock{currBlock, postBlock})
+		return
+	}
+
+chanrange:
+	{
+		c.builder.CreateBr(condBlock)
+		c.builder.SetInsertPointAtEnd(condBlock)
+		value, received := x.(*LLVMValue).chanRecv(true)
+		c.builder.CreateCondBr(received.LLVMValue(), loopBlock, doneBlock)
+		c.builder.SetInsertPointAtEnd(loopBlock)
+		if !keyPtr.IsNil() {
+			c.builder.CreateStore(value.LLVMValue(), keyPtr)
+		}
+		c.VisitBlockStmt(stmt.Body, false)
+		c.maybeImplicitBranch(postBlock)
+		c.builder.SetInsertPointAtEnd(postBlock)
+		c.builder.CreateBr(condBlock)
 		return
 	}
 }
