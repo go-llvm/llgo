@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // linkdeps links dependencies into the specified output file.
@@ -68,8 +69,23 @@ func linkdeps(pkg *build.Package, output string) error {
 
 	// Finally, link with clang++ to get exception handling.
 	if !emitllvm || triple == "pnacl" {
+		input := output
+		if strings.Contains(triple, "darwin") || strings.Contains(triple, "mac") {
+			// Not doing this intermediate step will make it invoke "dsymutil"
+			// which then asserts and kills the build.
+			// See discussion in issue #49 for more details.
+			input += ".o"
+			args := []string{"-g", "-c", "-o", input, output}
+			cmd := exec.Command(clang, args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err = runCmd(cmd); err != nil {
+				return err
+			}
+		}
+
 		clangxx := clang + "++"
-		args := []string{"-pthread", "-o", output, output}
+		args := []string{"-pthread", "-g", "-o", output, input}
 		if triple == "pnacl" {
 			args = append(args, "-l", "ppapi")
 		}
