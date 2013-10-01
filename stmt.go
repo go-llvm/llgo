@@ -51,6 +51,10 @@ func (c *compiler) VisitIncDecStmt(stmt *ast.IncDecStmt) {
 }
 
 func (c *compiler) VisitBlockStmt(stmt *ast.BlockStmt, createNewBlock bool) {
+	c.pushDebugContext(c.createBlockMetadata(stmt))
+	defer c.popDebugContext()
+	c.setDebugLine(stmt.Pos())
+
 	// This is a little awkward, but it makes dealing with branching easier.
 	// A free-standing block statement (i.e. one not attached to a control
 	// statement) will splice in a new block.
@@ -289,13 +293,7 @@ func (c *compiler) assignees(stmt *ast.AssignStmt) []*LLVMValue {
 			}
 			obj := c.typeinfo.Objects[x]
 			if stmt.Tok == token.DEFINE {
-				typ := obj.Type()
-				llvmtyp := c.types.ToLLVM(typ)
-				ptr := c.builder.CreateAlloca(llvmtyp, x.Name)
-				ptrtyp := types.NewPointer(typ)
-				stackvar := c.NewValue(ptr, ptrtyp).makePointee()
-				stackvar.stack = c.functions.top().LLVMValue
-				c.objectdata[obj].Value = stackvar
+				_, stackvar := c.newStackVar(c.functions.top().LLVMValue, obj, llvm.Value{}, x.Name)
 				lhs[i] = stackvar
 				continue
 			}
@@ -564,20 +562,12 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); !isBlank(key.Name) {
 			keyobj := c.typeinfo.Objects[key]
-			keyType := keyobj.Type()
-			keyPtr = c.builder.CreateAlloca(c.types.ToLLVM(keyType), "")
-			stackvar := c.NewValue(keyPtr, types.NewPointer(keyType)).makePointee()
-			stackvar.stack = c.functions.top().LLVMValue
-			c.objectdata[keyobj].Value = stackvar
+			keyPtr, _ = c.newStackVar(c.functions.top().LLVMValue, keyobj, llvm.Value{}, key.Name)
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); !isBlank(value.Name) {
 				valueobj := c.typeinfo.Objects[value]
-				valueType := valueobj.Type()
-				valuePtr = c.builder.CreateAlloca(c.types.ToLLVM(valueType), "")
-				stackvar := c.NewValue(valuePtr, types.NewPointer(valueType)).makePointee()
-				stackvar.stack = c.functions.top().LLVMValue
-				c.objectdata[valueobj].Value = stackvar
+				valuePtr, _ = c.newStackVar(c.functions.top().LLVMValue, valueobj, llvm.Value{}, value.Name)
 			}
 		}
 	} else {
@@ -905,6 +895,7 @@ func (c *compiler) VisitTypeSwitchStmt(stmt *ast.TypeSwitchStmt) {
 }
 
 func (c *compiler) VisitStmt(stmt ast.Stmt) {
+	c.setDebugLine(stmt.Pos())
 	if c.Logger != nil {
 		c.Logger.Println("Compile statement:", reflect.TypeOf(stmt),
 			"@", c.fileset.Position(stmt.Pos()))
