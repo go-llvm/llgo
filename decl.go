@@ -142,7 +142,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 		name := v.Name()
 		if !isBlank(name) {
 			value := llvm_fn.Param(i + paramoffset)
-			c.newStackVar(i+1, f, v, value, name)
+			c.newArgStackVar(i+1, f, v, value, name)
 		}
 	}
 
@@ -162,7 +162,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 		if allocstack {
 			typ := v.Type()
 			llvmtyp := c.types.ToLLVM(typ)
-			c.newStackVar(0, f, v, llvm.ConstNull(llvmtyp), name)
+			c.newStackVar(f, v, llvm.ConstNull(llvmtyp), name)
 		}
 	}
 

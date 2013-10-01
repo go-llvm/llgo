@@ -293,7 +293,7 @@ func (c *compiler) assignees(stmt *ast.AssignStmt) []*LLVMValue {
 			}
 			obj := c.typeinfo.Objects[x]
 			if stmt.Tok == token.DEFINE {
-				_, stackvar := c.newStackVar(0, c.functions.top().LLVMValue, obj, llvm.Value{}, x.Name)
+				_, stackvar := c.newStackVar(c.functions.top().LLVMValue, obj, llvm.Value{}, x.Name)
 				lhs[i] = stackvar
 				continue
 			}
@@ -562,12 +562,12 @@ func (c *compiler) VisitRangeStmt(stmt *ast.RangeStmt) {
 	if stmt.Tok == token.DEFINE {
 		if key := stmt.Key.(*ast.Ident); !isBlank(key.Name) {
 			keyobj := c.typeinfo.Objects[key]
-			keyPtr, _ = c.newStackVar(0, c.functions.top().LLVMValue, keyobj, llvm.Value{}, key.Name)
+			keyPtr, _ = c.newStackVar(c.functions.top().LLVMValue, keyobj, llvm.Value{}, key.Name)
 		}
 		if stmt.Value != nil {
 			if value := stmt.Value.(*ast.Ident); !isBlank(value.Name) {
 				valueobj := c.typeinfo.Objects[value]
-				valuePtr, _ = c.newStackVar(0, c.functions.top().LLVMValue, valueobj, llvm.Value{}, value.Name)
+				valuePtr, _ = c.newStackVar(c.functions.top().LLVMValue, valueobj, llvm.Value{}, value.Name)
 			}
 		}
 	} else {
