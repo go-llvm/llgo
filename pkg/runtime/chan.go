@@ -251,8 +251,7 @@ asynch:
 	}
 	c.qcount++
 
-	sg := c.recvq.dequeue()
-	if sg != nil {
+	if sg := c.recvq.dequeue(); sg != nil {
 		gp := sg.g
 		c.lock.unlock()
 		gp.ready()
@@ -364,8 +363,7 @@ asynch:
 	}
 	c.qcount--
 
-	sg := c.sendq.dequeue()
-	if sg != nil {
+	if sg := c.sendq.dequeue(); sg != nil {
 		gp := sg.g
 		c.lock.unlock()
 		gp.ready()
@@ -661,12 +659,15 @@ loop:
 		}
 	}
 
-	g := myg()
-	g.param = nil
-	sel.unlock()
-	g.park("select")
-	sel.lock()
-	sg = (*SudoG)(g.param)
+	// New scope to avoid declaring jumped-over vars.
+	{
+		g := myg()
+		g.param = nil
+		sel.unlock()
+		g.park("select")
+		sel.lock()
+		sg = (*SudoG)(g.param)
+	}
 
 	// pass 3 - dequeue from unsuccessful chans
 	// otherwise they stack up on quiet channels
