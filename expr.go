@@ -534,6 +534,7 @@ func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
 }
 
 func (c *compiler) VisitExpr(expr ast.Expr) Value {
+	c.setDebugLine(expr.Pos())
 	// Before all else, check if we've got a constant expression.
 	// go/types performs constant folding, and we store the value
 	// alongside the expression's type.

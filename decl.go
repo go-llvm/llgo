@@ -142,13 +142,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 		name := v.Name()
 		if !isBlank(name) {
 			value := llvm_fn.Param(i + paramoffset)
-			typ := v.Type()
-			stackvalue := c.builder.CreateAlloca(c.types.ToLLVM(typ), name)
-			c.builder.CreateStore(value, stackvalue)
-			ptrvalue := c.NewValue(stackvalue, types.NewPointer(typ))
-			stackvar := ptrvalue.makePointee()
-			stackvar.stack = f
-			c.objectdata[v].Value = stackvar
+			c.newArgStackVar(i+1, f, v, value, name)
 		}
 	}
 
@@ -168,12 +162,7 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 		if allocstack {
 			typ := v.Type()
 			llvmtyp := c.types.ToLLVM(typ)
-			stackptr := c.builder.CreateAlloca(llvmtyp, name)
-			c.builder.CreateStore(llvm.ConstNull(llvmtyp), stackptr)
-			ptrvalue := c.NewValue(stackptr, types.NewPointer(typ))
-			stackvar := ptrvalue.makePointee()
-			stackvar.stack = f
-			c.objectdata[v].Value = stackvar
+			c.newStackVar(f, v, llvm.ConstNull(llvmtyp), name)
 		}
 	}
 
@@ -183,6 +172,8 @@ func (c *compiler) buildFunction(f *LLVMValue, context, params, results *types.T
 	}
 	c.VisitBlockStmt(body, false)
 	c.functions.pop()
+
+	c.setDebugLine(body.End())
 
 	// If the last instruction in the function is not a terminator, then
 	// we either have unreachable code or a missing optional return statement
@@ -226,6 +217,11 @@ func (c *compiler) VisitFuncDecl(f *ast.FuncDecl) Value {
 			paramVars = append(paramVars, p)
 		}
 	}
+
+	c.pushDebugContext(c.createFunctionMetadata(f, fn))
+	defer c.popDebugContext()
+	c.setDebugLine(f.Pos())
+
 	paramVarsTuple := types.NewTuple(paramVars...)
 	c.buildFunction(fn, nil, paramVarsTuple, ftyp.Results(), f.Body)
 
@@ -429,6 +425,7 @@ func (c *compiler) VisitGenDecl(decl *ast.GenDecl) {
 }
 
 func (c *compiler) VisitDecl(decl ast.Decl) Value {
+	c.setDebugLine(decl.Pos())
 	// This is temporary. We'll return errors later, rather than panicking.
 	if c.Logger != nil {
 		c.Logger.Println("Compile declaration:", c.fileset.Position(decl.Pos()))

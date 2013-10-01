@@ -176,7 +176,13 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 	}
 
 	exepath := filepath.Join(tempdir, "test")
-	cmd = exec.Command("clang++", "-pthread", "-g", "-o", exepath, bcpath)
+	args := []string{"-pthread", "-o", exepath, bcpath}
+	if runtime.GOOS != "darwin" {
+		// TODO(q): -g breaks badly on my system at the moment, so is not enabled on darwin for now
+		args = append([]string{"-g"}, args...)
+	}
+
+	cmd = exec.Command("clang++", args...)
 	data, err = cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")
