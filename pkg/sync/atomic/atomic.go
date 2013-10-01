@@ -9,8 +9,8 @@ import "unsafe"
 // Defined in atomic.ll
 func LoadUint32(addr *uint32) (val uint32)
 func LoadUint64(addr *uint64) (val uint64)
-func LoadInt32(addr *uint32) (val uint32)
-func LoadInt64(addr *uint64) (val uint64)
+func LoadInt32(addr *int32) (val int32)
+func LoadInt64(addr *int64) (val int64)
 func StoreUint32(addr *uint32, val uint32)
 func StoreUint64(addr *uint64, val uint64)
 func StoreInt32(addr *int32, val int32)
