@@ -48,3 +48,9 @@ declare double @math.sqrt(double)
 
 declare double @math.abs(double)
 @math.Abs = alias double (double)* @math.abs
+
+declare double @math.ceil(double)
+@math.Ceil = alias double (double)* @math.ceil
+
+declare double @math.trunc(double)
+@math.Trunc = alias double (double)* @math.trunc
