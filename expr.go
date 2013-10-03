@@ -472,26 +472,25 @@ func (c *compiler) VisitSelectorExpr(expr *ast.SelectorExpr) Value {
 		} else {
 			isptr = lhs.(*LLVMValue).pointer != nil
 		}
-		method := c.methods(typ).lookup(name, isptr)
-		if method != nil {
-			recv := lhs.(*LLVMValue)
-			if isptr && typ == lhs.Type() {
-				recv = recv.pointer
-			}
-
-			if f, ok := method.(*types.Func); ok {
-				method = c.methodfunc(f)
-			}
-			methodValue := c.Resolve(c.objectdata[method].Ident).LLVMValue()
-			methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
-			recvValue := recv.LLVMValue()
-			types := []llvm.Type{methodValue.Type(), recvValue.Type()}
-			structType := llvm.StructType(types, false)
-			value := llvm.Undef(structType)
-			value = c.builder.CreateInsertValue(value, methodValue, 0, "")
-			value = c.builder.CreateInsertValue(value, recvValue, 1, "")
-			return c.NewValue(value, method.Type())
+		recv := lhs.(*LLVMValue)
+		if isptr && typ == lhs.Type() {
+			recv = recv.pointer
 		}
+		method := c.methods(typ).lookup(name, isptr)
+		if f, ok := method.(*types.Func); ok {
+			method = c.methodfunc(f)
+		}
+		methodValue := c.Resolve(c.objectdata[method].Ident).LLVMValue()
+		methodValue = c.builder.CreateExtractValue(methodValue, 0, "")
+		recvValue := recv.LLVMValue()
+		types := []llvm.Type{methodValue.Type(), recvValue.Type()}
+		structType := llvm.StructType(types, false)
+		value := llvm.Undef(structType)
+		value = c.builder.CreateInsertValue(value, methodValue, 0, "")
+		value = c.builder.CreateInsertValue(value, recvValue, 1, "")
+		v := c.NewValue(value, method.Type())
+		v.method = method
+		return v
 	}
 
 	// Get a pointer to the field.

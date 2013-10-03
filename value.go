@@ -42,6 +42,7 @@ type Value interface {
 // expression.
 type LLVMValue struct {
 	compiler *compiler
+	method   types.Object // method object, used in method value conversion
 	value    llvm.Value
 	typ      types.Type
 	pointer  *LLVMValue // Pointer value that dereferenced to this value.
@@ -50,7 +51,7 @@ type LLVMValue struct {
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
 func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, v, t, nil, nil}
+	return &LLVMValue{c, nil, v, t, nil, nil}
 }
 
 func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
@@ -501,6 +502,15 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.IsIdentical(srctyp, dsttyp) {
+		// A method converted to a function type without the
+		// receiver is where we convert a "method value" into a
+		// function.
+		if srctyp, ok := srctyp.(*types.Signature); ok && srctyp.Recv() != nil {
+			if dsttyp, ok := dsttyp.(*types.Signature); ok && dsttyp.Recv() == nil {
+				return v.convertMethodValue(origdsttyp)
+			}
+		}
+
 		// TODO avoid load here by reusing pointer value, if exists.
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
@@ -709,6 +719,54 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	srcstr := v.compiler.types.TypeString(v.typ)
 	dststr := v.compiler.types.TypeString(origdsttyp)
 	panic(fmt.Sprintf("unimplemented conversion: %s -> %s", srcstr, dststr))
+}
+
+func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
+	b := v.compiler.builder
+	dstlt := v.compiler.types.ToLLVM(dsttyp)
+	dstltelems := dstlt.StructElementTypes()
+
+	srclv := v.LLVMValue()
+	fnptr := b.CreateExtractValue(srclv, 0, "")
+	fnctx := b.CreateExtractValue(srclv, 1, "")
+	fnptr = b.CreateBitCast(fnptr, dstltelems[0], "")
+
+	// TODO(axw) There's a lot of overlap between this
+	// and the code that converts concrete methods to
+	// interface methods. Refactor.
+	if fnctx.Type().TypeKind() == llvm.PointerTypeKind {
+		fnctx = b.CreateBitCast(fnctx, dstltelems[1], "")
+	} else {
+		c := v.compiler
+		ptrsize := c.target.PointerSize()
+		if c.target.TypeStoreSize(fnctx.Type()) <= uint64(ptrsize) {
+			bits := c.target.TypeSizeInBits(fnctx.Type())
+			if bits > 0 {
+				fnctx = c.coerce(fnctx, llvm.IntType(int(bits)))
+				fnctx = b.CreateIntToPtr(fnctx, dstltelems[1], "")
+			} else {
+				fnctx = llvm.ConstNull(dstltelems[1])
+			}
+		} else {
+			ptr := c.createTypeMalloc(fnctx.Type())
+			b.CreateStore(fnctx, ptr)
+			fnctx = b.CreateBitCast(ptr, dstltelems[1], "")
+
+			// Switch to the pointer-receiver method.
+			methodset := c.methods(v.Type().(*types.Signature).Recv().Type())
+			ptrmethod := methodset.lookup(v.method.Name(), true)
+			if f, ok := ptrmethod.(*types.Func); ok {
+				ptrmethod = c.methodfunc(f)
+			}
+			lv := c.Resolve(c.objectdata[ptrmethod].Ident).LLVMValue()
+			fnptr = c.builder.CreateExtractValue(lv, 0, "")
+		}
+	}
+
+	dstlv := llvm.Undef(dstlt)
+	dstlv = b.CreateInsertValue(dstlv, fnptr, 0, "")
+	dstlv = b.CreateInsertValue(dstlv, fnctx, 1, "")
+	return v.compiler.NewValue(dstlv, dsttyp)
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
