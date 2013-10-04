@@ -12,11 +12,17 @@ package runtime
 
 // Gosched yields the processor, allowing other goroutines to run.  It does not
 // suspend the current goroutine, so execution resumes automatically.
-func Gosched()
+func Gosched() {
+	// TODO
+	return
+}
 
 // Goexit terminates the goroutine that calls it.  No other goroutine is affected.
 // Goexit runs all deferred calls before terminating the goroutine.
-func Goexit()
+func Goexit() {
+	// TODO
+	return
+}
 
 // Caller reports file and line number information about function invocations on
 // the calling goroutine's stack.  The argument skip is the number of stack frames
@@ -34,7 +40,10 @@ func Caller(skip int) (pc uintptr, file string, line int, ok bool) {
 // to skip before recording in pc, with 0 identifying the frame for Callers itself and
 // 1 identifying the caller of Callers.
 // It returns the number of entries written to pc.
-func Callers(skip int, pc []uintptr) int
+func Callers(skip int, pc []uintptr) (r int) {
+	// TODO
+	return
+}
 
 type Func struct { // Keep in sync with runtime.h:struct Func
 	name   string

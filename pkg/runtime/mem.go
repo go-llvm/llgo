@@ -54,7 +54,11 @@ type MemStats struct {
 var memStats MemStats
 
 // ReadMemStats populates m with memory allocator statistics.
-func ReadMemStats(m *MemStats)
+func ReadMemStats(m *MemStats) {
+	// TODO
+}
 
 // GC runs a garbage collection.
-func GC()
+func GC() {
+	// TODO
+}
