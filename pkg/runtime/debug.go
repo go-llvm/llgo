@@ -5,9 +5,7 @@
 package runtime
 
 // Breakpoint() executes a breakpoint trap.
-func Breakpoint() {
-	// TODO
-}
+func Breakpoint()
 
 // LockOSThread wires the calling goroutine to its current operating system thread.
 // Until the calling goroutine exits or calls UnlockOSThread, it will always
