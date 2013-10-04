@@ -9,3 +9,11 @@ entry:
 	call void @llvm.trap()
 	ret void
 }
+
+declare void @llvm.debugtrap() noreturn nounwind
+
+define void @runtime.llvm_debugtrap() {
+entry:
+	call void @llvm.debugtrap()
+	ret void
+}

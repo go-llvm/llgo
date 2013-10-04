@@ -5,3 +5,5 @@
 package runtime
 
 func llvm_trap()
+
+func llvm_debugtrap()
