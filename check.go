@@ -19,6 +19,7 @@ type ObjectData struct {
 
 func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.File) (*types.Package, error) {
 	var errors string
+	var imp = importer{compiler: c}
 	config := &types.Config{
 		Sizeof:    c.llvmtypes.Sizeof,
 		Alignof:   c.llvmtypes.Alignof,
@@ -29,6 +30,7 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 			}
 			errors += err.Error()
 		},
+		Import: imp.Import,
 	}
 
 	var info types.Info

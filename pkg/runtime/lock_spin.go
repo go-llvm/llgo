@@ -6,12 +6,13 @@
 
 package runtime
 
-type lock struct{}
+type lock uint32
 
 func (l *lock) lock() {
-	panic("lock.lock not implemented")
+	for !cas((*uint32)(l), 0, 1) {
+	}
 }
 
 func (l *lock) unlock() {
-	panic("lock.unlock not implemented")
+	xchg((*uint32)(l), 0)
 }

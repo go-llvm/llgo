@@ -5,32 +5,50 @@
 package runtime
 
 // Breakpoint() executes a breakpoint trap.
-func Breakpoint()
+func Breakpoint() {
+	// TODO
+}
 
 // LockOSThread wires the calling goroutine to its current operating system thread.
 // Until the calling goroutine exits or calls UnlockOSThread, it will always
 // execute in that thread, and no other goroutine can.
-func LockOSThread()
+func LockOSThread() {
+	// TODO
+}
 
 // UnlockOSThread unwires the calling goroutine from its fixed operating system thread.
 // If the calling goroutine has not called LockOSThread, UnlockOSThread is a no-op.
-func UnlockOSThread()
+func UnlockOSThread() {
+	// TODO
+}
 
 // GOMAXPROCS sets the maximum number of CPUs that can be executing
 // simultaneously and returns the previous setting.  If n < 1, it does not
 // change the current setting.
 // The number of logical CPUs on the local machine can be queried with NumCPU.
 // This call will go away when the scheduler improves.
-func GOMAXPROCS(n int) int
+func GOMAXPROCS(n int) int {
+	// TODO
+	return 1
+}
 
 // NumCPU returns the number of logical CPUs on the local machine.
-func NumCPU() int
+func NumCPU() int {
+	// TODO
+	return 1
+}
 
 // NumCgoCall returns the number of cgo calls made by the current process.
-func NumCgoCall() int64
+func NumCgoCall() int64 {
+	// TODO
+	return 0
+}
 
 // NumGoroutine returns the number of goroutines that currently exist.
-func NumGoroutine() int
+func NumGoroutine() int {
+	// TODO
+	return 0
+}
 
 // MemProfileRate controls the fraction of memory allocations
 // that are recorded and reported in the memory profile.
@@ -87,7 +105,10 @@ func (r *MemProfileRecord) Stack() []uintptr {
 // Most clients should use the runtime/pprof package or
 // the testing package's -test.memprofile flag instead
 // of calling MemProfile directly.
-func MemProfile(p []MemProfileRecord, inuseZero bool) (n int, ok bool)
+func MemProfile(p []MemProfileRecord, inuseZero bool) (n int, ok bool) {
+	// TODO
+	return 0, false
+}
 
 // A StackRecord describes a single execution stack.
 type StackRecord struct {
@@ -111,7 +132,10 @@ func (r *StackRecord) Stack() []uintptr {
 //
 // Most clients should use the runtime/pprof package instead
 // of calling ThreadCreateProfile directly.
-func ThreadCreateProfile(p []StackRecord) (n int, ok bool)
+func ThreadCreateProfile(p []StackRecord) (n int, ok bool) {
+	// TODO
+	return 0, false
+}
 
 // GoroutineProfile returns n, the number of records in the active goroutine stack profile.
 // If len(p) >= n, GoroutineProfile copies the profile into p and returns n, true.
@@ -119,7 +143,10 @@ func ThreadCreateProfile(p []StackRecord) (n int, ok bool)
 //
 // Most clients should use the runtime/pprof package instead
 // of calling GoroutineProfile directly.
-func GoroutineProfile(p []StackRecord) (n int, ok bool)
+func GoroutineProfile(p []StackRecord) (n int, ok bool) {
+	// TODO
+	return 0, false
+}
 
 // CPUProfile returns the next chunk of binary CPU profiling stack trace data,
 // blocking until data is available.  If profiling is turned off and all the profile
@@ -128,7 +155,10 @@ func GoroutineProfile(p []StackRecord) (n int, ok bool)
 // Most clients should use the runtime/pprof package or
 // the testing package's -test.cpuprofile flag instead of calling
 // CPUProfile directly.
-func CPUProfile() []byte
+func CPUProfile() []byte {
+	// TODO
+	return nil
+}
 
 // SetCPUProfileRate sets the CPU profiling rate to hz samples per second.
 // If hz <= 0, SetCPUProfileRate turns off profiling.
@@ -136,10 +166,45 @@ func CPUProfile() []byte
 // Most clients should use the runtime/pprof package or
 // the testing package's -test.cpuprofile flag instead of calling
 // SetCPUProfileRate directly.
-func SetCPUProfileRate(hz int)
+func SetCPUProfileRate(hz int) {
+	// TODO
+}
+
+// SetBlockProfileRate controls the fraction of goroutine blocking events
+// that are reported in the blocking profile.  The profiler aims to sample
+// an average of one blocking event per rate nanoseconds spent blocked.
+//
+// To include every blocking event in the profile, pass rate = 1.
+// To turn off profiling entirely, pass rate <= 0.
+func SetBlockProfileRate(rate int) {
+	// TODO
+}
+
+// BlockProfileRecord describes blocking events originated
+// at a particular call sequence (stack trace).
+type BlockProfileRecord struct {
+	Count  int64
+	Cycles int64
+	StackRecord
+}
+
+// BlockProfile returns n, the number of records in the current blocking profile.
+// If len(p) >= n, BlockProfile copies the profile into p and returns n, true.
+// If len(p) < n, BlockProfile does not change p and returns n, false.
+//
+// Most clients should use the runtime/pprof package or
+// the testing package's -test.blockprofile flag instead
+// of calling BlockProfile directly.
+func BlockProfile(p []BlockProfileRecord) (n int, ok bool) {
+	// TODO
+	return 0, false
+}
 
 // Stack formats a stack trace of the calling goroutine into buf
 // and returns the number of bytes written to buf.
 // If all is true, Stack formats stack traces of all other goroutines
 // into buf after the trace for the current goroutine.
-func Stack(buf []byte, all bool) int
+func Stack(buf []byte, all bool) int {
+	// TODO
+	return 0
+}
