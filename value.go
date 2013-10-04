@@ -729,7 +729,6 @@ func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
 	srclv := v.LLVMValue()
 	fnptr := b.CreateExtractValue(srclv, 0, "")
 	fnctx := b.CreateExtractValue(srclv, 1, "")
-	fnptr = b.CreateBitCast(fnptr, dstltelems[0], "")
 
 	// TODO(axw) There's a lot of overlap between this
 	// and the code that converts concrete methods to
@@ -764,6 +763,7 @@ func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
 	}
 
 	dstlv := llvm.Undef(dstlt)
+	fnptr = b.CreateBitCast(fnptr, dstltelems[0], "")
 	dstlv = b.CreateInsertValue(dstlv, fnptr, 0, "")
 	dstlv = b.CreateInsertValue(dstlv, fnctx, 1, "")
 	return v.compiler.NewValue(dstlv, dsttyp)
