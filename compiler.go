@@ -319,6 +319,11 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		var e = exporter{compiler: compiler}
+		if err := e.Export(pkg); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create global constructors. The initfuncs/varinitfuncs
