@@ -82,7 +82,7 @@ func main() {
 			err = buildPackageTests(args[0])
 		}
 	} else {
-		err = buildPackages(flag.Args())
+		err = buildPackages(args)
 	}
 	os.RemoveAll(workdir)
 	if err != nil {
