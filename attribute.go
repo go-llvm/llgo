@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
+	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"strings"
@@ -124,7 +125,16 @@ func (a nameAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
 		fn = llvm.ConstExtractValue(fn, []uint32{0})
-		fn.SetName(string(a))
+		name := string(a)
+		curr := fn.GlobalParent().NamedFunction(name)
+		if !curr.IsNil() && curr != fn {
+			if curr.BasicBlocksCount() != 0 {
+				panic(fmt.Errorf("Want to take the name %s from a function that has a body!", name))
+			}
+			curr.SetName(name + "_llgo_replaced")
+			curr.ReplaceAllUsesWith(fn)
+		}
+		fn.SetName(name)
 	} else {
 		global := v.(*LLVMValue).pointer.value
 		global.SetName(string(a))
