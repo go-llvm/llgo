@@ -49,7 +49,7 @@ func buildLlgo() error {
 	if sharedllvm {
 		cgoLdflags += fmt.Sprintf(" -lLLVM-%s ", llvmversion)
 	} else {
-		cgoLdflags += " " + llvmlibs + " -lstdc++ "
+		cgoLdflags += " " + llvmlibs + " -lstdc++ -lm "
 	}
 	cgoLdflags += " " + llvmldflags
 
