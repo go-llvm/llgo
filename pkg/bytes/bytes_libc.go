@@ -14,22 +14,42 @@ func memcmp(a, b *byte, n int) int32
 
 // #llgo name: bytes.IndexByte
 func indexByte(s []byte, c byte) int {
-    n := len(s)
-    if n > 0 {
-        ptr := memchr(&s[0], c, n)
-        if ptr != 0 {
-            diff := ptr - uintptr(unsafe.Pointer(&s[0]))
-            return int(diff)
-        }
-    }
-    return -1
+	n := len(s)
+	if n > 0 {
+		ptr := memchr(&s[0], c, n)
+		if ptr != 0 {
+			diff := ptr - uintptr(unsafe.Pointer(&s[0]))
+			return int(diff)
+		}
+	}
+	return -1
 }
 
 // #llgo name: bytes.Equal
 func equal(a, b []byte) bool {
-    if n := len(a); len(b) == n {
-        return n == 0 || memcmp(&a[0], &b[0], n) == 0
-    }
-    return false
+	if n := len(a); len(b) == n {
+		return n == 0 || memcmp(&a[0], &b[0], n) == 0
+	}
+	return false
 }
 
+// #llgo name: bytes.Compare
+func compare(a, b []byte) int {
+	la, lb := len(a), len(b)
+	if la == lb && la == 0 {
+		return 0
+	}
+	min := la
+	if lb < min {
+		min = lb
+	}
+	if r := memcmp(&a[0], &b[0], min); r == 0 {
+		if la < lb {
+			return -1
+		} else {
+			return 1
+		}
+	} else {
+		return int(r)
+	}
+}
