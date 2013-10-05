@@ -134,6 +134,20 @@ func getPackage(pkgpath string) (pkg *build.Package, err error) {
 			}
 			pkg.GoFiles[i] = path.Join(pkgdir, filename)
 		}
+		for i, filename := range pkg.TestGoFiles {
+			pkgdir := pkg.Dir
+			if overlayentries[filename] {
+				pkgdir = overlaypkg.Dir
+			}
+			pkg.TestGoFiles[i] = path.Join(pkgdir, filename)
+		}
+		for i, filename := range pkg.XTestGoFiles {
+			pkgdir := pkg.Dir
+			if overlayentries[filename] {
+				pkgdir = overlaypkg.Dir
+			}
+			pkg.XTestGoFiles[i] = path.Join(pkgdir, filename)
+		}
 		for i, filename := range pkg.CFiles {
 			pkgdir := pkg.Dir
 			if overlayentries[filename] {
@@ -191,7 +205,7 @@ func buildPackages(pkgpaths []string) error {
 func buildPackage(pkg *build.Package, output string) error {
 	args := []string{"-c", "-triple", triple}
 	dir, file := path.Split(pkg.ImportPath)
-	if pkg.IsCommand() {
+	if pkg.IsCommand() || test {
 		if output == "" {
 			output = file
 		}
@@ -211,6 +225,9 @@ func buildPackage(pkg *build.Package, output string) error {
 	tempfile := path.Join(workdir, file+".bc")
 	args = append(args, "-o", tempfile)
 	args = append(args, pkg.GoFiles...)
+	if test {
+		args = append(args, pkg.TestGoFiles...)
+	}
 	cmd := exec.Command("llgo", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -269,6 +286,10 @@ func buildPackage(pkg *build.Package, output string) error {
 	if pkg.IsCommand() {
 		err = linkdeps(pkg, tempfile)
 		if err != nil {
+			return err
+		}
+	} else if test {
+		if err = linktest(pkg, tempfile); err != nil {
 			return err
 		}
 	}

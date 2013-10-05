@@ -19,16 +19,16 @@ func linkdeps(pkg *build.Package, output string) error {
 	deps["runtime"] = true
 	deps["unsafe"] = true
 
-	var mkdeps func(pkg *build.Package) error
-	mkdeps = func(pkg *build.Package) error {
-		for _, path := range pkg.Imports {
+	var mkdeps func(pkg *build.Package, imports []string) error
+	mkdeps = func(pkg *build.Package, imports []string) error {
+		for _, path := range imports {
 			if !deps[path] {
 				deps[path] = true
 				pkg, err := build.Import(path, "", 0)
 				if err != nil {
 					return err
 				}
-				if err = mkdeps(pkg); err != nil {
+				if err = mkdeps(pkg, pkg.Imports); err != nil {
 					return err
 				}
 				depslist = append(depslist, path)
@@ -37,9 +37,17 @@ func linkdeps(pkg *build.Package, output string) error {
 		return nil
 	}
 
-	err := mkdeps(pkg)
+	err := mkdeps(pkg, pkg.Imports)
 	if err != nil {
 		return err
+	}
+	if test {
+		if err = mkdeps(pkg, pkg.TestImports); err != nil {
+			return err
+		}
+		if err = mkdeps(pkg, pkg.XTestImports); err != nil {
+			return err
+		}
 	}
 
 	for i := 0; i < len(depslist)/2; i++ {
@@ -50,6 +58,9 @@ func linkdeps(pkg *build.Package, output string) error {
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
 	args := []string{"-o", output, output}
 	for _, path := range depslist {
+		if path == pkg.ImportPath {
+			continue
+		}
 		bcfile := filepath.Join(pkgroot, path+".bc")
 		if buildDeps {
 			if _, err := os.Stat(bcfile); err != nil {
