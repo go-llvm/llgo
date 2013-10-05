@@ -218,6 +218,8 @@ func buildPackage(pkg *build.Package, output string) error {
 		if output == "" {
 			output = path.Join(dir, file+".bc")
 		}
+	}
+	if !pkg.IsCommand() || test {
 		args = append(args, "-importpath", pkg.ImportPath)
 	}
 

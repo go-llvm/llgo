@@ -36,7 +36,7 @@ import (
 
 	imports := make(map[string]bool)
 
-	addtests := func(pkgname string, gofiles []string) error {
+	addtests := func(pkgname, pkgpath string, gofiles []string) error {
 		for _, tf := range gofiles {
 			f, err := parser.ParseFile(fset, tf, nil, 0)
 			if err != nil {
@@ -44,9 +44,9 @@ import (
 			}
 			for k := range f.Scope.Objects {
 				if strings.HasPrefix(k, "Test") {
-					if !imports[pkgname] {
-						w.WriteString(fmt.Sprintf("\t\"%s\"\n", pkgname))
-						imports[pkgname] = true
+					if !imports[pkgpath] {
+						w.WriteString(fmt.Sprintf("\t\"%s\"\n", pkgpath))
+						imports[pkgpath] = true
 					}
 					tests.WriteString(fmt.Sprintf("\t{\"%s\", %s.%s},\n", k, pkgname, k))
 				}
@@ -54,10 +54,10 @@ import (
 		}
 		return nil
 	}
-	if err = addtests(pkg.Name, pkg.TestGoFiles); err != nil {
+	if err = addtests(pkg.Name, pkg.ImportPath, pkg.TestGoFiles); err != nil {
 		return err
 	}
-	if err = addtests(pkg.Name+"_test", pkg.XTestGoFiles); err != nil {
+	if err = addtests(pkg.Name+"_test", pkg.ImportPath+"_test", pkg.XTestGoFiles); err != nil {
 		return err
 	}
 	w.WriteString(")\n")
@@ -88,7 +88,7 @@ func main() {
 
 	test_bc := ""
 	if len(pkg.XTestGoFiles) > 0 {
-		args2 := []string{"-c", "-triple", triple}
+		args2 := []string{"-c", "-triple", triple, "-importpath", pkg.ImportPath + "_test"}
 		file := filepath.Base(linkfile)
 		file = file[:len(file)-3]
 		test_bc = filepath.Join(workdir, file+"_test.bc")
