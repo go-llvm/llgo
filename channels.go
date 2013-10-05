@@ -29,16 +29,16 @@ func (v *LLVMValue) chanClose() {
 }
 
 func (v *LLVMValue) chanSend(value Value) {
+	elttyp := v.typ.Underlying().(*types.Chan).Elem()
+	value = value.Convert(elttyp)
 	var ptr llvm.Value
 	if value, ok := value.(*LLVMValue); ok && value.pointer != nil {
 		ptr = value.pointer.LLVMValue()
 	}
-	elttyp := v.typ.Underlying().(*types.Chan).Elem()
 	c := v.compiler
 	if ptr.IsNil() {
 		ptr = c.builder.CreateAlloca(c.types.ToLLVM(elttyp), "")
-		value := value.Convert(elttyp).LLVMValue()
-		c.builder.CreateStore(value, ptr)
+		c.builder.CreateStore(value.LLVMValue(), ptr)
 	}
 	uintptr_ := c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
 	nb := boolLLVMValue(false)
