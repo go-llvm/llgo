@@ -6,6 +6,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	llgobuild "github.com/axw/llgo/build"
 	"go/build"
 	"io/ioutil"
@@ -28,6 +29,7 @@ var (
 	emitllvm      bool
 	buildctx      *build.Context
 	workdir       string
+	test          bool
 	buildDeps     bool = true
 )
 
@@ -37,6 +39,7 @@ func init() {
 	flag.StringVar(&output, "o", "", "Output file")
 	flag.BoolVar(&emitllvm, "emit-llvm", false, "Emit LLVM bitcode instead of a native binary")
 	flag.BoolVar(&printcommands, "x", false, "Print the commands")
+	flag.BoolVar(&test, "test", test, "When specified, the created output binary will be similar to what's output of \"go test -c\"")
 	flag.BoolVar(&buildDeps, "build-deps", buildDeps, "Whether to also build dependency packages or not")
 }
 
@@ -71,7 +74,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = buildPackages(flag.Args())
+	args := flag.Args()
+	if test {
+		if len(args) > 1 {
+			err = fmt.Errorf("Multiple files/packages can not be specified when building a test binary")
+		} else {
+			err = buildPackageTests(args[0])
+		}
+	} else {
+		err = buildPackages(args)
+	}
 	os.RemoveAll(workdir)
 	if err != nil {
 		log.Fatal(err)
