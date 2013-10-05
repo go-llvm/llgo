@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/build"
 	"go/format"
 	"go/parser"
@@ -42,8 +43,8 @@ import (
 			if err != nil {
 				return err
 			}
-			for k := range f.Scope.Objects {
-				if strings.HasPrefix(k, "Test") {
+			for k, o := range f.Scope.Objects {
+				if strings.HasPrefix(k, "Test") && o.Kind == ast.Fun {
 					if !imports[pkgpath] {
 						w.WriteString(fmt.Sprintf("\t\"%s\"\n", pkgpath))
 						imports[pkgpath] = true
