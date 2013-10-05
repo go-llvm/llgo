@@ -27,6 +27,7 @@ var (
 	output        string
 	printcommands bool
 	emitllvm      bool
+	generateDebug bool
 	buildctx      *build.Context
 	workdir       string
 	test          bool
@@ -40,6 +41,7 @@ func init() {
 	flag.StringVar(&output, "o", "", "Output file")
 	flag.BoolVar(&emitllvm, "emit-llvm", false, "Emit LLVM bitcode instead of a native binary")
 	flag.BoolVar(&printcommands, "x", false, "Print the commands")
+	flag.BoolVar(&generateDebug, "g", true, "Generate source level debug information")
 	flag.BoolVar(&test, "test", test, "When specified, the created output binary will be similar to what's output of \"go test -c\"")
 	flag.BoolVar(&buildDeps, "build-deps", buildDeps, "Whether to also build dependency packages or not")
 	flag.BoolVar(&work, "work", work, "Print the name of the temporary work directory and do not delete it when exiting")

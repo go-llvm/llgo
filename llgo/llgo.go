@@ -47,6 +47,7 @@ var arch = flag.String("arch", runtime.GOARCH, "Set the target architecture")
 var triple = flag.String("triple", "", "Set the target triple")
 var printTriple = flag.Bool("print-triple", false, "Print out target triple and exit")
 var compileOnly = flag.Bool("c", false, "Compile only, don't link")
+var generateDebug = flag.Bool("g", true, "Generate source level debug information")
 var outputFile = flag.String("o", "-", "Output filename")
 
 var exitCode = 0
@@ -238,6 +239,7 @@ func initCompiler() (llgo.Compiler, error) {
 	if *trace {
 		opts.Logger = log.New(os.Stderr, "", 0)
 	}
+	opts.GenerateDebug = *generateDebug
 	return llgo.NewCompiler(opts)
 }
 

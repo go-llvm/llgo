@@ -223,6 +223,7 @@ func buildPackage(pkg *build.Package, output string) error {
 
 	_, file = path.Split(output)
 	tempfile := path.Join(workdir, file+".bc")
+	args = append(args, fmt.Sprintf("-g=%v", generateDebug))
 	args = append(args, "-o", tempfile)
 	args = append(args, pkg.GoFiles...)
 	if test {

@@ -75,7 +75,6 @@ type compiler struct {
 	pnacl bool
 
 	debug_context []llvm.DebugDescriptor
-	compile_unit  *llvm.CompileUnitDescriptor
 	debug_info    *llvm.DebugInfo
 }
 
@@ -149,6 +148,10 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 type CompilerOptions struct {
 	// TargetTriple is the LLVM triple for the target.
 	TargetTriple string
+
+	// GenerateDebug decides whether debug data is
+	// generated in the output module.
+	GenerateDebug bool
 
 	// Logger is a logger used for tracing compilation.
 	Logger *log.Logger
@@ -292,22 +295,30 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 	compiler.debug_info = &llvm.DebugInfo{}
 	// Compile each file in the package.
 	for _, file := range files {
-		compiler.compile_unit = &llvm.CompileUnitDescriptor{
-			Language: llvm.DW_LANG_Go,
-			Path:     llvm.FileDescriptor(fset.File(file.Pos()).Name()),
-			Producer: LLGOProducer,
-			Runtime:  LLGORuntimeVersion,
+		if compiler.GenerateDebug {
+			cu := &llvm.CompileUnitDescriptor{
+				Language: llvm.DW_LANG_Go,
+				Path:     llvm.FileDescriptor(fset.File(file.Pos()).Name()),
+				Producer: LLGOProducer,
+				Runtime:  LLGORuntimeVersion,
+			}
+			compiler.pushDebugContext(cu)
+			compiler.pushDebugContext(&cu.Path)
 		}
-		compiler.pushDebugContext(&compiler.compile_unit.Path)
-
 		for _, decl := range file.Decls {
 			compiler.VisitDecl(decl)
 		}
-		compiler.popDebugContext()
-		if len(compiler.debug_context) > 0 {
-			log.Panicln(compiler.debug_context)
+		if compiler.GenerateDebug {
+			compiler.popDebugContext()
+			cu := compiler.popDebugContext()
+			if len(compiler.debug_context) > 0 {
+				log.Panicln(compiler.debug_context)
+			}
+			compiler.module.AddNamedMetadataOperand(
+				"llvm.dbg.cu",
+				compiler.debug_info.MDNode(cu),
+			)
 		}
-		compiler.module.AddNamedMetadataOperand("llvm.dbg.cu", compiler.debug_info.MDNode(compiler.compile_unit))
 	}
 
 	// Export runtime type information.
@@ -366,9 +377,6 @@ func (compiler *compiler) Compile(fset *token.FileSet, files []*ast.File, import
 		ctorsVar.SetInitializer(ctorsInit)
 		ctorsVar.SetLinkage(llvm.AppendingLinkage)
 	}
-
-	// Create debug metadata.
-	//compiler.createMetadata()
 
 	return compiler.module, nil
 }

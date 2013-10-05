@@ -63,49 +63,55 @@ func (c *compiler) pushDebugContext(d llvm.DebugDescriptor) {
 	c.debug_context = append(c.debug_context, d)
 }
 
-func (c *compiler) popDebugContext() {
-	c.debug_context = c.debug_context[:len(c.debug_context)-1]
+func (c *compiler) popDebugContext() (top llvm.DebugDescriptor) {
+	n := len(c.debug_context)
+	top, c.debug_context = c.debug_context[n-1], c.debug_context[:n-1]
+	return top
 }
 
 func (c *compiler) currentDebugContext() llvm.DebugDescriptor {
+	if len(c.debug_context) == 0 {
+		return nil
+	}
 	return c.debug_context[len(c.debug_context)-1]
 }
 
 func (c *compiler) setDebugLine(pos token.Pos) {
+	ctx := c.currentDebugContext()
+	if ctx == nil {
+		return
+	}
 	file := c.fileset.File(pos)
 	ld := &llvm.LineDescriptor{
 		Line:    uint32(file.Line(pos)),
-		Context: c.currentDebugContext(),
+		Context: ctx,
 	}
 	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(ld))
-}
-
-// Debug intrinsic collectors.
-func createGlobalVariableMetadata(global llvm.Value) llvm.DebugDescriptor {
-	return &llvm.GlobalVariableDescriptor{
-		Name:        global.Name(),
-		DisplayName: global.Name(),
-		//File:
-		//Line:
-		Type:  int32_debug_type, // FIXME
-		Value: global}
 }
 
 var uniqueId uint32
 
 func (c *compiler) createBlockMetadata(stmt *ast.BlockStmt) llvm.DebugDescriptor {
+	ctx := c.currentDebugContext()
+	if ctx == nil {
+		return nil
+	}
 	uniqueId++
 	file := c.fileset.File(stmt.Pos())
 	fd := llvm.FileDescriptor(file.Name())
 	return &llvm.BlockDescriptor{
 		File:    &fd,
 		Line:    uint32(file.Line(stmt.Pos())),
-		Context: c.currentDebugContext(),
+		Context: ctx,
 		Id:      uniqueId,
 	}
 }
 
 func (c *compiler) createFunctionMetadata(f *ast.FuncDecl, fn *LLVMValue) llvm.DebugDescriptor {
+	if len(c.debug_context) == 0 {
+		return nil
+	}
+
 	file := c.fileset.File(f.Pos())
 	fnptr := fn.value
 	fun := fnptr.IsAFunction()
@@ -143,42 +149,39 @@ func (c *compiler) createFunctionMetadata(f *ast.FuncDecl, fn *LLVMValue) llvm.D
 		}
 	}
 
-	meta.Type = llvm.NewSubroutineCompositeType(c.tollvmDebugDescriptor(result), metaparams)
-	c.compile_unit.Subprograms = append(c.compile_unit.Subprograms, meta)
+	meta.Type = llvm.NewSubroutineCompositeType(
+		c.tollvmDebugDescriptor(result),
+		metaparams,
+	)
+
+	// compile unit is the first context object pushed
+	compileUnit := c.debug_context[0].(*llvm.CompileUnitDescriptor)
+	compileUnit.Subprograms = append(compileUnit.Subprograms, meta)
 	return meta
 }
 
-func (c *compiler) createMetadata() {
-	functions := []llvm.DebugDescriptor{}
-	globals := []llvm.DebugDescriptor{}
-	debugInfo := &llvm.DebugInfo{}
-
-	// Create global metadata.
-	//
-	// TODO We should store the global llgo.Value objects, and refer to them,
-	// so we can calculate the type metadata properly.
-	global := c.module.FirstGlobal()
-	for ; !global.IsNil(); global = llvm.NextGlobal(global) {
-		if !global.IsAGlobalVariable().IsNil() {
-			name := global.Name()
-			if ast.IsExported(name) {
-				descriptor := createGlobalVariableMetadata(global)
-				globals = append(globals, descriptor)
-				c.module.AddNamedMetadataOperand(
-					"llvm.dbg.gv", debugInfo.MDNode(descriptor))
-			}
-		}
+// createLocalVariableMetadata creates and returns a debug descriptor for
+// a local variable in a function.
+//
+// obj is the go/types object for the var.
+// paramIndex is 0 for "auto" variables (non-parameter stack vars), and a
+// 1-based index for parameter vars.
+func (c *compiler) createLocalVariableMetadata(obj types.Object, paramIndex int) llvm.DebugDescriptor {
+	ctx := c.currentDebugContext()
+	if ctx == nil {
+		return nil
 	}
-
-	compile_unit := &llvm.CompileUnitDescriptor{
-		Language: llvm.DW_LANG_Go,
-		//Path:
-		Producer:        LLGOProducer,
-		Runtime:         LLGORuntimeVersion,
-		Subprograms:     functions,
-		GlobalVariables: globals}
-
-	// TODO resolve descriptors.
-	c.module.AddNamedMetadataOperand(
-		"llvm.dbg.cu", debugInfo.MDNode(compile_unit))
+	tag := llvm.DW_TAG_auto_variable
+	if paramIndex > 0 {
+		tag = llvm.DW_TAG_arg_variable
+	}
+	position := c.fileset.Position(obj.Pos())
+	ld := llvm.NewLocalVariableDescriptor(tag)
+	ld.Argument = uint32(paramIndex)
+	ld.Line = uint32(position.Line)
+	ld.Name = obj.Name()
+	ld.File = &llvm.ContextDescriptor{llvm.FileDescriptor(position.Filename)}
+	ld.Type = c.tollvmDebugDescriptor(obj.Type())
+	ld.Context = ctx
+	return ld
 }

@@ -54,18 +54,14 @@ func (c *compiler) newStackVarEx(argument int, stackf *LLVMValue, v types.Object
 	stackvar.stack = stackf
 	c.objectdata[v].Value = stackvar
 
-	file := c.fileset.File(v.Pos())
-	tag := llvm.DW_TAG_auto_variable
-	if argument > 0 {
-		tag = llvm.DW_TAG_arg_variable
+	// Generate debug metadata (will return nil
+	// if debug-data generation is disabled).
+	if descriptor := c.createLocalVariableMetadata(v, argument); descriptor != nil {
+		c.builder.InsertDeclare(
+			c.module.Module,
+			llvm.MDNode([]llvm.Value{stackvalue}),
+			c.debug_info.MDNode(descriptor),
+		)
 	}
-	ld := llvm.NewLocalVariableDescriptor(tag)
-	ld.Argument = uint32(argument)
-	ld.Line = uint32(file.Line(v.Pos()))
-	ld.Name = name
-	ld.File = &llvm.ContextDescriptor{llvm.FileDescriptor(file.Name())}
-	ld.Type = c.tollvmDebugDescriptor(typ)
-	ld.Context = c.currentDebugContext()
-	c.builder.InsertDeclare(c.module.Module, llvm.MDNode([]llvm.Value{stackvalue}), c.debug_info.MDNode(ld))
 	return stackvalue, stackvar
 }
