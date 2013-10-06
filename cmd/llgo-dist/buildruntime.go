@@ -22,12 +22,26 @@ func buildRuntime() (reterr error) {
 		"os/user",     // Issue #72
 		"runtime/cgo", // Issue #73
 	}
+	if triple == "pnacl" {
+		badPackages = append(badPackages,
+			"crypto/md5",
+			"crypto/rc4",
+			"hash/crc32",
+			"mime",
+			"os/exec",
+			"os/signal",
+			"path/filepath",
+		)
+	}
 
 	output, err := command("go", "list", "std").CombinedOutput()
 	if err != nil {
 		return err
 	}
-	runtimePackages := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	// Always build unsafe, runtime and syscall first
+	// TODO: Real import dependency discovery to build packages in the order they depend on each other
+	runtimePackages := append([]string{"unsafe", "runtime", "syscall"}, strings.Split(strings.TrimSpace(string(output)), "\n")...)
 outer:
 	for _, pkg := range runtimePackages {
 		// cmd's aren't packages
