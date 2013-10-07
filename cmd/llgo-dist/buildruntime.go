@@ -39,9 +39,9 @@ func buildRuntime() (reterr error) {
 		return err
 	}
 
-	// Always build unsafe, runtime and syscall first
+	// Always build runtime and syscall first
 	// TODO: Real import dependency discovery to build packages in the order they depend on each other
-	runtimePackages := append([]string{"unsafe", "runtime", "syscall"}, strings.Split(strings.TrimSpace(string(output)), "\n")...)
+	runtimePackages := append([]string{"runtime", "syscall"}, strings.Split(strings.TrimSpace(string(output)), "\n")...)
 outer:
 	for _, pkg := range runtimePackages {
 		// cmd's aren't packages
