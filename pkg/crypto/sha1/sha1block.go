@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build !arm
-
 // SHA1 block step.
 // In its own file so that a faster assembly or C version
 // can be substituted easily.
