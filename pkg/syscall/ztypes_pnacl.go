@@ -1,7 +1,8 @@
-// Created by cgo -godefs - DO NOT EDIT
-// cgo -godefs -- -nostdinc -D__native_client__ -isystem /home/andrew/prog/nacl_sdk/pepper_canary/toolchain/linux_x86_pnacl/newlib/usr/include -isystem /home/andrew/prog/nacl_sdk/pepper_canary/include -isystem /home/andrew/prog/nacl_sdk/pepper_canary/toolchain/linux_x86_pnacl/host_x86_64/lib/clang/3.3/include -isystem /home/andrew/prog/nacl_sdk/pepper_canary/toolchain/linux_x86_pnacl/newlib/sysroot/include /home/andrew/prog/go/me/src/github.com/axw/llgo/pkg/syscall/types_pnacl.go
 
 // +build pnacl
+
+// Created by cgo -godefs - DO NOT EDIT
+// cgo -godefs -objdir /var/folders/n1/yjqlqd2s04x7th1152h48hsr0000gn/T/llgo_dist381379107 -- -nostdinc -D__native_client__ -isystem /Users/quarnster/Downloads/nacl_sdk/pepper_29/toolchain/mac_x86_pnacl/newlib/usr/include -isystem /Users/quarnster/Downloads/nacl_sdk/pepper_29/include -isystem /Users/quarnster/Downloads/nacl_sdk/pepper_29/toolchain/mac_x86_pnacl/host_x86_64/lib/clang/3.3/include -isystem /Users/quarnster/Downloads/nacl_sdk/pepper_29/toolchain/mac_x86_pnacl/newlib/sysroot/include /Users/quarnster/code/go/src/github.com/axw/llgo/pkg/syscall/types_pnacl.go
 
 package syscall
 
