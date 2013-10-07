@@ -44,7 +44,11 @@ func (c *compiler) packageExportsFile(path string) string {
 	} else {
 		gopath = filepath.SplitList(gopath)[0]
 	}
-	return filepath.Join(gopath, "pkg", "llgo", c.TargetTriple, path+".lgx")
+	target := c.TargetTriple
+	if c.pnacl {
+		target = "pnacl"
+	}
+	return filepath.Join(gopath, "pkg", "llgo", target, path+".lgx")
 }
 
 func (c *importer) Import(imports map[string]*types.Package, path string) (pkg *types.Package, err error) {

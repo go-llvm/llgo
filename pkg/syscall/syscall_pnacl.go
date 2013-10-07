@@ -7,16 +7,18 @@
 package syscall
 
 import (
-	"runtime"
-	"sync"
 	"unsafe"
 )
+
+const ImplementsGetwd = false
 
 var (
 	Stdin  = 0
 	Stdout = 1
 	Stderr = 2
 )
+
+type SysProcAttr struct{}
 
 func Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 	return 0, 0, EPERM
@@ -188,7 +190,7 @@ func Exit(status int) {
 	_exit(status)
 }
 
-func Fstat(path string, buf *Stat_t) (err error) {
+func Fstat(fd int, buf *Stat_t) (err error) {
 	return EPERM
 }
 
@@ -293,8 +295,8 @@ func CloseOnExec(fd int) {
 }
 
 func UtimesNano(path string, ts []Timespec) error {
-    // TODO
-    return EPERM
+	// TODO
+	return EPERM
 }
 
 var ioSync int64
