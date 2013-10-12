@@ -8,7 +8,6 @@ import (
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 )
 
 func getprintf(module llvm.Module) llvm.Value {
@@ -88,7 +87,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
 					fallthrough
 				case types.Float64:
-					printfloat := c.NamedFunction("runtime.printfloat", "func(float64) string")
+					printfloat := c.RuntimeFunction("runtime.printfloat", "func(float64) string")
 					args := []llvm.Value{llvm_value}
 					llvm_value = c.builder.CreateCall(printfloat, args, "")
 					fallthrough
@@ -152,25 +151,8 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 	}
 	printf := getprintf(c.module.Module)
 	result := c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
-	fflush := c.NamedFunction("fflush", "func(*int32) int32")
+	fflush := c.RuntimeFunction("fflush", "func(*int32) int32")
 	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
 	return result
 }
 
-func (c *compiler) visitPrint(expr *ast.CallExpr) Value {
-	var values []Value
-	for _, arg := range expr.Args {
-		values = append(values, c.VisitExpr(arg))
-	}
-	return c.printValues(false, values...)
-}
-
-func (c *compiler) visitPrintln(expr *ast.CallExpr) Value {
-	var values []Value
-	for _, arg := range expr.Args {
-		values = append(values, c.VisitExpr(arg))
-	}
-	return c.printValues(true, values...)
-}
-
-// vim: set ft=go :

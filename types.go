@@ -15,72 +15,11 @@ import (
 // this is used to check whether a "function call" is in fact a
 // type conversion.
 
-// isType checks if an expression is a type.
-func (c *compiler) isType(x ast.Expr) bool {
-	switch t := x.(type) {
-	case *ast.Ident:
-		if obj, ok := c.typeinfo.Objects[t]; ok {
-			_, ok = obj.(*types.TypeName)
-			return ok
-		}
-	case *ast.ParenExpr:
-		return c.isType(t.X)
-	case *ast.SelectorExpr:
-		// qualified identifier
-		if sel := c.typeinfo.Selections[t]; sel.Kind() == types.PackageObj {
-			_, isType := sel.Obj().(*types.TypeName)
-			return isType
-		}
-		return false
-	case *ast.StarExpr:
-		return c.isType(t.X)
-	case *ast.ArrayType,
-		*ast.StructType,
-		*ast.FuncType,
-		*ast.InterfaceType,
-		*ast.MapType,
-		*ast.ChanType:
-		return true
-	}
-	return false
-}
-
 func unparen(x ast.Expr) ast.Expr {
 	if p, ok := x.(*ast.ParenExpr); ok {
 		return unparen(p.X)
 	}
 	return x
-}
-
-func (c *compiler) convertUntyped(from ast.Expr, to interface{}) bool {
-	fromtype := c.typeinfo.Types[from]
-	if fromtype != nil && isUntyped(fromtype) {
-		var newtype types.Type
-		switch to := to.(type) {
-		case types.Type:
-			newtype = to
-		case *ast.Ident:
-			obj := c.typeinfo.Objects[to]
-			newtype = obj.Type()
-		case ast.Expr:
-			newtype = c.typeinfo.Types[to]
-		default:
-			panic(fmt.Errorf("unexpected type: %T", to))
-		}
-
-		// If untyped constant is assigned to interface{},
-		// we'll change its type to the default type for
-		// the literal instead.
-		if fromtype != types.Typ[types.UntypedNil] {
-			if _, ok := newtype.(*types.Interface); ok {
-				newtype = defaultType(fromtype)
-			}
-		}
-
-		c.typeinfo.Types[from] = newtype
-		return true
-	}
-	return false
 }
 
 func deref(t types.Type) types.Type {

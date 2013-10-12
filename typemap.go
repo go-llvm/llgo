@@ -50,7 +50,6 @@ type TypeMap struct {
 	pkgpath   string
 	types     runtimeTypeInfoMap
 	functions *FunctionCache
-	resolver  Resolver
 
 	runtimeType,
 	runtimeUncommonType,
@@ -86,14 +85,13 @@ func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 	}
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *FunctionCache, r Resolver) *TypeMap {
+func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *FunctionCache /*, r Resolver*/) *TypeMap {
 	tm := &TypeMap{
 		LLVMTypeMap: llvmtm,
 		module:      module,
 		pkgpath:     pkgpath,
 		types:       make(runtimeTypeInfoMap),
 		functions:   c,
-		resolver:    r,
 	}
 
 	// Load runtime/reflect types, and generate LLVM types for
@@ -511,19 +509,19 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	case *types.Basic:
 		switch t.Kind() {
 		case types.String:
-			equalAlg = tm.functions.NamedFunction("runtime.streqalg", eqalgsig)
+			equalAlg = tm.functions.RuntimeFunction("runtime.streqalg", eqalgsig)
 		case types.Float32:
-			equalAlg = tm.functions.NamedFunction("runtime.f32eqalg", eqalgsig)
+			equalAlg = tm.functions.RuntimeFunction("runtime.f32eqalg", eqalgsig)
 		case types.Float64:
-			equalAlg = tm.functions.NamedFunction("runtime.f64eqalg", eqalgsig)
+			equalAlg = tm.functions.RuntimeFunction("runtime.f64eqalg", eqalgsig)
 		case types.Complex64:
-			equalAlg = tm.functions.NamedFunction("runtime.c64eqalg", eqalgsig)
+			equalAlg = tm.functions.RuntimeFunction("runtime.c64eqalg", eqalgsig)
 		case types.Complex128:
-			equalAlg = tm.functions.NamedFunction("runtime.c128eqalg", eqalgsig)
+			equalAlg = tm.functions.RuntimeFunction("runtime.c128eqalg", eqalgsig)
 		}
 	}
 	if equalAlg.IsNil() {
-		equalAlg = tm.functions.NamedFunction("runtime.memequal", eqalgsig)
+		equalAlg = tm.functions.RuntimeFunction("runtime.memequal", eqalgsig)
 	}
 	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)
@@ -815,6 +813,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 	pkgpathPtr := tm.globalStringPtr(path)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 
+    /*
 	methodset := tm.functions.methods(n)
 	methodfuncs := methodset.nonptr
 	if ptr {
@@ -843,27 +842,28 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 		typ := tm.ToRuntime(ftyp)
 		method = llvm.ConstInsertValue(method, typ, []uint32{3})
 
-		// tfn (standard method/function pointer for plain method calls)
-		tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
-		tfn = llvm.ConstExtractValue(tfn, []uint32{0})
-		tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+			// tfn (standard method/function pointer for plain method calls)
+			tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+			tfn = llvm.ConstExtractValue(tfn, []uint32{0})
+			tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
 
-		// ifn (single-word receiver function pointer for interface calls)
-		ifn := tfn
-		if !ptr && tm.Sizeof(ftyp.Recv().Type()) > int64(tm.target.PointerSize()) {
-			mfunc := methodset.lookup(mfunc.Name(), true)
-			ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
-			ifn = llvm.ConstExtractValue(ifn, []uint32{0})
-			ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
-		}
+			// ifn (single-word receiver function pointer for interface calls)
+			ifn := tfn
+			if !ptr && tm.Sizeof(ftyp.Recv().Type()) > int64(tm.target.PointerSize()) {
+				mfunc := methodset.lookup(mfunc.Name(), true)
+				ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+				ifn = llvm.ConstExtractValue(ifn, []uint32{0})
+				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+			}
 
-		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
-		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
+			method = llvm.ConstInsertValue(method, ifn, []uint32{4})
+			method = llvm.ConstInsertValue(method, tfn, []uint32{5})
 		methods[i] = method
 	}
 	methodsSliceType := tm.runtimeUncommonType.StructElementTypes()[2]
 	methodsSlice := tm.makeSlice(methods, methodsSliceType)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, methodsSlice, []uint32{2})
+    */
 	return uncommonTypeInit
 }
 

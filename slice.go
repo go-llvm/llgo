@@ -7,7 +7,6 @@ package llgo
 import (
 	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 )
 
 // makeLiteralSlice allocates a new slice, storing in it the provided elements.
@@ -76,6 +75,7 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 	return dst
 }
 
+/*
 func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 	s := c.VisitExpr(expr.Args[0])
 	elemtyp := s.Type().Underlying().(*types.Slice).Elem()
@@ -212,5 +212,4 @@ func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
 	}
 	panic("unreachable")
 }
-
-// vim: set ft=go :
+*/
