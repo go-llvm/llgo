@@ -89,7 +89,7 @@ func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
 		}
 	}
 
-	sliceappend := c.NamedFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
+	sliceappend := c.RuntimeFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
 	i8slice := sliceappend.Type().ElementType().ReturnType()
 	i8ptr := c.types.ToLLVM(types.NewPointer(types.Typ[types.Int8]))
 
@@ -135,7 +135,7 @@ func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
 	// If it's a string, convert it to a []byte first.
 	source = source.Convert(dest.Type())
 
-	slicecopy := c.NamedFunction("runtime.slicecopy", "func(t uintptr, dst, src slice) int")
+	slicecopy := c.RuntimeFunction("runtime.slicecopy", "func(t uintptr, dst, src slice) int")
 	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
 
 	// Coerce first argument into an []int8.
@@ -149,67 +149,59 @@ func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
 	result := c.builder.CreateCall(slicecopy, args, "")
 	return c.NewValue(result, types.Typ[types.Int])
 }
+*/
 
-func (c *compiler) VisitSliceExpr(expr *ast.SliceExpr) Value {
-	value := c.VisitExpr(expr.X)
-
-	var low llvm.Value
-	if expr.Low != nil {
-		lowvalue := c.VisitExpr(expr.Low).Convert(types.Typ[types.Int])
-		low = lowvalue.LLVMValue()
+func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
+	if low != nil {
+		low = low.Convert(types.Typ[types.Int]).(*LLVMValue)
 	} else {
-		low = llvm.ConstNull(c.types.inttype)
+		low = c.NewValue(llvm.ConstNull(c.types.inttype), types.Typ[types.Int])
 	}
 
-	var high llvm.Value
-	if expr.High != nil {
-		highvalue := c.VisitExpr(expr.High).Convert(types.Typ[types.Int])
-		high = highvalue.LLVMValue()
+	if high != nil {
+		high = high.Convert(types.Typ[types.Int]).(*LLVMValue)
 	} else {
-		high = llvm.ConstAllOnes(c.types.inttype) // -1
+		// all bits set is -1
+		high = c.NewValue(llvm.ConstAllOnes(c.types.inttype), types.Typ[types.Int])
 	}
 
-	if _, ok := value.Type().Underlying().(*types.Pointer); ok {
-		value = value.(*LLVMValue).makePointee()
-	}
-
-	switch typ := value.Type().Underlying().(type) {
-	case *types.Array:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
+	switch typ := x.Type().Underlying().(type) {
+	case *types.Pointer: // *array
+		sliceslice := c.RuntimeFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
-		arrayptr := value.(*LLVMValue).pointer.LLVMValue()
+		arraytyp := typ.Elem().(*types.Array)
+		arrayptr := x.LLVMValue()
 		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
-		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
+		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(arraytyp.Len()), false)
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
 		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
-		sliceTyp := types.NewSlice(typ.Elem())
+		sliceTyp := types.NewSlice(arraytyp.Elem())
 		runtimeTyp := c.types.ToRuntime(sliceTyp)
 		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
-		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
+		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
 		result := c.builder.CreateCall(sliceslice, args, "")
 		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
 		return c.NewValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
-		sliceslice := c.NamedFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
+		sliceslice := c.RuntimeFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
 		i8slice := sliceslice.Type().ElementType().ReturnType()
-		sliceValue := value.LLVMValue()
+		sliceValue := x.LLVMValue()
 		sliceTyp := sliceValue.Type()
 		sliceValue = c.coerceSlice(sliceValue, i8slice)
-		runtimeTyp := c.types.ToRuntime(value.Type())
+		runtimeTyp := c.types.ToRuntime(x.Type())
 		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
-		args := []llvm.Value{runtimeTyp, sliceValue, low, high}
+		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
 		result := c.builder.CreateCall(sliceslice, args, "")
-		return c.NewValue(c.coerceSlice(result, sliceTyp), value.Type())
+		return c.NewValue(c.coerceSlice(result, sliceTyp), x.Type())
 	case *types.Basic:
-		stringslice := c.NamedFunction("runtime.stringslice", "func(a string, low, high int) string")
-		args := []llvm.Value{value.LLVMValue(), low, high}
+		stringslice := c.RuntimeFunction("runtime.stringslice", "func(a string, low, high int) string")
+		args := []llvm.Value{x.LLVMValue(), low.LLVMValue(), high.LLVMValue()}
 		result := c.builder.CreateCall(stringslice, args, "")
-		return c.NewValue(result, value.Type())
+		return c.NewValue(result, x.Type())
 	default:
 		panic("unimplemented")
 	}
 	panic("unreachable")
 }
-*/

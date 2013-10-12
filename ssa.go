@@ -118,6 +118,8 @@ func (fr *frame) block(b *ssa.BasicBlock) llvm.BasicBlock {
 
 func (fr *frame) value(v ssa.Value) *LLVMValue {
 	switch v := v.(type) {
+	case nil:
+		return nil
 	case *ssa.Function:
 		return fr.functions[v]
 	case *ssa.Const:
@@ -237,7 +239,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			elemtyp = deref(typ).(*types.Array).Elem()
 			addr = fr.builder.CreateGEP(x, []llvm.Value{zero, index}, "")
 		}
-		fr.env[instr] = fr.NewValue(addr, elemtyp)
+		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp))
 
 	case *ssa.Jump:
 		succ := instr.Block().Succs[0]
@@ -298,7 +300,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	//case *ssa.RunDefers:
 	//case *ssa.Select:
 	//case *ssa.Send:
-	//case *ssa.Slice:
+
+	case *ssa.Slice:
+		x := fr.value(instr.X)
+		low := fr.value(instr.Low)
+		high := fr.value(instr.High)
+		fr.env[instr] = fr.slice(x, low, high)
 
 	case *ssa.Store:
 		addr := fr.value(instr.Addr)
@@ -308,7 +315,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	//case *ssa.TypeAssert:
 
 	case *ssa.UnOp:
-		fmt.Println(instr.Op)
 		result := fr.value(instr.X).UnaryOp(instr.Op).(*LLVMValue)
 		fr.env[instr] = result
 
