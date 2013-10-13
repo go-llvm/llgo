@@ -181,6 +181,12 @@ func (compiler *compiler) Dispose() {
 	}
 }
 
+func (c *compiler) logf(format string, v ...interface{}) {
+	if c.Logger != nil {
+		c.Logger.Printf(format, v...)
+	}
+}
+
 func (compiler *compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.exportedtypes = nil
@@ -252,7 +258,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	defer compiler.builder.Dispose()
 
 	mainpkg.Build()
-	compiler.translateSSA(mainpkg)
+	compiler.translatePackage(mainpkg)
 
 	/*
 		compiler.debug_info = &llvm.DebugInfo{}

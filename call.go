@@ -9,92 +9,6 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-/*
-func (c *compiler) VisitCallExpr(expr *ast.CallExpr) Value {
-	// Is it a type conversion?
-	if len(expr.Args) == 1 && c.isType(expr.Fun) {
-		typ := c.typeinfo.Types[expr]
-		c.convertUntyped(expr.Args[0], typ)
-		value := c.VisitExpr(expr.Args[0])
-		return value.Convert(typ)
-	}
-
-	// Builtin functions.
-	// Builtin function's have a special Type (types.builtin).
-	//
-	// Note: we do not handle unsafe.{Align,Offset,Size}of here,
-	// as they are evaluated during type-checking.
-	if builtin := c.maybeBuiltin(expr.Fun); builtin != nil {
-		switch builtin.Name() {
-		case "close":
-			c.visitClose(expr)
-			return nil
-		case "copy":
-			return c.VisitCopy(expr)
-		case "print":
-			return c.visitPrint(expr)
-		case "println":
-			return c.visitPrintln(expr)
-		case "cap":
-			return c.VisitCap(expr)
-		case "len":
-			return c.VisitLen(expr)
-		case "new":
-			return c.VisitNew(expr)
-		case "make":
-			return c.VisitMake(expr)
-		case "append":
-			return c.VisitAppend(expr)
-		case "delete":
-			m := c.VisitExpr(expr.Args[0]).(*LLVMValue)
-			key := c.VisitExpr(expr.Args[1])
-			c.mapDelete(m, key)
-			return nil
-		case "panic":
-			var arg Value
-			if len(expr.Args) > 0 {
-				arg = c.VisitExpr(expr.Args[0])
-			}
-			c.visitPanic(arg)
-			return nil
-		case "recover":
-			return c.visitRecover()
-		case "real":
-			cmplx := c.VisitExpr(expr.Args[0]).(*LLVMValue)
-			return cmplx.extractComplexComponent(0)
-		case "imag":
-			cmplx := c.VisitExpr(expr.Args[0]).(*LLVMValue)
-			return cmplx.extractComplexComponent(1)
-		case "complex":
-			r := c.VisitExpr(expr.Args[0]).LLVMValue()
-			i := c.VisitExpr(expr.Args[1]).LLVMValue()
-			typ := c.typeinfo.Types[expr]
-			cmplx := llvm.Undef(c.types.ToLLVM(typ))
-			cmplx = c.builder.CreateInsertValue(cmplx, r, 0, "")
-			cmplx = c.builder.CreateInsertValue(cmplx, i, 1, "")
-			return c.NewValue(cmplx, typ)
-		}
-	}
-
-	// Not a type conversion, so must be a function call.
-	lhs := c.VisitExpr(expr.Fun)
-	fn := lhs.(*LLVMValue)
-	fn_type := fn.Type().Underlying().(*types.Signature)
-
-	// Evaluate arguments.
-	dotdotdot := expr.Ellipsis.IsValid()
-	argValues := c.evalCallArgs(fn_type, expr.Args, dotdotdot)
-
-	// Depending on whether the function contains defer statements or not,
-	// we'll generate either a "call" or an "invoke" instruction.
-	var invoke bool
-	if f := c.functions.top(); f != nil && !f.deferblock.IsNil() {
-		invoke = true
-	}
-	return c.createCall(fn, argValues, dotdotdot, invoke)
-}
-*/
-
 // createCall emits the code for a function call, taking into account
 // variadic functions, receivers, and panic/defer.
 //
@@ -142,20 +56,20 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, dotdotdot, 
 	// Depending on whether the function contains defer statements or not,
 	// we'll generate either a "call" or an "invoke" instruction.
 	var createCall = c.builder.CreateCall
-    /*
-	if invoke {
-		f := c.functions.top()
-		// TODO Create a method on compiler (avoid creating closures).
-		createCall = func(fn llvm.Value, args []llvm.Value, name string) llvm.Value {
-			currblock := c.builder.GetInsertBlock()
-			returnblock := llvm.AddBasicBlock(currblock.Parent(), "")
-			returnblock.MoveAfter(currblock)
-			value := c.builder.CreateInvoke(fn, args, returnblock, f.unwindblock, "")
-			c.builder.SetInsertPointAtEnd(returnblock)
-			return value
+	/*
+		if invoke {
+			f := c.functions.top()
+			// TODO Create a method on compiler (avoid creating closures).
+			createCall = func(fn llvm.Value, args []llvm.Value, name string) llvm.Value {
+				currblock := c.builder.GetInsertBlock()
+				returnblock := llvm.AddBasicBlock(currblock.Parent(), "")
+				returnblock.MoveAfter(currblock)
+				value := c.builder.CreateInvoke(fn, args, returnblock, f.unwindblock, "")
+				c.builder.SetInsertPointAtEnd(returnblock)
+				return value
+			}
 		}
-	}
-    */
+	*/
 
 	var fnptr llvm.Value
 	fnval := fn.LLVMValue()

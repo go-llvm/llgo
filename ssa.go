@@ -12,15 +12,15 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-type translator struct {
+type unit struct {
 	*compiler
 	pkg       *ssa.Package
 	functions map[*ssa.Function]*LLVMValue
 	globals   map[ssa.Value]*LLVMValue
 }
 
-func (c *compiler) translateSSA(pkg *ssa.Package) {
-	t := &translator{
+func (c *compiler) translatePackage(pkg *ssa.Package) {
+	u := &unit{
 		compiler:  c,
 		pkg:       pkg,
 		functions: make(map[*ssa.Function]*LLVMValue),
@@ -32,73 +32,75 @@ func (c *compiler) translateSSA(pkg *ssa.Package) {
 		switch v := m.(type) {
 		case *ssa.Global:
 			llvmType := c.types.ToLLVM(v.Type())
-			name := fmt.Sprintf("%s.%s", pkg.Object.Path(), v.Name())
-			global := llvm.AddGlobal(c.module.Module, llvmType, name)
+			global := llvm.AddGlobal(c.module.Module, llvmType, v.String())
 			global.SetInitializer(llvm.ConstNull(llvmType))
 			value := c.NewValue(global, types.NewPointer(v.Type()))
-			t.globals[v] = value.makePointee()
+			u.globals[v] = value.makePointee()
 		}
 	}
 
 	// Translate functions.
 	for f, _ := range ssa.AllFunctions(pkg.Prog) {
-		t.declareFunction(f)
+		u.declareFunction(f)
 	}
-	for f, _ := range ssa.AllFunctions(pkg.Prog) {
-		t.defineFunction(f)
+	for f, _ := range u.functions {
+		u.defineFunction(f)
 	}
 }
 
 // declareFunction adds a function declaration with the given name
 // and type to the module.
-func (t *translator) declareFunction(f *ssa.Function) {
+func (u *unit) declareFunction(f *ssa.Function) {
 	name := f.Name()
+	// TODO use f.String() for the name, which includes path,
+	// receiver and function name. Runtime type generation
+	// must be changed at the same time.
 	if recv := f.Signature.Recv(); recv != nil {
 		// receiver name includes package
 		name = fmt.Sprintf("%s.%s", recv.Type(), name)
 	} else if f.Pkg != nil {
 		name = fmt.Sprintf("%s.%s", f.Pkg.Object.Path(), name)
 	}
-	llvmFunction := t.module.Module.NamedFunction(name)
-	if llvmFunction.IsNil() {
-		llvmType := t.types.ToLLVM(f.Signature)
-		llvmType = llvmType.StructElementTypes()[0].ElementType()
-		llvmFunction = llvm.AddFunction(t.module.Module, name, llvmType)
-	}
-	fn := t.NewValue(llvmFunction, f.Signature)
-	t.functions[f] = fn
+	llvmType := u.types.ToLLVM(f.Signature)
+	llvmType = llvmType.StructElementTypes()[0].ElementType()
+	llvmFunction := llvm.AddFunction(u.module.Module, name, llvmType)
+	fn := u.NewValue(llvmFunction, f.Signature)
+	u.functions[f] = fn
 }
 
-func (t *translator) defineFunction(f *ssa.Function) {
-	fr := frame{
-		translator: t,
-		blocks:     make([]llvm.BasicBlock, len(f.Blocks)),
-		locals:     make(map[ssa.Value]*LLVMValue),
-		env:        make(map[ssa.Value]*LLVMValue),
+func (u *unit) defineFunction(f *ssa.Function) {
+	// Nothing to do for functions without bodies.
+	if len(f.Blocks) == 0 {
+		return
 	}
 
-	llvmFunction := t.functions[f].LLVMValue()
-	fmt.Println("Define function:", llvmFunction.Name())
+	fr := frame{
+		unit:   u,
+		blocks: make([]llvm.BasicBlock, len(f.Blocks)),
+		env:    make(map[ssa.Value]*LLVMValue),
+	}
+
+	fr.logf("Define function: %s", f.String())
+	llvmFunction := u.functions[f].LLVMValue()
 	for i, param := range f.Params {
-		value := t.NewValue(llvmFunction.Param(i), param.Type())
-		fr.env[param] = value
+		fr.env[param] = u.NewValue(llvmFunction.Param(i), param.Type())
 	}
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
 	}
+
+	// Allocate stack space for locals in the entry block.
+	u.builder.SetInsertPointAtEnd(fr.blocks[0])
+	for _, local := range f.Locals {
+		typ := u.types.ToLLVM(deref(local.Type()))
+		alloca := u.builder.CreateAlloca(typ, local.Name())
+		u.memsetZero(alloca, llvm.SizeOf(typ))
+		value := fr.NewValue(alloca, local.Type())
+		fr.env[local] = value
+	}
+
 	for i, block := range f.Blocks {
-		t.builder.SetInsertPointAtEnd(fr.blocks[i])
-		if i == 0 {
-			// Allocate stack space for locals in the entry block.
-			for _, local := range f.Locals {
-				typ := t.types.ToLLVM(deref(local.Type()))
-				alloca := t.builder.CreateAlloca(typ, local.Name())
-				t.memsetZero(alloca, llvm.SizeOf(typ))
-				value := fr.NewValue(alloca, local.Type())
-				fr.locals[local] = value
-				fr.env[local] = value
-			}
-		}
+		u.builder.SetInsertPointAtEnd(fr.blocks[i])
 		for _, instr := range block.Instrs {
 			fr.instruction(instr)
 		}
@@ -106,7 +108,7 @@ func (t *translator) defineFunction(f *ssa.Function) {
 }
 
 type frame struct {
-	*translator
+	*unit
 	blocks []llvm.BasicBlock
 	locals map[ssa.Value]*LLVMValue
 	env    map[ssa.Value]*LLVMValue
@@ -125,9 +127,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
-		if value, ok := fr.globals[v]; ok {
-			return value
-		}
+		return fr.globals[v]
 	}
 	if value, ok := fr.env[v]; ok {
 		return value
@@ -142,8 +142,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 }
 
 func (fr *frame) instruction(instr ssa.Instruction) {
-	fset := fr.pkg.Prog.Fset
-	fmt.Printf("[%T] %v @ %s\n", instr, instr, fset.Position(instr.Pos()))
+	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
 
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
@@ -153,17 +152,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			value = fr.createTypeMalloc(typ)
 			fr.env[instr] = fr.NewValue(value, instr.Type())
 		} else {
-			value = fr.locals[instr].LLVMValue()
+			value = fr.env[instr].LLVMValue()
 		}
 		fr.memsetZero(value, llvm.SizeOf(typ))
 
 	case *ssa.BinOp:
 		lhs, rhs := fr.value(instr.X), fr.value(instr.Y)
-		result := lhs.BinaryOp(instr.Op, rhs).(*LLVMValue)
-		fr.env[instr] = result
+		fr.env[instr] = lhs.BinaryOp(instr.Op, rhs).(*LLVMValue)
 
 	case *ssa.Call:
-		fn, args, result := fr.prepareCall(&instr.Call)
+		fn, args, result := fr.prepareCall(instr)
 		if result != nil {
 			fr.env[instr] = result
 			return
@@ -201,6 +199,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
+		// TODO: implement nil check and panic.
+		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		ptr := fr.value(instr.X).LLVMValue()
 		fieldptr := fr.builder.CreateStructGEP(ptr, instr.Field, instr.Name())
 		fieldptrtyp := instr.Type()
@@ -224,6 +224,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp)).makePointee()
 
 	case *ssa.IndexAddr:
+		// TODO: implement nil-check and panic.
+		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).LLVMValue()
 		index := fr.value(instr.Index).LLVMValue()
 		var addr llvm.Value
@@ -234,8 +236,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			elemtyp = typ.Elem()
 			x = fr.builder.CreateExtractValue(x, 0, "")
 			addr = fr.builder.CreateGEP(x, []llvm.Value{index}, "")
-		case *types.Pointer:
-			// *array
+		case *types.Pointer: // *array
 			elemtyp = deref(typ).(*types.Array).Elem()
 			addr = fr.builder.CreateGEP(x, []llvm.Value{zero, index}, "")
 		}
@@ -341,7 +342,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 // For builtins that may not be used in go/defer, prepareCall
 // will emits inline code. In this case, prepareCall returns
 // nil for fn and args, and returns a non-nil value for result.
-func (fr *frame) prepareCall(call *ssa.CallCommon) (fn *LLVMValue, args []*LLVMValue, result *LLVMValue) {
+func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*LLVMValue, result *LLVMValue) {
+	call := instr.Common()
 	if call.IsInvoke() {
 		panic("invoke mode unimplemented")
 	}
@@ -400,6 +402,21 @@ func (fr *frame) prepareCall(call *ssa.CallCommon) (fn *LLVMValue, args []*LLVMV
 
 	case "len":
 		return nil, nil, fr.callLen(args[0])
+
+	case "real":
+		return nil, nil, args[0].extractComplexComponent(0)
+
+	case "imag":
+		return nil, nil, args[0].extractComplexComponent(1)
+
+	case "complex":
+		r := args[0].LLVMValue()
+		i := args[1].LLVMValue()
+		typ := instr.Value().Type()
+		cmplx := llvm.Undef(fr.types.ToLLVM(typ))
+		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
+		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
+		return nil, nil, fr.NewValue(cmplx, typ)
 
 	default:
 		panic("unimplemented: " + builtin.Name())

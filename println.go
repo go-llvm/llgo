@@ -155,4 +155,3 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
 	return result
 }
-

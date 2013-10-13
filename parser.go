@@ -5,11 +5,10 @@
 package llgo
 
 import (
-    "fmt"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"sort"
 )
 
 func parseFile(fset *token.FileSet, filename string) (*ast.File, error) {
@@ -19,8 +18,7 @@ func parseFile(fset *token.FileSet, filename string) (*ast.File, error) {
 
 func parseFiles(fset *token.FileSet, filenames []string) ([]*ast.File, error) {
 	filenames = append([]string{}, filenames...)
-	sort.Strings(filenames)
-    var files []*ast.File
+	var files []*ast.File
 	for i, filename := range filenames {
 		if i > 0 && filenames[i-1] == filename {
 			return nil, fmt.Errorf("%q: duplicate file", filename)
@@ -28,8 +26,8 @@ func parseFiles(fset *token.FileSet, filenames []string) ([]*ast.File, error) {
 			if file, err := parseFile(fset, filename); err != nil {
 				return nil, fmt.Errorf("%q: %v", err)
 			} else {
-			    files = append(files, file)
-            }
+				files = append(files, file)
+			}
 		}
 	}
 	return files, nil
