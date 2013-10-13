@@ -208,11 +208,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		if isString(rhs.typ) {
 			switch op {
 			case token.ADD:
-				panic("TODO")
-				//return c.concatenateStrings(lhs, rhs)
+				return c.concatenateStrings(lhs, rhs)
 			case token.EQL, token.LSS, token.GTR, token.LEQ, token.GEQ:
-				panic("TODO")
-				//return c.compareStrings(lhs, rhs, op)
+				return c.compareStrings(lhs, rhs, op)
 			default:
 				panic(fmt.Sprint("Unimplemented operator: ", op))
 			}
@@ -797,7 +795,7 @@ func (v *LLVMValue) interfaceValue() llvm.Value {
 			return llvm.ConstNull(i8ptr)
 		}
 	} else {
-        ptr := c.createTypeMalloc(value.Type())
+		ptr := c.createTypeMalloc(value.Type())
 		c.builder.CreateStore(value, ptr)
 		return c.builder.CreateBitCast(ptr, i8ptr, "")
 	}

@@ -312,7 +312,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		value := fr.value(instr.Val)
 		fr.builder.CreateStore(value.LLVMValue(), addr.LLVMValue())
 
-	//case *ssa.TypeAssert:
+	case *ssa.TypeAssert:
+		x := fr.value(instr.X)
+		if !instr.CommaOk {
+			fr.env[instr] = x.mustConvertI2V(instr.AssertedType)
+		} else {
+			result, ok := x.convertI2V(instr.AssertedType)
+			resultval := result.LLVMValue()
+			okval := ok.LLVMValue()
+			pairtyp := llvm.StructType([]llvm.Type{resultval.Type(), okval.Type()}, false)
+			pair := llvm.Undef(pairtyp)
+			pair = fr.builder.CreateInsertValue(pair, resultval, 0, "")
+			pair = fr.builder.CreateInsertValue(pair, okval, 1, "")
+			fr.env[instr] = fr.NewValue(pair, instr.Type())
+		}
 
 	case *ssa.UnOp:
 		result := fr.value(instr.X).UnaryOp(instr.Op).(*LLVMValue)
