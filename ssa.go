@@ -295,7 +295,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(value, instr.Type())
 
 	//case *ssa.MakeMap:
-	//case *ssa.MakeSlice:
+
+	case *ssa.MakeSlice:
+		length := fr.value(instr.Len)
+		capacity := fr.value(instr.Cap)
+		fr.env[instr] = fr.makeSlice(instr.Type(), length, capacity)
+
 	//case *ssa.MapUpdate:
 	//case *ssa.Next:
 

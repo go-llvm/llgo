@@ -31,33 +31,23 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
-func (c *compiler) makeSlice(elttyp types.Type, length, capacity Value) llvm.Value {
-	var lengthValue llvm.Value
-	if length != nil {
-		lengthValue = length.Convert(types.Typ[types.Int]).LLVMValue()
-	} else {
-		lengthValue = llvm.ConstNull(c.llvmtypes.inttype)
-	}
-
+func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
 	// TODO check capacity >= length
-	capacityValue := lengthValue
-	if capacity != nil {
-		capacityValue = capacity.Convert(types.Typ[types.Int]).LLVMValue()
-	}
+	lengthValue := length.LLVMValue()
+	capacityValue := capacity.LLVMValue()
 
-	eltType := c.types.ToLLVM(elttyp)
-	sizeof := llvm.ConstTruncOrBitCast(llvm.SizeOf(eltType), c.types.inttype)
+	elemType := c.types.ToLLVM(sliceType.Underlying().(*types.Slice).Elem())
+	sizeof := llvm.ConstTruncOrBitCast(llvm.SizeOf(elemType), c.types.inttype)
 	size := c.builder.CreateMul(capacityValue, sizeof, "")
 	mem := c.createMalloc(size)
-	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
+	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(elemType, 0), "")
 	c.memsetZero(mem, size)
 
-	slicetyp := types.NewSlice(elttyp)
-	struct_ := llvm.Undef(c.types.ToLLVM(slicetyp))
-	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
-	struct_ = c.builder.CreateInsertValue(struct_, lengthValue, 1, "")
-	struct_ = c.builder.CreateInsertValue(struct_, capacityValue, 2, "")
-	return struct_
+	slice := llvm.Undef(c.types.ToLLVM(sliceType))
+	slice = c.builder.CreateInsertValue(slice, mem, 0, "")
+	slice = c.builder.CreateInsertValue(slice, lengthValue, 1, "")
+	slice = c.builder.CreateInsertValue(slice, capacityValue, 2, "")
+	return c.NewValue(slice, sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a
