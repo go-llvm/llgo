@@ -63,6 +63,20 @@ func (u *unit) declareFunction(f *ssa.Function) {
 	}
 	llvmType := u.types.ToLLVM(f.Signature)
 	llvmType = llvmType.StructElementTypes()[0].ElementType()
+	if len(f.FreeVars) > 0 {
+		// Add an implicit first argument.
+		returnType := llvmType.ReturnType()
+		paramTypes := llvmType.ParamTypes()
+		vararg := llvmType.IsFunctionVarArg()
+		blockElementTypes := make([]llvm.Type, len(f.FreeVars))
+		for i, fv := range f.FreeVars {
+			blockElementTypes[i] = u.types.ToLLVM(fv.Type())
+		}
+		blockType := llvm.StructType(blockElementTypes, false)
+		blockPtrType := llvm.PointerType(blockType, 0)
+		paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
+		llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
+	}
 	llvmFunction := llvm.AddFunction(u.module.Module, name, llvmType)
 	fn := u.NewValue(llvmFunction, f.Signature)
 	u.functions[f] = fn
@@ -82,15 +96,27 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := u.functions[f].LLVMValue()
+	u.builder.SetInsertPointAtEnd(fr.blocks[0])
+
+	var paramOffset int
+	if len(f.FreeVars) > 0 {
+		// Extract captures from the first implicit parameter.
+		arg0 := llvmFunction.Param(0)
+		for i, fv := range f.FreeVars {
+			addressPtr := u.builder.CreateStructGEP(arg0, i, "")
+			address := u.builder.CreateLoad(addressPtr, "")
+			fr.env[fv] = u.NewValue(address, fv.Type())
+		}
+		paramOffset++
+	}
 	for i, param := range f.Params {
-		fr.env[param] = u.NewValue(llvmFunction.Param(i), param.Type())
+		fr.env[param] = u.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
 	}
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
 	}
 
 	// Allocate stack space for locals in the entry block.
-	u.builder.SetInsertPointAtEnd(fr.blocks[0])
 	for _, local := range f.Locals {
 		typ := u.types.ToLLVM(deref(local.Type()))
 		alloca := u.builder.CreateAlloca(typ, local.Name())
@@ -248,7 +274,14 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	//case *ssa.Lookup:
 	//case *ssa.MakeChan:
-	//case *ssa.MakeClosure:
+
+	case *ssa.MakeClosure:
+		fn := fr.value(instr.Fn)
+		bindings := make([]*LLVMValue, len(instr.Bindings))
+		for i, binding := range instr.Bindings {
+			bindings[i] = fr.value(binding)
+		}
+		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
 		iface := instr.Type().Underlying().(*types.Interface)
