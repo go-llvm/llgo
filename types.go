@@ -11,17 +11,6 @@ import (
 	"go/ast"
 )
 
-// XXX the below function is a clone of the one from llgo/types.
-// this is used to check whether a "function call" is in fact a
-// type conversion.
-
-func unparen(x ast.Expr) ast.Expr {
-	if p, ok := x.(*ast.ParenExpr); ok {
-		return unparen(p.X)
-	}
-	return x
-}
-
 func deref(t types.Type) types.Type {
 	if p, ok := t.(*types.Pointer); ok {
 		return p.Elem()
@@ -61,30 +50,6 @@ func (c *compiler) exportRuntimeTypes() {
 		c.types.ToRuntime(typ)
 		c.types.ToRuntime(types.NewPointer(typ))
 	}
-}
-
-func fieldIndex(s *types.Struct, name string) int {
-	for i := 0; i < s.NumFields(); i++ {
-		f := s.Field(i)
-		if f.Name() == name {
-			return i
-		}
-	}
-	return -1
-}
-
-type objectsByName []types.Object
-
-func (o objectsByName) Len() int {
-	return len(o)
-}
-
-func (o objectsByName) Less(i, j int) bool {
-	return o[i].Name() < o[j].Name()
-}
-
-func (o objectsByName) Swap(i, j int) {
-	o[i], o[j] = o[j], o[i]
 }
 
 type TypeStringer struct{}

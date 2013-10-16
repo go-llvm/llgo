@@ -6,7 +6,6 @@ package llgo
 
 import (
 	"fmt"
-	"go/ast"
 	"go/token"
 	"log"
 	"strings"
@@ -31,7 +30,6 @@ func (m Module) Dispose() {
 	}
 }
 
-// TODO get rid of this, change compiler to Compiler.
 type Compiler interface {
 	Compile(filenames []string, importpath string) (*Module, error)
 	Dispose()
@@ -51,12 +49,6 @@ type compiler struct {
 	importer      *goimporter.Importer
 	exportedtypes []types.Type
 
-	// lastlabel, if non-nil, is a LabeledStmt immediately
-	// preceding an unprocessed ForStmt, SwitchStmt or SelectStmt.
-	// Upon processing the statement, the label data will be updated,
-	// and forlabel set to nil.
-	lastlabel *ast.Ident
-
 	*FunctionCache
 	llvmtypes *LLVMTypeMap
 	types     *TypeMap
@@ -73,16 +65,6 @@ type compiler struct {
 
 	debug_context []llvm.DebugDescriptor
 	debug_info    *llvm.DebugInfo
-}
-
-func (c *compiler) archinfo() (intsize, ptrsize int64) {
-	ptrsize = int64(c.target.PointerSize())
-	if ptrsize >= 8 {
-		intsize = 8
-	} else {
-		intsize = 4
-	}
-	return
 }
 
 ///////////////////////////////////////////////////////////////////////////////

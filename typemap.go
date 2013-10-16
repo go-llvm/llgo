@@ -90,7 +90,7 @@ func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 	}
 }
 
-func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *FunctionCache /*, r Resolver*/) *TypeMap {
+func NewTypeMap(llvmtm *LLVMTypeMap, module llvm.Module, pkgpath string, c *FunctionCache) *TypeMap {
 	tm := &TypeMap{
 		LLVMTypeMap: llvmtm,
 		module:      module,

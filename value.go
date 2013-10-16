@@ -9,14 +9,8 @@ import (
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 	"go/token"
 )
-
-// Resolver is an interface for resolving AST objects to values.
-type Resolver interface {
-	Resolve(*ast.Ident) Value
-}
 
 // Value is an interface for representing values returned by Go expressions.
 type Value interface {
