@@ -219,15 +219,10 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		importpath = pkgname
 	}
 	pkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
-	if err = program.CreatePackages(compiler.importer); err != nil {
+	if pkginfo.Err != nil {
 		return nil, err
 	}
-	var mainpkg *ssa.Package
-	for _, pkg := range program.AllPackages() {
-		if pkg.Object == pkginfo.Pkg {
-			mainpkg = pkg
-		}
-	}
+	mainpkg := program.CreatePackage(pkginfo)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke

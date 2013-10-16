@@ -14,17 +14,15 @@ import (
 
 type unit struct {
 	*compiler
-	pkg       *ssa.Package
-	functions map[*ssa.Function]*LLVMValue
-	globals   map[ssa.Value]*LLVMValue
+	pkg     *ssa.Package
+	globals map[ssa.Value]*LLVMValue
 }
 
 func (c *compiler) translatePackage(pkg *ssa.Package) {
 	u := &unit{
-		compiler:  c,
-		pkg:       pkg,
-		functions: make(map[*ssa.Function]*LLVMValue),
-		globals:   make(map[ssa.Value]*LLVMValue),
+		compiler: c,
+		pkg:      pkg,
+		globals:  make(map[ssa.Value]*LLVMValue),
 	}
 
 	// Initialize global storage.
@@ -40,10 +38,11 @@ func (c *compiler) translatePackage(pkg *ssa.Package) {
 	}
 
 	// Translate functions.
-	for f, _ := range ssa.AllFunctions(pkg.Prog) {
+	functions := ssa.AllFunctions(pkg.Prog)
+	for f, _ := range functions {
 		u.declareFunction(f)
 	}
-	for f, _ := range u.functions {
+	for f, _ := range functions {
 		u.defineFunction(f)
 	}
 }
@@ -79,7 +78,7 @@ func (u *unit) declareFunction(f *ssa.Function) {
 	}
 	llvmFunction := llvm.AddFunction(u.module.Module, name, llvmType)
 	fn := u.NewValue(llvmFunction, f.Signature)
-	u.functions[f] = fn
+	u.globals[f] = fn
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
@@ -95,7 +94,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := u.functions[f].LLVMValue()
+	llvmFunction := u.globals[f].LLVMValue()
 	u.builder.SetInsertPointAtEnd(fr.blocks[0])
 
 	var paramOffset int
@@ -119,7 +118,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// Allocate stack space for locals in the entry block.
 	for _, local := range f.Locals {
 		typ := u.types.ToLLVM(deref(local.Type()))
-		alloca := u.builder.CreateAlloca(typ, local.Name())
+		alloca := u.builder.CreateAlloca(typ, local.Comment)
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
 		fr.env[local] = value
@@ -149,7 +148,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case nil:
 		return nil
 	case *ssa.Function:
-		return fr.functions[v]
+		return fr.globals[v]
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
@@ -192,11 +191,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			fr.env[instr] = result
 			return
 		}
-		if instr.Call.IsInvoke() {
-			panic("TODO")
-		}
 		const hasdefers = false // TODO
-		result = fr.createCall(fn, args, instr.Call.HasEllipsis, hasdefers)
+		result = fr.createCall(fn, args, hasdefers)
 		fr.env[instr] = result
 
 	//case *ssa.Builtin:
@@ -287,6 +283,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		iface := instr.Type().Underlying().(*types.Interface)
 		receiver := fr.value(instr.X)
 		value := llvm.Undef(fr.types.ToLLVM(iface))
+		fmt.Println("MakeInterface(", iface, "):", value.Type())
 		rtype := fr.types.ToRuntime(receiver.Type())
 		rtype = fr.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
 		value = fr.builder.CreateInsertValue(value, rtype, 0, "")
@@ -309,7 +306,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Phi:
 		typ := instr.Type()
-		phi := fr.builder.CreatePHI(fr.types.ToLLVM(typ), instr.Name())
+		phi := fr.builder.CreatePHI(fr.types.ToLLVM(typ), instr.Comment)
 		fr.env[instr] = fr.NewValue(phi, typ)
 		values := make([]llvm.Value, len(instr.Edges))
 		blocks := make([]llvm.BasicBlock, len(instr.Edges))
@@ -382,13 +379,39 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 // nil for fn and args, and returns a non-nil value for result.
 func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*LLVMValue, result *LLVMValue) {
 	call := instr.Common()
-	if call.IsInvoke() {
-		panic("invoke mode unimplemented")
-	}
-
 	args = make([]*LLVMValue, len(call.Args))
 	for i, arg := range call.Args {
 		args[i] = fr.value(arg)
+	}
+
+	// "Invoke mode" means that
+	if call.IsInvoke() {
+		panic("invoke mode unimplemented")
+		// TODO cache sorted function indices?
+		// Selection.Index() isn't useful, as
+		// that's an index into the sequence in
+		// declaration order, not name order.
+		recv := fr.value(call.Value)
+		recvType := recv.Type()
+		methods := recvType.MethodSet()
+		var selection *types.Selection
+		var index int
+		for i := 0; i < methods.Len(); i++ {
+			selection = methods.At(i)
+			if selection.Obj() == call.Method {
+				index = i
+				break
+			}
+		}
+		fr.logf("indexof %s: %d", call.Method, index)
+		iface := recv.LLVMValue()
+		fmt.Println(recv.Type(), "/", iface.Type())
+		llvmFunction := fr.builder.CreateExtractValue(iface, index+2, "")
+		fn = fr.NewValue(llvmFunction, call.Method.Type())
+		return fn, args, nil
+		//fr.value(fr.pkg.Prog.Method(selection))
+		//methods := call.
+		//fr.logf("%v..%v", call.Value().Type())
 	}
 
 	switch call.Value.(type) {

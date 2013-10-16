@@ -32,10 +32,10 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
 func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
-	// TODO check capacity >= length
 	lengthValue := length.LLVMValue()
 	capacityValue := capacity.LLVMValue()
 
+	// TODO move this into the runtime, do parameter checks.
 	elemType := c.types.ToLLVM(sliceType.Underlying().(*types.Slice).Elem())
 	sizeof := llvm.ConstTruncOrBitCast(llvm.SizeOf(elemType), c.types.inttype)
 	size := c.builder.CreateMul(capacityValue, sizeof, "")

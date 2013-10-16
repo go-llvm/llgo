@@ -10,22 +10,20 @@ import (
 )
 
 func (c *compiler) callCap(arg *LLVMValue) *LLVMValue {
-	var capvalue llvm.Value
+	var v llvm.Value
 	switch typ := arg.Type().Underlying().(type) {
 	case *types.Array:
-		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
+		v = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
 	case *types.Pointer:
 		atyp := typ.Elem().Underlying().(*types.Array)
-		capvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
+		v = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
-		sliceval := arg.LLVMValue()
-		capvalue = c.builder.CreateExtractValue(sliceval, 2, "")
+		v = c.builder.CreateExtractValue(arg.LLVMValue(), 2, "")
 	case *types.Chan:
-		chanval := arg.LLVMValue()
 		f := c.RuntimeFunction("runtime.chancap", "func(c uintptr) int")
-		capvalue = c.builder.CreateCall(f, []llvm.Value{chanval}, "")
+		v = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	}
-	return c.NewValue(capvalue, types.Typ[types.Int])
+	return c.NewValue(v, types.Typ[types.Int])
 }
 
 func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
@@ -37,20 +35,17 @@ func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
 		atyp := typ.Elem().Underlying().(*types.Array)
 		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
-		sliceval := arg.LLVMValue()
-		lenvalue = c.builder.CreateExtractValue(sliceval, 1, "")
+		lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 	case *types.Map:
-		mapval := arg.LLVMValue()
 		f := c.RuntimeFunction("runtime.maplen", "func(m uintptr) int")
-		lenvalue = c.builder.CreateCall(f, []llvm.Value{mapval}, "")
+		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	case *types.Basic:
 		if isString(typ) {
 			lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 		}
 	case *types.Chan:
-		chanval := arg.LLVMValue()
 		f := c.RuntimeFunction("runtime.chanlen", "func(c uintptr) int")
-		lenvalue = c.builder.CreateCall(f, []llvm.Value{chanval}, "")
+		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	}
 	return c.NewValue(lenvalue, types.Typ[types.Int])
 }

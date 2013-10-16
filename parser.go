@@ -17,18 +17,13 @@ func parseFile(fset *token.FileSet, filename string) (*ast.File, error) {
 }
 
 func parseFiles(fset *token.FileSet, filenames []string) ([]*ast.File, error) {
-	filenames = append([]string{}, filenames...)
-	var files []*ast.File
+	files := make([]*ast.File, len(filenames))
 	for i, filename := range filenames {
-		if i > 0 && filenames[i-1] == filename {
-			return nil, fmt.Errorf("%q: duplicate file", filename)
-		} else {
-			if file, err := parseFile(fset, filename); err != nil {
-				return nil, fmt.Errorf("%q: %v", err)
-			} else {
-				files = append(files, file)
-			}
+		file, err := parseFile(fset, filename)
+		if err != nil {
+			return nil, fmt.Errorf("%q: %v", filename, err)
 		}
+		files[i] = file
 	}
 	return files, nil
 }

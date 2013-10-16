@@ -248,7 +248,7 @@ func (tm *LLVMTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
 func (tm *LLVMTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
 	typ, ok := tm.types[tstr]
 	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed("")
+		typ = llvm.GlobalContext().StructCreateNamed(tstr)
 		tm.types[tstr] = typ
 		elements := []llvm.Type{
 			llvm.PointerType(tm.ToLLVM(s.Elem()), 0),
@@ -382,6 +382,7 @@ func (tm *LLVMTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) nameLLVMType(n *types.Named) llvm.Type {
+	// TODO propagate name through to underlying type.
 	return tm.ToLLVM(n.Underlying())
 }
 
@@ -813,57 +814,57 @@ func (tm *TypeMap) uncommonType(n *types.Named, ptr bool) llvm.Value {
 	pkgpathPtr := tm.globalStringPtr(path)
 	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
 
-    /*
-	methodset := tm.functions.methods(n)
-	methodfuncs := methodset.nonptr
-	if ptr {
-		methodfuncs = methodset.ptr
-	}
-
-	// Store methods.
-	methods := make([]llvm.Value, len(methodfuncs))
-	for i, mfunc := range methodfuncs {
-		ftyp := mfunc.Type().(*types.Signature)
-
-		method := llvm.ConstNull(tm.runtimeMethod)
-		name := tm.globalStringPtr(mfunc.Name())
-		name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
-		// name
-		method = llvm.ConstInsertValue(method, name, []uint32{0})
-		// pkgPath
-		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
-		// mtyp (method type, no receiver)
-		{
-			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
-			mtyp := tm.ToRuntime(ftyp)
-			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
+	/*
+		methodset := tm.functions.methods(n)
+		methodfuncs := methodset.nonptr
+		if ptr {
+			methodfuncs = methodset.ptr
 		}
-		// typ (function type, with receiver)
-		typ := tm.ToRuntime(ftyp)
-		method = llvm.ConstInsertValue(method, typ, []uint32{3})
 
-			// tfn (standard method/function pointer for plain method calls)
-			tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
-			tfn = llvm.ConstExtractValue(tfn, []uint32{0})
-			tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+		// Store methods.
+		methods := make([]llvm.Value, len(methodfuncs))
+		for i, mfunc := range methodfuncs {
+			ftyp := mfunc.Type().(*types.Signature)
 
-			// ifn (single-word receiver function pointer for interface calls)
-			ifn := tfn
-			if !ptr && tm.Sizeof(ftyp.Recv().Type()) > int64(tm.target.PointerSize()) {
-				mfunc := methodset.lookup(mfunc.Name(), true)
-				ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
-				ifn = llvm.ConstExtractValue(ifn, []uint32{0})
-				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+			method := llvm.ConstNull(tm.runtimeMethod)
+			name := tm.globalStringPtr(mfunc.Name())
+			name = llvm.ConstBitCast(name, tm.runtimeMethod.StructElementTypes()[0])
+			// name
+			method = llvm.ConstInsertValue(method, name, []uint32{0})
+			// pkgPath
+			method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
+			// mtyp (method type, no receiver)
+			{
+				ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
+				mtyp := tm.ToRuntime(ftyp)
+				method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
 			}
+			// typ (function type, with receiver)
+			typ := tm.ToRuntime(ftyp)
+			method = llvm.ConstInsertValue(method, typ, []uint32{3})
 
-			method = llvm.ConstInsertValue(method, ifn, []uint32{4})
-			method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods[i] = method
-	}
-	methodsSliceType := tm.runtimeUncommonType.StructElementTypes()[2]
-	methodsSlice := tm.makeSlice(methods, methodsSliceType)
-	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, methodsSlice, []uint32{2})
-    */
+				// tfn (standard method/function pointer for plain method calls)
+				tfn := tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+				tfn = llvm.ConstExtractValue(tfn, []uint32{0})
+				tfn = llvm.ConstPtrToInt(tfn, tm.target.IntPtrType())
+
+				// ifn (single-word receiver function pointer for interface calls)
+				ifn := tfn
+				if !ptr && tm.Sizeof(ftyp.Recv().Type()) > int64(tm.target.PointerSize()) {
+					mfunc := methodset.lookup(mfunc.Name(), true)
+					ifn = tm.resolver.Resolve(tm.functions.objectdata[mfunc].Ident).LLVMValue()
+					ifn = llvm.ConstExtractValue(ifn, []uint32{0})
+					ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
+				}
+
+				method = llvm.ConstInsertValue(method, ifn, []uint32{4})
+				method = llvm.ConstInsertValue(method, tfn, []uint32{5})
+			methods[i] = method
+		}
+		methodsSliceType := tm.runtimeUncommonType.StructElementTypes()[2]
+		methodsSlice := tm.makeSlice(methods, methodsSliceType)
+		uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, methodsSlice, []uint32{2})
+	*/
 	return uncommonTypeInit
 }
 
