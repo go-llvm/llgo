@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
+	"code.google.com/p/go.tools/go/exact"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -534,11 +535,18 @@ func (c *compiler) VisitTypeAssertExpr(expr *ast.TypeAssertExpr) Value {
 
 func (c *compiler) VisitExpr(expr ast.Expr) Value {
 	c.setDebugLine(expr.Pos())
+	
 	// Before all else, check if we've got a constant expression.
 	// go/types performs constant folding, and we store the value
 	// alongside the expression's type.
 	if constval := c.typeinfo.Values[expr]; constval != nil {
 		return c.NewConstValue(constval, c.typeinfo.Types[expr])
+	}
+	// nil-literals are parsed to Ident-nodes for some reason,
+	// treat them like constant values here.
+	// TODO nil literals should be represented more appropriately.
+	if identval, valid := expr.(*ast.Ident); valid && identval.Name == "nil" {
+		return c.NewConstValue(exact.MakeUnknown(), c.typeinfo.Types[expr])
 	}
 
 	switch x := expr.(type) {
