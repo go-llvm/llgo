@@ -198,10 +198,8 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	}
 	impcfg := &goimporter.Config{
 		TypeChecker: types.Config{
-			Import:    (&importer{compiler: compiler}).Import,
-			Sizeof:    compiler.llvmtypes.Sizeof,
-			Alignof:   compiler.llvmtypes.Alignof,
-			Offsetsof: compiler.llvmtypes.Offsetsof,
+			Import: (&importer{compiler: compiler}).Import,
+			Sizes:  compiler.llvmtypes,
 		},
 		Build: buildctx,
 	}
