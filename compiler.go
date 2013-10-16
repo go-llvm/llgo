@@ -136,7 +136,7 @@ func (c *compiler) Resolve(ident *ast.Ident) Value {
 		value = c.NewConstValue(obj.Val(), obj.Type())
 
 	default:
-		panic(fmt.Sprintf("unreachable (%T)", obj))
+		panic(fmt.Sprintf("Could not handle type in compiler.Resolve(): (%T)", obj))
 	}
 
 	data.Value = value
