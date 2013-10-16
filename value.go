@@ -56,7 +56,8 @@ func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
 
 func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	switch {
-	case v.Kind() == exact.Nil:
+	case v.Kind() == exact.Unknown:
+		// TODO nil literals should be represented more appropriately once the exact-package supports it.
 		llvmtyp := c.types.ToLLVM(typ)
 		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
 
