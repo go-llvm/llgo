@@ -21,9 +21,6 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 	var errors string
 	var imp = importer{compiler: c}
 	config := &types.Config{
-		Sizeof:    c.llvmtypes.Sizeof,
-		Alignof:   c.llvmtypes.Alignof,
-		Offsetsof: c.llvmtypes.Offsetsof,
 		Error: func(err error) {
 			if errors != "" {
 				errors += "\n"
@@ -31,6 +28,7 @@ func (c *compiler) typecheck(pkgpath string, fset *token.FileSet, files []*ast.F
 			errors += err.Error()
 		},
 		Import: imp.Import,
+		Sizes:  c.llvmtypes,
 	}
 
 	var info types.Info

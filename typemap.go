@@ -22,6 +22,7 @@ type ExprTypeInfo struct {
 
 type LLVMTypeMap struct {
 	TypeStringer
+	types.StdSizes
 	target  llvm.TargetData
 	inttype llvm.Type
 
@@ -80,7 +81,11 @@ func NewLLVMTypeMap(target llvm.TargetData) *LLVMTypeMap {
 		inttype = llvm.Int32Type()
 	}
 	return &LLVMTypeMap{
-		target:  target,
+		target: target,
+		StdSizes: types.StdSizes{
+			WordSize: int64(target.PointerSize()),
+			MaxAlign: 8,
+		},
 		types:   make(map[string]llvm.Type),
 		inttype: inttype,
 	}
@@ -399,7 +404,7 @@ func (tm *LLVMTypeMap) Alignof(typ types.Type) int64 {
 		case types.Uintptr, types.UnsafePointer, types.String:
 			return int64(tm.target.PointerSize())
 		}
-		return types.DefaultAlignof(typ)
+		return tm.StdSizes.Alignof(typ)
 	case *types.Struct:
 		max := int64(1)
 		for i := 0; i < typ.NumFields(); i++ {
@@ -422,10 +427,8 @@ func (tm *LLVMTypeMap) Sizeof(typ types.Type) int64 {
 			return int64(tm.target.TypeAllocSize(tm.inttype))
 		case types.Uintptr, types.UnsafePointer:
 			return int64(tm.target.PointerSize())
-		case types.String:
-			return 2 * int64(tm.target.PointerSize())
 		}
-		return types.DefaultSizeof(typ)
+		return tm.StdSizes.Sizeof(typ)
 	case *types.Array:
 		eltsize := tm.Sizeof(typ.Elem())
 		eltalign := tm.Alignof(typ.Elem())
