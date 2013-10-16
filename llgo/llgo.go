@@ -176,7 +176,7 @@ func computeTriple() string {
 
 func initCompiler() (llgo.Compiler, error) {
 	opts := llgo.CompilerOptions{TargetTriple: computeTriple()}
-	if *trace {
+	if *trace || os.Getenv("LLGO_TRACE") == "1" {
 		opts.Logger = log.New(os.Stderr, "", 0)
 	}
 	opts.GenerateDebug = *generateDebug
