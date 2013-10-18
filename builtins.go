@@ -49,3 +49,20 @@ func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
 	}
 	return c.NewValue(lenvalue, types.Typ[types.Int])
 }
+
+// callAppend takes two slices of the same type, and yields
+// the result of appending the second to the first.
+func (c *compiler) callAppend(a, b *LLVMValue) *LLVMValue {
+	f := c.RuntimeFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
+	i8slice := f.Type().ElementType().ReturnType()
+	lla := a.LLVMValue()
+	llaType := lla.Type()
+	runtimeType := c.types.ToRuntime(a.Type())
+	args := []llvm.Value{
+		c.builder.CreatePtrToInt(runtimeType, c.target.IntPtrType(), ""),
+		c.coerceSlice(lla, i8slice),
+		c.coerceSlice(b.LLVMValue(), i8slice),
+	}
+	result := c.builder.CreateCall(f, args, "")
+	return c.NewValue(c.coerceSlice(result, llaType), a.Type())
+}

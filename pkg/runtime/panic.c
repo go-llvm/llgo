@@ -21,7 +21,7 @@ void __cxa_throw(void *exc, void *typeinfo, void (*dest)(void*)) __attribute__((
 // runtime functions
 void panic(struct Eface error)
 		LLGO_ASM_EXPORT("runtime.panic_") __attribute__((noreturn));
-void recover(int32_t indirect, struct Eface *error)
+struct Eface recover(int32_t indirect)
 	LLGO_ASM_EXPORT("runtime.recover") __attribute__((noinline));
 void pushdefer(struct Func)
 	LLGO_ASM_EXPORT("runtime.pushdefer") __attribute__((noinline));
@@ -37,10 +37,10 @@ void panic(struct Eface error) {
 }
 
 struct Panic* current_panic() {
-    return tlspanic;
+	return tlspanic;
 }
 
-void recover(int32_t indirect, struct Eface *error) {
+struct Eface recover(int32_t indirect) {
 	// (valid) call stack:
 	//     recover
 	//     deferred function
@@ -49,18 +49,21 @@ void recover(int32_t indirect, struct Eface *error) {
 	//     guardedcall0
 	//     run_defers
 	//     catch-site
+	struct Eface value;
 	int depth = 5 + (indirect ? 1 : 0);
 	if (tlspanic && tlsdefer && tlsdefer->caller == runtime_caller_region(depth)) {
 		struct Panic *p = tlspanic;
-		memcpy(error, &p->value, sizeof(struct Eface));
-	    while (tlspanic) {
-	        p = tlspanic->next;
-	        free(tlspanic);
-	        tlspanic = p;
-	    }
-		return;
+		struct Eface value = p->value;
+		while (tlspanic) {
+			p = tlspanic->next;
+			free(tlspanic);
+			tlspanic = p;
+		}
+		return value;
+	} else {
+		value.type = value.data = (void*)0;
+		return value;
 	}
-	memset(error, 0, sizeof(struct Eface));
 }
 
 void pushdefer(struct Func f) {
@@ -75,10 +78,10 @@ void rundefers(void) {
 	// FIXME cater for recursive calls.
 	const uintptr_t caller = runtime_caller_region(1);
 	for (; tlsdefer && tlsdefer->caller == caller;) {
-	    struct Defer *d = tlsdefer;
-	    guardedcall0(d->f);
-	    tlsdefer = tlsdefer->next;
-	    free(d);
+		struct Defer *d = tlsdefer;
+		guardedcall0(d->f);
+		tlsdefer = tlsdefer->next;
+		free(d);
 	}
 	if (tlspanic) {
 		__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);

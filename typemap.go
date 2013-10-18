@@ -298,79 +298,72 @@ func (tm *LLVMTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 }
 
 func (tm *LLVMTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
-	typ, ok := tm.types[tstr]
-	if !ok {
-		// If there's a receiver change the receiver to an
-		// additional (first) parameter, and take the value of
-		// the resulting signature instead.
-		var param_types []llvm.Type
-		if recv := f.Recv(); recv != nil {
-			if _, ok := recv.Type().Underlying().(*types.Interface); !ok {
-				params := f.Params()
-				paramvars := make([]*types.Var, int(params.Len()+1))
-				paramvars[0] = recv
-				for i := 0; i < int(params.Len()); i++ {
-					paramvars[i+1] = params.At(i)
-				}
-				params = types.NewTuple(paramvars...)
-				f := types.NewSignature(nil, nil, params, f.Results(), f.IsVariadic())
-				return tm.ToLLVM(f)
-			}
-		}
-
-		typ = llvm.GlobalContext().StructCreateNamed("")
-		tm.types[tstr] = typ
-
-		params := f.Params()
-		nparams := int(params.Len())
-		for i := 0; i < nparams; i++ {
-			llvmtyp := tm.ToLLVM(params.At(i).Type())
-			param_types = append(param_types, llvmtyp)
-		}
-
-		var return_type llvm.Type
-		results := f.Results()
-		switch nresults := int(results.Len()); nresults {
-		case 0:
-			return_type = llvm.VoidType()
-		case 1:
-			return_type = tm.ToLLVM(results.At(0).Type())
-		default:
-			elements := make([]llvm.Type, nresults)
-			for i := range elements {
-				result := results.At(i)
-				elements[i] = tm.ToLLVM(result.Type())
-			}
-			return_type = llvm.StructType(elements, false)
-		}
-
-		fntyp := llvm.FunctionType(return_type, param_types, false)
-		fnptrtyp := llvm.PointerType(fntyp, 0)
-		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-		elements := []llvm.Type{fnptrtyp, i8ptr} // func, closure
-		typ.StructSetBody(elements, false)
+	if typ, ok := tm.types[tstr]; ok {
+		return typ
 	}
+
+	// If there's a receiver change the receiver to an
+	// additional (first) parameter, and take the value of
+	// the resulting signature instead.
+	var param_types []llvm.Type
+	if recv := f.Recv(); recv != nil {
+		params := f.Params()
+		paramvars := make([]*types.Var, int(params.Len()+1))
+		paramvars[0] = recv
+		for i := 0; i < int(params.Len()); i++ {
+			paramvars[i+1] = params.At(i)
+		}
+		params = types.NewTuple(paramvars...)
+		f := types.NewSignature(nil, nil, params, f.Results(), f.IsVariadic())
+		return tm.ToLLVM(f)
+	}
+
+	typ := llvm.GlobalContext().StructCreateNamed("")
+	tm.types[tstr] = typ
+
+	params := f.Params()
+	nparams := int(params.Len())
+	for i := 0; i < nparams; i++ {
+		llvmtyp := tm.ToLLVM(params.At(i).Type())
+		param_types = append(param_types, llvmtyp)
+	}
+
+	var return_type llvm.Type
+	results := f.Results()
+	switch nresults := int(results.Len()); nresults {
+	case 0:
+		return_type = llvm.VoidType()
+	case 1:
+		return_type = tm.ToLLVM(results.At(0).Type())
+	default:
+		elements := make([]llvm.Type, nresults)
+		for i := range elements {
+			result := results.At(i)
+			elements[i] = tm.ToLLVM(result.Type())
+		}
+		return_type = llvm.StructType(elements, false)
+	}
+
+	fntyp := llvm.FunctionType(return_type, param_types, false)
+	fnptrtyp := llvm.PointerType(fntyp, 0)
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	elements := []llvm.Type{fnptrtyp, i8ptr} // func, closure
+	typ.StructSetBody(elements, false)
 	return typ
 }
 
 func (tm *LLVMTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.Type {
-	typ, ok := tm.types[tstr]
-	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed("")
-		tm.types[tstr] = typ
-		valptr_type := llvm.PointerType(llvm.Int8Type(), 0)
-		typptr_type := valptr_type // runtimeType may not be defined yet
-		elements := make([]llvm.Type, 2+i.NumMethods())
-		elements[0] = typptr_type // type
-		elements[1] = valptr_type // value
-
-		methods := i.MethodSet()
-		for n := 0; n < methods.Len(); n++ {
-			fntype := methods.At(n).Type()
-			elements[n+2] = tm.ToLLVM(fntype).StructElementTypes()[0]
-		}
-		typ.StructSetBody(elements, false)
+	if typ, ok := tm.types[tstr]; ok {
+		return typ
 	}
+	// interface{} is represented as {type, value},
+	// and non-empty interfaces are represented as {itab, value}.
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	rtypeType := i8ptr
+	valueType := i8ptr
+	typ := llvm.GlobalContext().StructCreateNamed(tstr)
+	typ.StructSetBody([]llvm.Type{rtypeType, valueType}, false)
+	tm.types[tstr] = typ
 	return typ
 }
 

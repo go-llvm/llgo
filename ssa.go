@@ -77,8 +77,12 @@ func (u *unit) declareFunction(f *ssa.Function) {
 		llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
 	}
 	llvmFunction := llvm.AddFunction(u.module.Module, name, llvmType)
-	fn := u.NewValue(llvmFunction, f.Signature)
-	u.globals[f] = fn
+	u.globals[f] = u.NewValue(llvmFunction, f.Signature)
+	// Functions that call recover must not be inlined, or we
+	// can't tell whether the recover call is valid at runtime.
+	if f.Recover != nil {
+		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
+	}
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
@@ -114,6 +118,9 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
 	}
+	if f.Recover != nil {
+		fr.recoverBlock = llvm.AddBasicBlock(llvmFunction, f.Recover.Comment)
+	}
 
 	// Allocate stack space for locals in the entry block.
 	for _, local := range f.Locals {
@@ -125,18 +132,26 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	for i, block := range f.Blocks {
-		u.builder.SetInsertPointAtEnd(fr.blocks[i])
-		for _, instr := range block.Instrs {
-			fr.instruction(instr)
-		}
+		fr.translateBlock(block, fr.blocks[i])
+	}
+	if f.Recover != nil {
+		fr.translateBlock(f.Recover, fr.recoverBlock)
 	}
 }
 
 type frame struct {
 	*unit
-	blocks []llvm.BasicBlock
-	locals map[ssa.Value]*LLVMValue
-	env    map[ssa.Value]*LLVMValue
+	blocks       []llvm.BasicBlock
+	recoverBlock llvm.BasicBlock
+	locals       map[ssa.Value]*LLVMValue
+	env          map[ssa.Value]*LLVMValue
+}
+
+func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
+	fr.builder.SetInsertPointAtEnd(llb)
+	for _, instr := range b.Instrs {
+		fr.instruction(instr)
+	}
 }
 
 func (fr *frame) block(b *ssa.BasicBlock) llvm.BasicBlock {
@@ -196,7 +211,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = result
 
 	//case *ssa.Builtin:
-	//case *ssa.ChangeInterface:
+
+	case *ssa.ChangeInterface:
+		// TODO convI2I, convI2E
+		lliface := llvm.ConstNull(fr.types.ToLLVM(instr.Type()))
+		fr.env[instr] = fr.NewValue(lliface, instr.Type())
 
 	case *ssa.ChangeType:
 		// TODO refactor Convert
@@ -206,7 +225,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)
 
 	//case *ssa.DebugRef:
-	//case *ssa.Defer:
+
+	case *ssa.Defer:
+		// TODO: implement defer; requires synthesised function
+		// for loading arg struct and calling function.
 
 	case *ssa.Extract:
 		tuple := fr.value(instr.Tuple).LLVMValue()
@@ -283,12 +305,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		iface := instr.Type().Underlying().(*types.Interface)
 		receiver := fr.value(instr.X)
 		value := llvm.Undef(fr.types.ToLLVM(iface))
-		fmt.Println("MakeInterface(", iface, "):", value.Type())
 		rtype := fr.types.ToRuntime(receiver.Type())
 		rtype = fr.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
 		value = fr.builder.CreateInsertValue(value, rtype, 0, "")
 		value = fr.builder.CreateInsertValue(value, receiver.interfaceValue(), 1, "")
-		// TODO methods
+		// TODO convE2I
 		fr.env[instr] = fr.NewValue(value, instr.Type())
 
 	//case *ssa.MakeMap:
@@ -303,6 +324,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO
+		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
 		typ := instr.Type()
@@ -333,7 +355,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			fr.builder.CreateAggregateRet(values)
 		}
 
-	//case *ssa.RunDefers:
+	case *ssa.RunDefers:
+		rundefers := fr.RuntimeFunction("runtime.rundefers", "func()")
+		fr.builder.CreateCall(rundefers, nil, "")
+
 	//case *ssa.Select:
 	//case *ssa.Send:
 
@@ -384,34 +409,9 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		args[i] = fr.value(arg)
 	}
 
-	// "Invoke mode" means that
 	if call.IsInvoke() {
-		panic("invoke mode unimplemented")
-		// TODO cache sorted function indices?
-		// Selection.Index() isn't useful, as
-		// that's an index into the sequence in
-		// declaration order, not name order.
-		recv := fr.value(call.Value)
-		recvType := recv.Type()
-		methods := recvType.MethodSet()
-		var selection *types.Selection
-		var index int
-		for i := 0; i < methods.Len(); i++ {
-			selection = methods.At(i)
-			if selection.Obj() == call.Method {
-				index = i
-				break
-			}
-		}
-		fr.logf("indexof %s: %d", call.Method, index)
-		iface := recv.LLVMValue()
-		fmt.Println(recv.Type(), "/", iface.Type())
-		llvmFunction := fr.builder.CreateExtractValue(iface, index+2, "")
-		fn = fr.NewValue(llvmFunction, call.Method.Type())
+		fn := fr.interfaceMethod(fr.value(call.Value), call.Method)
 		return fn, args, nil
-		//fr.value(fr.pkg.Prog.Method(selection))
-		//methods := call.
-		//fr.logf("%v..%v", call.Value().Type())
 	}
 
 	switch call.Value.(type) {
@@ -456,7 +456,17 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		panic("TODO: panic")
 
 	case "recover":
-		panic("TODO: recover")
+		// TODO store this somewhere, probably when we fix up RuntimeFunction
+		// to be a fixed set of functions in a table.
+		llfn := fr.RuntimeFunction("runtime.recover", "func(int32) interface{}")
+		results := types.NewTuple(types.NewVar(0, nil, "", &types.Interface{}))
+		fn := fr.NewValue(llfn, types.NewSignature(nil, nil, nil, results, false))
+		// TODO determine number of frames to skip in pc check
+		indirect := fr.NewValue(llvm.ConstNull(llvm.Int32Type()), types.Typ[types.Int32])
+		return fn, []*LLVMValue{indirect}, nil
+
+	case "append":
+		return nil, nil, fr.callAppend(args[0], args[1])
 
 	case "cap":
 		return nil, nil, fr.callCap(args[0])

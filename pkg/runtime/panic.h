@@ -18,8 +18,8 @@ struct Defer {
 };
 
 struct Eface {
-	void *data;
 	void *type;
+	void *data;
 };
 
 struct Panic {

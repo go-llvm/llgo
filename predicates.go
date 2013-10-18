@@ -44,4 +44,3 @@ func isUntyped(typ types.Type) bool {
 	t, ok := typ.Underlying().(*types.Basic)
 	return ok && t.Info()&types.IsUntyped != 0
 }
-
