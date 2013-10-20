@@ -181,9 +181,14 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	if fr.backpatch == nil {
 		fr.backpatch = make(map[ssa.Value]*LLVMValue)
 	}
-	// Note: we must not create a constant here, as it is not permissible to
-	// replace a constant with a non-constant.
+	// Note: we must not create a constant here (e.g. Undef/ConstNull), as
+	// it is not permissible to replace a constant with a non-constant.
+	// We must create the value in its own standalone basic block, so we can
+	// dispose of it after replacing.
+	currBlock := fr.builder.GetInsertBlock()
+	fr.builder.SetInsertPointAtEnd(llvm.AddBasicBlock(currBlock.Parent(), ""))
 	placeholder := fr.compiler.builder.CreatePHI(fr.types.ToLLVM(v.Type()), "")
+	fr.builder.SetInsertPointAtEnd(currBlock)
 	value := fr.NewValue(placeholder, v.Type())
 	fr.backpatch[v] = value
 	return value
@@ -202,6 +207,7 @@ func (fr *frame) backpatcher(v ssa.Value) func() {
 	}
 	return func() {
 		b.LLVMValue().ReplaceAllUsesWith(fr.env[v].LLVMValue())
+		b.LLVMValue().InstructionParent().EraseFromParent()
 		delete(fr.backpatch, v)
 	}
 }
@@ -360,6 +366,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO
+		trap := fr.RuntimeFunction("llvm.trap", "func()")
+		fr.builder.CreateCall(trap, nil, "")
+		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
 		typ := instr.Type()

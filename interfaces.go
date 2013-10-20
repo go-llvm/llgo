@@ -18,7 +18,10 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 	// and extract interface pointer here.
 	//llitab := ll
 
+	// Strip receiver.
 	sig := method.Type().(*types.Signature)
+	sig = types.NewSignature(nil, nil, sig.Params(), sig.Results(), sig.IsVariadic())
+
 	llfn := llvm.ConstNull(c.types.ToLLVM(sig))
 	llfn = c.builder.CreateInsertValue(llfn, llvalue, 1, "")
 	return c.NewValue(llfn, sig)
