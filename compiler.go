@@ -233,7 +233,8 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	defer compiler.builder.Dispose()
 
 	mainpkg.Build()
-	compiler.translatePackage(mainpkg)
+	unit := compiler.translatePackage(mainpkg)
+	compiler.processAnnotations(unit, pkginfo)
 
 	/*
 		compiler.debug_info = &llvm.DebugInfo{}

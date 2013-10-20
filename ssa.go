@@ -18,7 +18,9 @@ type unit struct {
 	globals map[ssa.Value]*LLVMValue
 }
 
-func (c *compiler) translatePackage(pkg *ssa.Package) {
+// translatePackage translates an *ssa.Package into an LLVM module, and returns
+// the translation unit information.
+func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 	u := &unit{
 		compiler: c,
 		pkg:      pkg,
@@ -44,6 +46,7 @@ func (c *compiler) translatePackage(pkg *ssa.Package) {
 	for f, _ := range functions {
 		u.defineFunction(f)
 	}
+	return u
 }
 
 // declareFunction adds a function declaration with the given name
