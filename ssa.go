@@ -78,7 +78,13 @@ func (u *unit) declareFunction(f *ssa.Function) {
 		paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
 		llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
 	}
-	llvmFunction := llvm.AddFunction(u.module.Module, name, llvmType)
+	// It's possible that the function already exists in the module;
+	// for example, if it's a runtime intrinsic that the compiler
+	// has already referenced.
+	llvmFunction := u.module.Module.NamedFunction(name)
+	if llvmFunction.IsNil() {
+		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
+	}
 	u.globals[f] = u.NewValue(llvmFunction, f.Signature)
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
