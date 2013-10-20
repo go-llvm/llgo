@@ -118,13 +118,9 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				//     Create an internal constant if it's a constant array, or
 				//     Create space on the stack and store it there.
 				init_ := value.(*LLVMValue)
-				if init_.pointer != nil {
-					llvm_value = init_.pointer.LLVMValue()
-				} else {
-					init_value := init_.LLVMValue()
-					llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
-					c.builder.CreateStore(init_value, llvm_value)
-				}
+				init_value := init_.LLVMValue()
+				llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
+				c.builder.CreateStore(init_value, llvm_value)
 				// FIXME don't assume string...
 				format += "%s"
 

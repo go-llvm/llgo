@@ -275,10 +275,11 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 			return nil, err
 		}
 	} else {
-		var e = exporter{compiler: compiler}
-		if err := e.Export(mainpkg.Object); err != nil {
-			return nil, err
-		}
+		// TODO reenable when everything's working
+		//var e = exporter{compiler: compiler}
+		//if err := e.Export(mainpkg.Object); err != nil {
+		//	return nil, err
+		//}
 	}
 
 	/*

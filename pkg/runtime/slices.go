@@ -6,6 +6,14 @@ package runtime
 
 import "unsafe"
 
+// makeslice creates
+func makeslice(t unsafe.Pointer, len, cap uint) (s slice) {
+	// TODO check len <= cap
+	s = slicegrow((*sliceType)(t), s, cap)
+	s.len = len
+	return s
+}
+
 // sliceappend takes a slice type and two slices, and returns the
 // result of appending the second slice to the first, growing the
 // slice as necessary.
@@ -39,6 +47,8 @@ func slicecopy(t unsafe.Pointer, a, b slice) uint {
 
 func slicegrow(t *sliceType, a slice, newcap uint) slice {
 	mem := malloc(uintptr(t.elem.size * uintptr(newcap)))
+	extended := uintptr(newcap-uint(a.cap)) * t.elem.size
+	memset(unsafe.Pointer(uintptr(unsafe.Pointer(a.array))+uintptr(a.cap)), 0, extended)
 	if a.len > 0 {
 		size := uintptr(a.len) * t.elem.size
 		memcpy(mem, unsafe.Pointer(a.array), size)

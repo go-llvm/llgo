@@ -73,9 +73,8 @@ func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
 	}
 	if c.types.Sizeof(typ) > int64(c.target.PointerSize()) {
 		ptr := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
-		typ = types.NewPointer(typ)
-		ptr = c.builder.CreateBitCast(ptr, c.types.ToLLVM(typ), "")
-		return c.NewValue(ptr, typ).makePointee()
+		ptr = c.builder.CreateBitCast(ptr, llvm.PointerType(c.types.ToLLVM(typ), 0), "")
+		return c.NewValue(c.builder.CreateLoad(ptr, ""), typ)
 	}
 	value := c.builder.CreateExtractValue(v.LLVMValue(), 1, "")
 	if _, ok := typ.Underlying().(*types.Pointer); ok {

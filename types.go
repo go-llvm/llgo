@@ -12,10 +12,7 @@ import (
 )
 
 func deref(t types.Type) types.Type {
-	if p, ok := t.(*types.Pointer); ok {
-		return p.Elem()
-	}
-	return t
+	return t.Underlying().(*types.Pointer).Elem()
 }
 
 func (c *compiler) exportRuntimeTypes() {

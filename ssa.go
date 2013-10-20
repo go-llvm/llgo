@@ -29,11 +29,10 @@ func (c *compiler) translatePackage(pkg *ssa.Package) {
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
-			llvmType := c.types.ToLLVM(v.Type())
-			global := llvm.AddGlobal(c.module.Module, llvmType, v.String())
-			global.SetInitializer(llvm.ConstNull(llvmType))
-			value := c.NewValue(global, types.NewPointer(v.Type()))
-			u.globals[v] = value.makePointee()
+			llelemtyp := c.types.ToLLVM(deref(v.Type()))
+			global := llvm.AddGlobal(c.module.Module, llelemtyp, v.String())
+			global.SetInitializer(llvm.ConstNull(llelemtyp))
+			u.globals[v] = c.NewValue(global, v.Type())
 		}
 	}
 
@@ -99,6 +98,12 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := u.globals[f].LLVMValue()
+	for i, block := range f.Blocks {
+		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
+	}
+	if f.Recover != nil {
+		fr.recoverBlock = llvm.AddBasicBlock(llvmFunction, f.Recover.Comment)
+	}
 	u.builder.SetInsertPointAtEnd(fr.blocks[0])
 
 	var paramOffset int
@@ -114,12 +119,6 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 	for i, param := range f.Params {
 		fr.env[param] = u.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
-	}
-	for i, block := range f.Blocks {
-		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
-	}
-	if f.Recover != nil {
-		fr.recoverBlock = llvm.AddBasicBlock(llvmFunction, f.Recover.Comment)
 	}
 
 	// Allocate stack space for locals in the entry block.
@@ -143,7 +142,7 @@ type frame struct {
 	*unit
 	blocks       []llvm.BasicBlock
 	recoverBlock llvm.BasicBlock
-	locals       map[ssa.Value]*LLVMValue
+	backpatch    map[ssa.Value]*LLVMValue
 	env          map[ssa.Value]*LLVMValue
 }
 
@@ -172,17 +171,51 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	if value, ok := fr.env[v]; ok {
 		return value
 	}
-	if instr, ok := v.(ssa.Instruction); ok {
-		fr.instruction(instr)
-		if value, ok := fr.env[v]; ok {
-			return value
-		}
+
+	// Instructions are not necessarily visited before they are used (e.g. Phi
+	// edges) so we must "backpatch": create a value with the resultant type,
+	// and then replace it when we visit the instruction.
+	if b, ok := fr.backpatch[v]; ok {
+		return b
 	}
-	panic(fmt.Sprintf("no value for %T: %v", v, v.Name()))
+	if fr.backpatch == nil {
+		fr.backpatch = make(map[ssa.Value]*LLVMValue)
+	}
+	// Note: we must not create a constant here, as it is not permissible to
+	// replace a constant with a non-constant.
+	placeholder := fr.compiler.builder.CreatePHI(fr.types.ToLLVM(v.Type()), "")
+	value := fr.NewValue(placeholder, v.Type())
+	fr.backpatch[v] = value
+	return value
+}
+
+// backpatcher returns, if necessary, a function that may
+// be called to backpatch a placeholder value; if backpatching
+// is unnecessary, the backpatcher returns nil.
+//
+// When the returned function is called, it is expected that
+// fr.env[v] contains the value to backpatch.
+func (fr *frame) backpatcher(v ssa.Value) func() {
+	b := fr.backpatch[v]
+	if b == nil {
+		return nil
+	}
+	return func() {
+		b.LLVMValue().ReplaceAllUsesWith(fr.env[v].LLVMValue())
+		delete(fr.backpatch, v)
+	}
 }
 
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
+
+	// Check if we'll need to backpatch; see comment
+	// in fr.value().
+	if v, ok := instr.(ssa.Value); ok {
+		if b := fr.backpatcher(v); b != nil {
+			defer b()
+		}
+	}
 
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
@@ -260,12 +293,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.builder.CreateCondBr(cond, trueBlock, falseBlock)
 
 	case *ssa.Index:
-		ptr := fr.value(instr.X).pointer.LLVMValue()
+		// FIXME Surely we should be dealing with an
+		// *array, so we can do a GEP?
+		array := fr.value(instr.X).LLVMValue()
+		arrayptr := fr.builder.CreateAlloca(array.Type(), "")
+		fr.builder.CreateStore(array, arrayptr)
 		index := fr.value(instr.Index).LLVMValue()
 		zero := llvm.ConstNull(index.Type())
-		addr := fr.builder.CreateGEP(ptr, []llvm.Value{zero, index}, "")
-		elemtyp := instr.X.Type().(*types.Array).Elem()
-		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp)).makePointee()
+		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
+		fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
 		// TODO: implement nil-check and panic.
@@ -324,7 +360,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO
-		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
 		typ := instr.Type()

@@ -75,8 +75,9 @@ func parseAttribute(line string) Attribute {
 type linkageAttribute llvm.Linkage
 
 func (a linkageAttribute) Apply(v Value) {
-	global := v.(*LLVMValue).pointer.value
-	global.SetLinkage(llvm.Linkage(a))
+	panic("TODO")
+	//global := v.(*LLVMValue).pointer.value
+	//global.SetLinkage(llvm.Linkage(a))
 }
 
 func parseLinkageAttribute(value string) linkageAttribute {
@@ -136,8 +137,9 @@ func (a nameAttribute) Apply(v Value) {
 		}
 		fn.SetName(name)
 	} else {
-		global := v.(*LLVMValue).pointer.value
-		global.SetName(string(a))
+		panic("TODO")
+		//global := v.(*LLVMValue).pointer.value
+		//global.SetName(string(a))
 	}
 }
 
@@ -174,6 +176,7 @@ func (a llvmAttribute) Apply(v Value) {
 type tlsAttribute struct{}
 
 func (tlsAttribute) Apply(v Value) {
-	global := v.(*LLVMValue).pointer.value
-	global.SetThreadLocal(true)
+	// TODO
+	//global := v.(*LLVMValue).pointer.value
+	//global.SetThreadLocal(true)
 }

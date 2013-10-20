@@ -32,22 +32,15 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
 func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
-	lengthValue := length.LLVMValue()
-	capacityValue := capacity.LLVMValue()
-
-	// TODO move this into the runtime, do parameter checks.
-	elemType := c.types.ToLLVM(sliceType.Underlying().(*types.Slice).Elem())
-	sizeof := llvm.ConstTruncOrBitCast(llvm.SizeOf(elemType), c.types.inttype)
-	size := c.builder.CreateMul(capacityValue, sizeof, "")
-	mem := c.createMalloc(size)
-	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(elemType, 0), "")
-	c.memsetZero(mem, size)
-
-	slice := llvm.Undef(c.types.ToLLVM(sliceType))
-	slice = c.builder.CreateInsertValue(slice, mem, 0, "")
-	slice = c.builder.CreateInsertValue(slice, lengthValue, 1, "")
-	slice = c.builder.CreateInsertValue(slice, capacityValue, 2, "")
-	return c.NewValue(slice, sliceType)
+	length = length.Convert(types.Typ[types.Int]).(*LLVMValue)
+	capacity = capacity.Convert(types.Typ[types.Int]).(*LLVMValue)
+	makeslice := c.RuntimeFunction("runtime.makeslice", "func(t uintptr, len, cap int) slice")
+	runtimeType := c.builder.CreatePtrToInt(c.types.ToRuntime(sliceType), c.target.IntPtrType(), "")
+	llslice := c.builder.CreateCall(makeslice, []llvm.Value{
+		runtimeType, length.LLVMValue(), capacity.LLVMValue(),
+	}, "")
+	llslice = c.coerceSlice(llslice, c.types.ToLLVM(sliceType))
+	return c.NewValue(llslice, sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a

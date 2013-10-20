@@ -36,16 +36,13 @@ type Value interface {
 // expression.
 type LLVMValue struct {
 	compiler *compiler
-	method   types.Object // method object, used in method value conversion
 	value    llvm.Value
 	typ      types.Type
-	pointer  *LLVMValue // Pointer value that dereferenced to this value.
-	stack    *LLVMValue // If a stack value, the Value for the containing function.
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
 func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, nil, v, t, nil, nil}
+	return &LLVMValue{c, v, t}
 }
 
 func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
@@ -439,18 +436,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		return v.compiler.NewValue(value, v.typ)
 	case token.ADD:
 		return v // No-op
-	case token.AND:
-		if typ, ok := v.typ.Underlying().(*types.Pointer); ok {
-			if typ.Elem().Underlying() == typ {
-				// Taking the address of a recursive pointer
-				// yields a value with the same type.
-				value := v.pointer.value
-				basetyp := value.Type().ElementType()
-				value = b.CreateBitCast(value, basetyp, "")
-				return v.compiler.NewValue(value, v.typ)
-			}
-		}
-		return v.pointer
 	case token.NOT:
 		value := b.CreateNot(v.LLVMValue(), "")
 		return v.compiler.NewValue(value, v.typ)
@@ -464,7 +449,8 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		//value, _ := v.chanRecv(false)
 		//return value
 	case token.MUL:
-		return v.makePointee()
+		elemtyp := v.typ.Underlying().(*types.Pointer).Elem()
+		return v.compiler.NewValue(b.CreateLoad(v.LLVMValue(), ""), elemtyp)
 	default:
 		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
@@ -493,8 +479,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 				return v.convertMethodValue(origdsttyp)
 			}
 		}
-
-		// TODO avoid load here by reusing pointer value, if exists.
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
 
@@ -687,7 +671,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	srcstr := v.compiler.types.TypeString(v.typ)
 	dststr := v.compiler.types.TypeString(origdsttyp)
-	panic(fmt.Sprintf("unimplemented conversion: %s -> %s", srcstr, dststr))
+	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", srcstr, lv.Type(), dststr))
 }
 
 func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
@@ -742,20 +726,11 @@ func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
-	if v.pointer != nil {
-		return v.compiler.builder.CreateLoad(v.pointer.LLVMValue(), "")
-	}
 	return v.value
 }
 
 func (v *LLVMValue) Type() types.Type {
 	return v.typ
-}
-
-func (v *LLVMValue) makePointee() *LLVMValue {
-	t := v.compiler.NewValue(llvm.Value{}, v.typ.Underlying().(*types.Pointer).Elem())
-	t.pointer = v
-	return t
 }
 
 func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
