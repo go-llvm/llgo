@@ -516,14 +516,14 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 			// Data must be copied, to prevent changes in
 			// the byte slice from mutating the string.
-			newdata := c.builder.CreateArrayMalloc(strdata.Type().ElementType(), strlen, "")
+			newdata := c.createMalloc(strlen)
 			memcpy := c.RuntimeFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
 			c.builder.CreateCall(memcpy, []llvm.Value{
-				c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+				newdata,
 				c.builder.CreatePtrToInt(strdata, c.target.IntPtrType(), ""),
 				strlen,
 			}, "")
-			strdata = newdata
+			strdata = c.builder.CreateIntToPtr(newdata, strdata.Type(), "")
 
 			struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
 			struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
@@ -547,14 +547,14 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 		// Data must be copied, to prevent changes in
 		// the byte slice from mutating the string.
-		newdata := c.builder.CreateArrayMalloc(data.Type().ElementType(), len, "")
+		newdata := c.createMalloc(len)
 		memcpy := c.RuntimeFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
 		c.builder.CreateCall(memcpy, []llvm.Value{
-			c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+			newdata,
 			c.builder.CreatePtrToInt(data, c.target.IntPtrType(), ""),
 			len,
 		}, "")
-		data = newdata
+		data = c.builder.CreateIntToPtr(newdata, data.Type(), "")
 
 		struct_ := llvm.Undef(c.types.ToLLVM(types.Typ[types.String]))
 		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")

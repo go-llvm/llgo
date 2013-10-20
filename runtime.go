@@ -26,6 +26,10 @@ func (c *FunctionCache) RuntimeFunction(name string, signature string) llvm.Valu
 	if !f.IsNil() {
 		return f
 	}
+	if f := c.module.Module.NamedFunction(name); !f.IsNil() {
+		c.functions[name] = f
+		return f
+	}
 
 	if c.runtimetypespkg == nil {
 		// Parse the runtime package, since we may need to refer to
