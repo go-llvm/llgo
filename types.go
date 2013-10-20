@@ -84,10 +84,8 @@ func (ts *TypeStringer) writeParams(buf *bytes.Buffer, params *types.Tuple, isVa
 
 func (ts *TypeStringer) writeSignature(buf *bytes.Buffer, sig *types.Signature, unique bool) {
 	if recv := sig.Recv(); recv != nil {
-		if _, ok := recv.Type().Underlying().(*types.Interface); !ok {
-			ts.writeType(buf, recv.Type(), unique)
-			buf.WriteByte(' ')
-		}
+		ts.writeType(buf, recv.Type(), unique)
+		buf.WriteByte(' ')
 	}
 
 	ts.writeParams(buf, sig.Params(), sig.IsVariadic(), unique)
