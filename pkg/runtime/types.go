@@ -192,3 +192,9 @@ type slice struct {
 	len   uint
 	cap   uint
 }
+
+// interface{}
+type eface struct {
+	rtyp *rtype
+	data *uint8
+}

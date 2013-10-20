@@ -26,3 +26,12 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 	llfn = c.builder.CreateInsertValue(llfn, llvalue, 1, "")
 	return c.NewValue(llfn, sig)
 }
+
+// compareInterfaces emits code to compare two interfaces for
+// equality.
+func (c *compiler) compareInterfaces(a_, b_ *LLVMValue) *LLVMValue {
+	a, b := a_.LLVMValue(), b_.LLVMValue()
+	// TODO I2I, I2E, etc. when we have interfaces implemented right.
+	f := c.RuntimeFunction("runtime.compareI2I", "func(a, b interface{}) bool")
+	return c.NewValue(c.builder.CreateCall(f, []llvm.Value{a, b}, ""), types.Typ[types.Bool])
+}

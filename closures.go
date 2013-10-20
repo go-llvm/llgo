@@ -22,7 +22,9 @@ func (c *compiler) makeClosure(fn *LLVMValue, bindings []*LLVMValue) *LLVMValue 
 		c.builder.CreateStore(binding.LLVMValue(), addressPtr)
 	}
 	block = c.builder.CreateBitCast(block, llvm.PointerType(llvm.Int8Type(), 0), "")
-	closure := fn.LLVMValue()
+	// fn is a raw function pointer; ToLLVM yields {*fn, *uint8}.
+	closure := llvm.Undef(c.types.ToLLVM(fn.Type()))
+	closure = c.builder.CreateInsertValue(closure, fn.LLVMValue(), 0, "")
 	closure = c.builder.CreateInsertValue(closure, block, 1, "")
 	return c.NewValue(closure, fn.Type())
 }

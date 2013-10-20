@@ -6,23 +6,24 @@ package runtime
 
 import "unsafe"
 
-func compareI2I(atyp_, btyp_, aval, bval uintptr) bool {
-	atyp := (*rtype)(unsafe.Pointer(atyp_))
-	btyp := (*rtype)(unsafe.Pointer(btyp_))
-	if eqtyp(atyp, btyp) {
-		algs := unsafe.Pointer(atyp.alg)
+func compareI2I(a, b eface) bool {
+	if (a.rtyp != b.rtyp) && (a.rtyp == nil || b.rtyp == nil) {
+		return false
+	}
+	if eqtyp(a.rtyp, b.rtyp) {
+		algs := unsafe.Pointer(a.rtyp.alg)
 		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(algs))
 		eqFn := *(*unsafe.Pointer)(eqPtr)
 		var avalptr, bvalptr unsafe.Pointer
-		if atyp.size <= unsafe.Sizeof(aval) {
+		if a.rtyp.size <= unsafe.Sizeof(a.data) {
 			// value fits in pointer
-			avalptr = unsafe.Pointer(&aval)
-			bvalptr = unsafe.Pointer(&bval)
+			avalptr = unsafe.Pointer(&a.data)
+			bvalptr = unsafe.Pointer(&b.data)
 		} else {
-			avalptr = unsafe.Pointer(aval)
-			bvalptr = unsafe.Pointer(bval)
+			avalptr = unsafe.Pointer(a.data)
+			bvalptr = unsafe.Pointer(b.data)
 		}
-		return eqalg(eqFn, atyp.size, avalptr, bvalptr)
+		return eqalg(eqFn, a.rtyp.size, avalptr, bvalptr)
 	}
 	return false
 }

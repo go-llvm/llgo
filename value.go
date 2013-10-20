@@ -192,6 +192,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// func == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
 		return c.NewValue(isnil, types.Typ[types.Bool])
+
+	case *types.Interface:
+		return c.compareInterfaces(lhs, rhs)
 	}
 
 	// Strings.
