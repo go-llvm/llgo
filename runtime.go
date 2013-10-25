@@ -156,7 +156,6 @@ func parseRuntime(buildctx *build.Context, checker *types.Config) (*types.Packag
 	for i, f := range buildpkg.GoFiles {
 		filenames[i] = path.Join(buildpkg.Dir, f)
 	}
-	fmt.Println(filenames)
 	fset := token.NewFileSet()
 	files, err := parseFiles(fset, filenames)
 	if err != nil {
