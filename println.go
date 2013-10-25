@@ -10,16 +10,26 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-func getprintf(module llvm.Module) llvm.Value {
+func getPrintf(module llvm.Module) llvm.Value {
 	printf := module.NamedFunction("printf")
 	if printf.IsNil() {
-		CharPtr := llvm.PointerType(llvm.Int8Type(), 0)
-		fn_type := llvm.FunctionType(
-			llvm.Int32Type(), []llvm.Type{CharPtr}, true)
-		printf = llvm.AddFunction(module, "printf", fn_type)
+		charPtr := llvm.PointerType(llvm.Int8Type(), 0)
+		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{charPtr}, true)
+		printf = llvm.AddFunction(module, "printf", ftyp)
 		printf.SetFunctionCallConv(llvm.CCallConv)
 	}
 	return printf
+}
+
+func getFflush(module llvm.Module) llvm.Value {
+	fflush := module.NamedFunction("fflush")
+	if fflush.IsNil() {
+		voidPtr := llvm.PointerType(llvm.Int8Type(), 0)
+		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{voidPtr}, false)
+		fflush = llvm.AddFunction(module, "fflush", ftyp)
+		fflush.SetFunctionCallConv(llvm.CCallConv)
+	}
+	return fflush
 }
 
 func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
@@ -87,7 +97,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
 					fallthrough
 				case types.Float64:
-					printfloat := c.RuntimeFunction("runtime.printfloat", "func(float64) string")
+					printfloat := c.runtime.printfloat.LLVMValue()
 					args := []llvm.Value{llvm_value}
 					llvm_value = c.builder.CreateCall(printfloat, args, "")
 					fallthrough
@@ -145,9 +155,10 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		}
 		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
 	}
-	printf := getprintf(c.module.Module)
+	printf := getPrintf(c.module.Module)
 	result := c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
-	fflush := c.RuntimeFunction("fflush", "func(*int32) int32")
-	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
+	fflush := getFflush(c.module.Module)
+	fileptr := llvm.ConstNull(fflush.Type().ElementType().ParamTypes()[0])
+	c.builder.CreateCall(fflush, []llvm.Value{fileptr}, "")
 	return result
 }

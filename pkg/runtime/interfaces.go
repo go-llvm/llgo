@@ -6,7 +6,9 @@ package runtime
 
 import "unsafe"
 
-func compareI2I(a, b eface) bool {
+func compareI2I(a_, b_ interface{}) bool {
+    a := (*eface)(unsafe.Pointer(&a_))
+    b := (*eface)(unsafe.Pointer(&b_))
 	if (a.rtyp != b.rtyp) && (a.rtyp == nil || b.rtyp == nil) {
 		return false
 	}

@@ -49,8 +49,8 @@ type compiler struct {
 	importer      *goimporter.Importer
 	exportedtypes []types.Type
 
-	*FunctionCache
-	llvmtypes *LLVMTypeMap
+	runtime   *runtimeInterface
+	llvmtypes *llvmTypeMap
 	types     *TypeMap
 
 	// runtimetypespkg is the type-checked runtime/types.go file,
@@ -211,21 +211,27 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
 	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.target.String())
-	defer func() {
-		if e := recover(); e != nil {
-			compiler.module.Dispose()
-			panic(e)
+
+	// Map runtime types and functions.
+	runtimePkg := mainpkg.Object
+	if importpath != "runtime" {
+		runtimePkg, err = parseRuntime(buildctx, compiler.typechecker)
+		if err != nil {
+			return nil, err
 		}
-	}()
+	}
+	compiler.runtime, err = newRuntimeInterface(runtimePkg, compiler.module.Module, compiler.llvmtypes)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
-	compiler.FunctionCache = NewFunctionCache(compiler)
 	compiler.types = NewTypeMap(
+		importpath,
 		compiler.llvmtypes,
 		compiler.module.Module,
-		importpath,
-		compiler.FunctionCache,
+		compiler.runtime,
 	)
 
 	// Create a Builder, for building LLVM instructions.
@@ -364,8 +370,12 @@ func (c *compiler) createMainFunction() error {
 	// runtime.main is called by main, with argc, argv, argp,
 	// and a pointer to main.main, which must be a niladic
 	// function with no result.
-	runtimeMain := c.RuntimeFunction("runtime.main", "func(int32, **byte, **byte, *int8) int32")
-	main := c.RuntimeFunction("main", "func(int32, **byte, **byte) int32")
+	runtimeMain := c.runtime.main.LLVMValue()
+
+	ptrptr := llvm.PointerType(llvm.PointerType(llvm.Int8Type(), 0), 0)
+	ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{llvm.Int32Type(), ptrptr, ptrptr}, true)
+	main := llvm.AddFunction(c.module.Module, "main", ftyp)
+
 	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(nil))
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)

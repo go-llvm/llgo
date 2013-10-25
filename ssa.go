@@ -375,8 +375,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO
-		trap := fr.RuntimeFunction("llvm.trap", "func()")
-		fr.builder.CreateCall(trap, nil, "")
+		fr.builder.CreateCall(fr.runtime.llvm_trap.LLVMValue(), nil, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
@@ -409,8 +408,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.RunDefers:
-		rundefers := fr.RuntimeFunction("runtime.rundefers", "func()")
-		fr.builder.CreateCall(rundefers, nil, "")
+		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
 
 	//case *ssa.Select:
 	//case *ssa.Send:
@@ -509,14 +507,9 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		panic("TODO: panic")
 
 	case "recover":
-		// TODO store this somewhere, probably when we fix up RuntimeFunction
-		// to be a fixed set of functions in a table.
-		llfn := fr.RuntimeFunction("runtime.recover", "func(int32) interface{}")
-		results := types.NewTuple(types.NewVar(0, nil, "", &types.Interface{}))
-		fn := fr.NewValue(llfn, types.NewSignature(nil, nil, nil, results, false))
 		// TODO determine number of frames to skip in pc check
 		indirect := fr.NewValue(llvm.ConstNull(llvm.Int32Type()), types.Typ[types.Int32])
-		return fn, []*LLVMValue{indirect}, nil
+		return fr.runtime.recover_, []*LLVMValue{indirect}, nil
 
 	case "append":
 		return nil, nil, fr.callAppend(args[0], args[1])

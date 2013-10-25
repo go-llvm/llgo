@@ -20,7 +20,7 @@ func (c *compiler) callCap(arg *LLVMValue) *LLVMValue {
 	case *types.Slice:
 		v = c.builder.CreateExtractValue(arg.LLVMValue(), 2, "")
 	case *types.Chan:
-		f := c.RuntimeFunction("runtime.chancap", "func(c uintptr) int")
+		f := c.runtime.chancap.LLVMValue()
 		v = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	}
 	return c.NewValue(v, types.Typ[types.Int])
@@ -37,14 +37,14 @@ func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
 	case *types.Slice:
 		lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 	case *types.Map:
-		f := c.RuntimeFunction("runtime.maplen", "func(m uintptr) int")
+		f := c.runtime.maplen.LLVMValue()
 		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	case *types.Basic:
 		if isString(typ) {
 			lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 		}
 	case *types.Chan:
-		f := c.RuntimeFunction("runtime.chanlen", "func(c uintptr) int")
+		f := c.runtime.chanlen.LLVMValue()
 		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	}
 	return c.NewValue(lenvalue, types.Typ[types.Int])
@@ -53,7 +53,7 @@ func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
 // callAppend takes two slices of the same type, and yields
 // the result of appending the second to the first.
 func (c *compiler) callAppend(a, b *LLVMValue) *LLVMValue {
-	f := c.RuntimeFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
+	f := c.runtime.sliceappend.LLVMValue()
 	i8slice := f.Type().ElementType().ReturnType()
 	lla := a.LLVMValue()
 	llaType := lla.Type()

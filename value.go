@@ -517,7 +517,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			// Data must be copied, to prevent changes in
 			// the byte slice from mutating the string.
 			newdata := c.createMalloc(strlen)
-			memcpy := c.RuntimeFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
+			memcpy := c.runtime.memcpy.LLVMValue()
 			c.builder.CreateCall(memcpy, []llvm.Value{
 				newdata,
 				c.builder.CreatePtrToInt(strdata, c.target.IntPtrType(), ""),
@@ -548,7 +548,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		// Data must be copied, to prevent changes in
 		// the byte slice from mutating the string.
 		newdata := c.createMalloc(len)
-		memcpy := c.RuntimeFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
+		memcpy := c.runtime.memcpy.LLVMValue()
 		c.builder.CreateCall(memcpy, []llvm.Value{
 			newdata,
 			c.builder.CreatePtrToInt(data, c.target.IntPtrType(), ""),

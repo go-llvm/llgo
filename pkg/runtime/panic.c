@@ -22,7 +22,7 @@ void __cxa_throw(void *exc, void *typeinfo, void (*dest)(void*)) __attribute__((
 void panic(struct Eface error)
 		LLGO_ASM_EXPORT("runtime.panic_") __attribute__((noreturn));
 struct Eface recover(int32_t indirect)
-	LLGO_ASM_EXPORT("runtime.recover") __attribute__((noinline));
+	LLGO_ASM_EXPORT("runtime.recover_") __attribute__((noinline));
 void pushdefer(struct Func)
 	LLGO_ASM_EXPORT("runtime.pushdefer") __attribute__((noinline));
 void rundefers(void)

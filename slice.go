@@ -34,7 +34,7 @@ func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Valu
 func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
 	length = length.Convert(types.Typ[types.Int]).(*LLVMValue)
 	capacity = capacity.Convert(types.Typ[types.Int]).(*LLVMValue)
-	makeslice := c.RuntimeFunction("runtime.makeslice", "func(t uintptr, len, cap int) slice")
+	makeslice := c.runtime.makeslice.LLVMValue()
 	runtimeType := c.builder.CreatePtrToInt(c.types.ToRuntime(sliceType), c.target.IntPtrType(), "")
 	llslice := c.builder.CreateCall(makeslice, []llvm.Value{
 		runtimeType, length.LLVMValue(), capacity.LLVMValue(),
@@ -150,7 +150,7 @@ func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 
 	switch typ := x.Type().Underlying().(type) {
 	case *types.Pointer: // *array
-		sliceslice := c.RuntimeFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
+		sliceslice := c.runtime.sliceslice.LLVMValue()
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
 		arraytyp := typ.Elem().(*types.Array)
@@ -168,7 +168,7 @@ func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
 		return c.NewValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
-		sliceslice := c.RuntimeFunction("runtime.sliceslice", "func(t uintptr, s slice, low, high int) slice")
+		sliceslice := c.runtime.sliceslice.LLVMValue()
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := x.LLVMValue()
 		sliceTyp := sliceValue.Type()
@@ -179,7 +179,7 @@ func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 		result := c.builder.CreateCall(sliceslice, args, "")
 		return c.NewValue(c.coerceSlice(result, sliceTyp), x.Type())
 	case *types.Basic:
-		stringslice := c.RuntimeFunction("runtime.stringslice", "func(a string, low, high int) string")
+		stringslice := c.runtime.stringslice.LLVMValue()
 		args := []llvm.Value{x.LLVMValue(), low.LLVMValue(), high.LLVMValue()}
 		result := c.builder.CreateCall(stringslice, args, "")
 		return c.NewValue(result, x.Type())

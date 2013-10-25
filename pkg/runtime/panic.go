@@ -20,6 +20,7 @@ func caller_region(skip int32) uintptr
 func pushdefer(f func())
 func rundefers()
 func current_panic() *panicstack
+func recover_() interface{}
 
 // #llgo attr: noinline
 func callniladic(f func()) {

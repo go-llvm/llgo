@@ -93,7 +93,7 @@ func (lhs *LLVMValue) interfaceTypeEquals(typ types.Type) *LLVMValue {
 	c, b := lhs.compiler, lhs.compiler.builder
 	lhsType := b.CreateExtractValue(lhs.LLVMValue(), 0, "")
 	rhsType := c.types.ToRuntime(typ)
-	f := c.RuntimeFunction("runtime.eqtyp", "func(t1, t2 *rtype) bool")
+	f := c.runtime.eqtyp.LLVMValue()
 	t := f.Type().ElementType().ParamTypes()[0]
 	lhsType = b.CreateBitCast(lhsType, t, "")
 	rhsType = b.CreateBitCast(rhsType, t, "")
