@@ -38,6 +38,9 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 		}
 	}
 
+	// TODO prune off unreferenced functions from imported packages,
+	// so the IR isn't littered unnecessarily.
+
 	// Translate functions.
 	functions := ssa.AllFunctions(pkg.Prog)
 	for f, _ := range functions {
@@ -171,7 +174,12 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case nil:
 		return nil
 	case *ssa.Function:
-		return fr.globals[v]
+		// fr.globals[v] has the function in raw pointer form;
+		// we must convert it to <f,ctx> form.
+		f := fr.globals[v]
+		pair := llvm.ConstNull(fr.types.ToLLVM(f.Type()))
+		pair = llvm.ConstInsertValue(pair, f.LLVMValue(), []uint32{0})
+		return fr.NewValue(pair, f.Type())
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:

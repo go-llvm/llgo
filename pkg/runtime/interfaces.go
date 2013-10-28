@@ -6,9 +6,7 @@ package runtime
 
 import "unsafe"
 
-func compareI2I(a_, b_ interface{}) bool {
-    a := (*eface)(unsafe.Pointer(&a_))
-    b := (*eface)(unsafe.Pointer(&b_))
+func compareE2E(a, b eface) bool {
 	if (a.rtyp != b.rtyp) && (a.rtyp == nil || b.rtyp == nil) {
 		return false
 	}
@@ -71,6 +69,15 @@ func convertI2I(typ_, from_, to_ uintptr) bool {
 		return true
 	}
 	return false
+}
+
+// convertI2E takes a non-empty interface
+// value and converts it to an empty one.
+func convertI2E(i iface) eface {
+	if i.tab == nil {
+		return eface{nil, nil}
+	}
+	return eface{i.tab.typ, i.data}
 }
 
 // #llgo name: reflect.ifaceE2I

@@ -24,21 +24,25 @@ type runtimeType struct {
 // runtime types and intrinsic function declarations.
 type runtimeInterface struct {
 	// runtime types
+	eface,
 	rtype,
 	uncommonType,
 	arrayType,
 	chanType,
 	funcType,
-	method,
+	iface,
 	imethod,
 	interfaceType,
+	itab,
 	mapType,
+	method,
 	ptrType,
 	sliceType,
 	structType runtimeType
 
 	// intrinsics
-	compareI2I,
+	compareE2E,
+	convertI2E,
 	eqtyp,
 	//fflush,
 	llvm_trap,
@@ -53,19 +57,19 @@ type runtimeInterface struct {
 	rundefers,
 	chancap,
 	chanlen,
-	maplen,
 	makeslice,
+	maplen,
+	runestostr,
 	sliceappend,
 	slicecopy,
 	sliceslice,
-	stringslice,
 	strcat,
 	strcmp,
+	streqalg,
+	stringslice,
 	strnext,
 	strrune,
 	strtorunes,
-	runestostr,
-	streqalg,
 	f32eqalg,
 	f64eqalg,
 	c64eqalg,
@@ -75,15 +79,18 @@ type runtimeInterface struct {
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap) (*runtimeInterface, error) {
 	var ri runtimeInterface
 	types := map[string]*runtimeType{
+		"eface":         &ri.eface,
 		"rtype":         &ri.rtype,
 		"uncommonType":  &ri.uncommonType,
 		"arrayType":     &ri.arrayType,
 		"chanType":      &ri.chanType,
 		"funcType":      &ri.funcType,
-		"method":        &ri.method,
+		"iface":         &ri.iface,
 		"imethod":       &ri.imethod,
 		"interfaceType": &ri.interfaceType,
+		"itab":          &ri.itab,
 		"mapType":       &ri.mapType,
+		"method":        &ri.method,
 		"ptrType":       &ri.ptrType,
 		"sliceType":     &ri.sliceType,
 		"structType":    &ri.structType,
@@ -98,7 +105,8 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	}
 
 	intrinsics := map[string]**LLVMValue{
-		"compareI2I": &ri.compareI2I,
+		"compareE2E": &ri.compareE2E,
+		"convertI2E": &ri.convertI2E,
 		"eqtyp":      &ri.eqtyp,
 		//"fflush": &ri.fflush,
 		"llvm_trap":   &ri.llvm_trap,

@@ -202,6 +202,12 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	if pkginfo.Err != nil {
 		return nil, err
 	}
+	// First call CreatePackages to resolve imports, and then CreatePackage
+	// to obtain the main package. The latter simply returns the package
+	// created by the former.
+	if err := program.CreatePackages(compiler.importer); err != nil {
+		return nil, err
+	}
 	mainpkg := program.CreatePackage(pkginfo)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,

@@ -45,6 +45,14 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success *LLVMValue) {
 	return result, success
 }
 
+// convertI2E converts a non-empty interface value to an empty interface.
+func (v *LLVMValue) convertI2E() *LLVMValue {
+	c := v.compiler
+	f := c.runtime.convertI2E.LLVMValue()
+	args := []llvm.Value{c.coerce(v.LLVMValue(), c.runtime.iface.llvm)}
+	return c.NewValue(c.builder.CreateCall(f, args, ""), types.NewInterface(nil))
+}
+
 // mustConvertI2V calls convertI2V, panicking if the assertion failed.
 func (v *LLVMValue) mustConvertI2V(typ types.Type) *LLVMValue {
 	result, ok := v.convertI2V(typ)

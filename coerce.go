@@ -11,9 +11,12 @@ import (
 // coerce yields a value of the the type specified, initialised
 // to the exact bit pattern as in the specified value.
 //
-// Note: the specified value must be a non-aggregate, and its type
-// and the specified type must have the same size.
+// Note: the value's type and the specified target type must have
+// the same size. If the source is an aggregate, then the target
+// must also be an aggregate with the same number of fields, each
+// of which must have the same size.
 func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
+	// FIXME don't do this with alloca
 	switch t.TypeKind() {
 	case llvm.ArrayTypeKind, llvm.StructTypeKind:
 		ptr := c.builder.CreateAlloca(t, "")

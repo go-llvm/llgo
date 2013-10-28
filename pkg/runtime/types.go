@@ -198,3 +198,18 @@ type eface struct {
 	rtyp *rtype
 	data *uint8
 }
+
+// interface{...}
+type iface struct {
+	tab  *itab
+	data *uint8
+}
+
+type itab struct {
+	inter  *interfaceType
+	typ    *rtype
+	link   *itab
+	bad    int32
+	unused int32
+	fun    *func()
+}
