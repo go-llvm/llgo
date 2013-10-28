@@ -274,8 +274,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(lliface, instr.Type())
 
 	case *ssa.ChangeType:
-		// TODO refactor Convert
-		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)
+		fr.env[instr] = fr.NewValue(fr.value(instr.X).LLVMValue(), instr.Type())
 
 	case *ssa.Convert:
 		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)
