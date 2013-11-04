@@ -5,6 +5,9 @@
 package llgo
 
 import (
+	"fmt"
+
+	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
@@ -64,9 +67,9 @@ func (v *LLVMValue) mustConvertI2V(typ types.Type) *LLVMValue {
 	builder.CreateCondBr(ok.LLVMValue(), end, failed)
 	builder.SetInsertPointAtEnd(failed)
 
-	// TODO
-	//s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
-	//c.visitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
+	c := v.compiler
+	s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
+	c.emitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }

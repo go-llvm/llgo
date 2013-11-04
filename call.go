@@ -29,24 +29,6 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool
 		resultType = results
 	}
 
-	// Depending on whether the function contains defer statements or not,
-	// we'll generate either a "call" or an "invoke" instruction.
-	var createCall = c.builder.CreateCall
-	/*
-		if invoke {
-			f := c.functions.top()
-			// TODO Create a method on compiler (avoid creating closures).
-			createCall = func(fn llvm.Value, args []llvm.Value, name string) llvm.Value {
-				currblock := c.builder.GetInsertBlock()
-				returnblock := llvm.AddBasicBlock(currblock.Parent(), "")
-				returnblock.MoveAfter(currblock)
-				value := c.builder.CreateInvoke(fn, args, returnblock, f.unwindblock, "")
-				c.builder.SetInsertPointAtEnd(returnblock)
-				return value
-			}
-		}
-	*/
-
 	var fnptr llvm.Value
 	fnval := fn.LLVMValue()
 	if fnval.Type().TypeKind() == llvm.PointerTypeKind {
@@ -61,7 +43,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool
 		// dealing with a method (where we don't care about the value
 		// of the receiver), then we must conditionally call the
 		// function with the additional receiver/closure.
-		if !context.IsNull() || fntyp.Recv() != nil {
+		if !context.IsNull() && fntyp.Recv() == nil {
 			// Store the blocks for referencing in the Phi below;
 			// note that we update the block after each createCall,
 			// since createCall may create new blocks and we want
@@ -83,7 +65,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool
 
 				// null context case.
 				c.builder.SetInsertPointAtEnd(nullctxblock)
-				nullctxresult = createCall(fnptr, args, "")
+				nullctxresult = c.builder.CreateCall(fnptr, args, "")
 				nullctxblock = c.builder.GetInsertBlock()
 				c.builder.CreateBr(endblock)
 				c.builder.SetInsertPointAtEnd(nonnullctxblock)
@@ -101,7 +83,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool
 				fnptrtyp := llvm.PointerType(llfntyp, 0)
 				fnptr = c.builder.CreateBitCast(fnptr, fnptrtyp, "")
 			}
-			result = createCall(fnptr, args, "")
+			result = c.builder.CreateCall(fnptr, args, "")
 
 			// If the return type is not void, create a
 			// PHI node to select which value to return.
@@ -120,6 +102,6 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool
 			return c.NewValue(result, resultType)
 		}
 	}
-	result := createCall(fnptr, args, "")
+	result := c.builder.CreateCall(fnptr, args, "")
 	return c.NewValue(result, resultType)
 }

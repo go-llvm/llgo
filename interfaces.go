@@ -48,3 +48,13 @@ func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	}
 	return c.NewValue(c.builder.CreateCall(f, args, ""), types.Typ[types.Bool])
 }
+
+func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
+	value := llvm.Undef(c.types.ToLLVM(iface))
+	rtype := c.types.ToRuntime(v.Type())
+	rtype = c.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
+	value = c.builder.CreateInsertValue(value, rtype, 0, "")
+	value = c.builder.CreateInsertValue(value, v.interfaceValue(), 1, "")
+	// TODO convE2I
+	return c.NewValue(value, iface)
+}

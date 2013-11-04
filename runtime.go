@@ -204,3 +204,11 @@ func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
 	fill := llvm.ConstNull(llvm.Int8Type())
 	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
 }
+
+func (c *compiler) emitPanic(arg *LLVMValue) {
+	// FIXME check if arg is already an interface
+	arg = c.makeInterface(arg, types.NewInterface(nil))
+	args := []llvm.Value{arg.LLVMValue()}
+	c.builder.CreateCall(c.runtime.panic_.LLVMValue(), args, "")
+	c.builder.CreateUnreachable()
+}

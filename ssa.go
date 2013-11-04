@@ -360,15 +360,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		iface := instr.Type().Underlying().(*types.Interface)
+		//iface := instr.Type().Underlying().(*types.Interface)
 		receiver := fr.value(instr.X)
-		value := llvm.Undef(fr.types.ToLLVM(iface))
-		rtype := fr.types.ToRuntime(receiver.Type())
-		rtype = fr.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
-		value = fr.builder.CreateInsertValue(value, rtype, 0, "")
-		value = fr.builder.CreateInsertValue(value, receiver.interfaceValue(), 1, "")
-		// TODO convE2I
-		fr.env[instr] = fr.NewValue(value, instr.Type())
+		fr.env[instr] = fr.makeInterface(receiver, instr.Type())
 
 	//case *ssa.MakeMap:
 

@@ -295,48 +295,22 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		//}
 	}
 
-	/*
-		// Create global constructors. The initfuncs/varinitfuncs
-		// slices are in the order of visitation; we generate the
-		// list of constructors in the reverse order.
-		//
-		// The llgo linker will link modules in the order of
-		// package dependency, i.e. if A requires B, then llgo-link
-		// will link the modules in the order A, B. The "runtime"
-		// package is always last.
-		//
-		// At program initialisation, the runtime initialisation
-		// function (runtime.main) will invoke the constructors
-		// in reverse order.
-		var initfuncs [][]llvm.Value
-		if compiler.varinitfuncs != nil {
-			initfuncs = append(initfuncs, compiler.varinitfuncs)
-		}
-		if compiler.initfuncs != nil {
-			initfuncs = append(initfuncs, compiler.initfuncs)
-		}
-		if initfuncs != nil {
-			ctortype := llvm.PointerType(llvm.Int8Type(), 0)
-			var ctors []llvm.Value
-			var index int = 0
-			for _, initfuncs := range initfuncs {
-				for _, fnptr := range initfuncs {
-					name := fmt.Sprintf("__llgo.ctor.%s.%d", importpath, index)
-					fnptr.SetName(name)
-					fnptr = llvm.ConstBitCast(fnptr, ctortype)
-					ctors = append(ctors, fnptr)
-					index++
-				}
-			}
-			for i, n := 0, len(ctors); i < n/2; i++ {
-				ctors[i], ctors[n-i-1] = ctors[n-i-1], ctors[i]
-			}
-			ctorsInit := llvm.ConstArray(ctortype, ctors)
-			ctorsVar := llvm.AddGlobal(compiler.module.Module, ctorsInit.Type(), "runtime.ctors")
-			ctorsVar.SetInitializer(ctorsInit)
-			ctorsVar.SetLinkage(llvm.AppendingLinkage)
-		}
-	*/
+	// Create a global constructor for package initialization.
+	//
+	// The llgo-build tool will link modules in the order of
+	// package dependency, i.e. if A requires B, then llgo-build
+	// will link the modules in the order A, B. The "runtime"
+	// package is always last.
+	//
+	// At program initialization, the runtime initialization
+	// function (runtime.main) will invoke the runtime.ctors
+	// constructors in reverse order.
+	initFunction := compiler.module.NamedFunction(importpath + ".init")
+	initFunction = llvm.ConstBitCast(initFunction, llvm.PointerType(llvm.Int8Type(), 0))
+	ctorsInit := llvm.ConstArray(initFunction.Type(), []llvm.Value{initFunction})
+	ctorsVar := llvm.AddGlobal(compiler.module.Module, ctorsInit.Type(), "runtime.ctors")
+	ctorsVar.SetInitializer(ctorsInit)
+	ctorsVar.SetLinkage(llvm.AppendingLinkage)
 
 	return compiler.module, nil
 }
