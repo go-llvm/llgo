@@ -460,7 +460,7 @@ func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 
 	const eqalgsig = "func(uintptr, unsafe.Pointer, unsafe.Pointer) bool"
 	var equalAlg llvm.Value
-	switch t := t.(type) {
+	switch t := t.Underlying().(type) {
 	case *types.Basic:
 		switch t.Kind() {
 		case types.String:

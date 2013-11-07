@@ -276,10 +276,10 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 				)
 			}
 		}
-
-		// Export runtime type information.
-		compiler.exportRuntimeTypes()
 	*/
+
+	// Export runtime type information.
+	compiler.exportRuntimeTypes(importpath == "runtime")
 
 	if importpath == "main" {
 		// Create "main.proginit", which will perform program initialization.

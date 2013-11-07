@@ -24,39 +24,28 @@ func reflect_ismapkey(t *rtype) bool {
 
 // #llgo name: reflect.makemap
 func reflect_makemap(t *map_) unsafe.Pointer {
-	return makemap(unsafe.Pointer(t), 0, 0, 0)
+	return makemap(unsafe.Pointer(t), 0)
 }
 
-func makemap(t unsafe.Pointer, n int, keys, values uintptr) unsafe.Pointer {
+func makemap(t unsafe.Pointer, cap int) unsafe.Pointer {
 	m := (*map_)(malloc(uintptr(unsafe.Sizeof(map_{}))))
-	if m != nil {
-		m.length = 0
-		m.head = nil
-		maptyp := (*mapType)(t)
-		for i := 0; i < n; i++ {
-			reflect_mapassign(maptyp, unsafe.Pointer(m), unsafe.Pointer(keys), unsafe.Pointer(values), true)
-			keys = align(keys+maptyp.key.size, uintptr(maptyp.key.align))
-			values = align(values+maptyp.elem.size, uintptr(maptyp.elem.align))
-		}
-	}
 	return unsafe.Pointer(m)
 }
 
 // #llgo name: reflect.maplen
 func reflect_maplen(m unsafe.Pointer) int32 {
-	return int32(maplen((*map_)(m)))
+	return int32(maplen(m))
 }
 
-func maplen(m *map_) int {
+func maplen(m unsafe.Pointer) int {
 	if m != nil {
-		return int(m.length)
+		return int((*map_)(m).length)
 	}
 	return 0
 }
 
 // #llgo name: reflect.mapassign
-func reflect_mapassign(t *mapType, m_, key, val unsafe.Pointer, ok bool) {
-	m := (*map_)(m_)
+func reflect_mapassign(t *mapType, m, key, val unsafe.Pointer, ok bool) {
 	if ok {
 		ptr := maplookup(unsafe.Pointer(t), m, key, true)
 		// TODO use copy alg
@@ -67,16 +56,31 @@ func reflect_mapassign(t *mapType, m_, key, val unsafe.Pointer, ok bool) {
 }
 
 // #llgo name: reflect.mapaccess
-func reflect_mapaccess(t *rtype, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
-	m := (*map_)(m_)
+func reflect_mapaccess(t *rtype, m, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	ptr := maplookup(unsafe.Pointer(t), m, key, false)
 	return ptr, ptr != nil
 }
 
-func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {
-	if m == nil {
+// mapaccess copies the value for the given key out if that key exists,
+// else nil. The return value is true iff the key exists.
+func mapaccess(t unsafe.Pointer, m_, key, outval unsafe.Pointer) bool {
+	maptyp := (*mapType)(t)
+	elemsize := uintptr(maptyp.elem.size)
+	ptr := maplookup(t, m_, key, false)
+	if ptr != nil {
+		memcpy(outval, ptr, elemsize)
+		return true
+	}
+	bzero(outval, elemsize)
+	return false
+}
+
+// maplookup returns a pointer to the value for the given key
+func maplookup(t unsafe.Pointer, m_, key unsafe.Pointer, insert bool) unsafe.Pointer {
+	if m_ == nil {
 		return nil
 	}
+	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
@@ -119,10 +123,11 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	return nil
 }
 
-func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
-	if m == nil {
+func mapdelete(t unsafe.Pointer, m_, key unsafe.Pointer) {
+	if m_ == nil {
 		return
 	}
+	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
 	ptrsize := uintptr(unsafe.Sizeof(m.head.next))

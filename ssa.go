@@ -348,7 +348,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		succ := instr.Block().Succs[0]
 		fr.builder.CreateBr(fr.block(succ))
 
-	//case *ssa.Lookup:
+	case *ssa.Lookup:
+		x := fr.value(instr.X)
+		index := fr.value(instr.Index)
+		if isString(x.Type().Underlying()) {
+			// TODO
+			panic("unimplemented: string indexing")
+		} else {
+			fr.env[instr] = fr.mapLookup(x, index, instr.CommaOk)
+		}
+
 	//case *ssa.MakeChan:
 
 	case *ssa.MakeClosure:
@@ -364,14 +373,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		receiver := fr.value(instr.X)
 		fr.env[instr] = fr.makeInterface(receiver, instr.Type())
 
-	//case *ssa.MakeMap:
+	case *ssa.MakeMap:
+		fr.env[instr] = fr.makeMap(instr.Type(), fr.value(instr.Reserve))
 
 	case *ssa.MakeSlice:
 		length := fr.value(instr.Len)
 		capacity := fr.value(instr.Cap)
 		fr.env[instr] = fr.makeSlice(instr.Type(), length, capacity)
 
-	//case *ssa.MapUpdate:
+	case *ssa.MapUpdate:
+		m := fr.value(instr.Map)
+		k := fr.value(instr.Key)
+		v := fr.value(instr.Value)
+		fr.mapUpdate(m, k, v)
+
 	//case *ssa.Next:
 
 	case *ssa.Panic:
@@ -445,7 +460,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = result
 
 	default:
-		panic("unhandled")
+		panic(fmt.Sprintf("unhandled: %v", instr))
 	}
 }
 
