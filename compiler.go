@@ -42,7 +42,6 @@ type compiler struct {
 	module  *Module
 	machine llvm.TargetMachine
 	target  llvm.TargetData
-	pkg     *types.Package
 	fileset *token.FileSet
 
 	typechecker   *types.Config
@@ -282,8 +281,12 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		compiler.exportRuntimeTypes()
 	*/
 
-	// Wrap "main.main" in a call to runtime.main.
 	if importpath == "main" {
+		// Create "main.proginit", which will perform program initialization.
+		if err = compiler.createProginit(mainpkg.Object, buildctx); err != nil {
+			return nil, err
+		}
+		// Wrap "main.main" in a call to runtime.main.
 		if err = compiler.createMainFunction(); err != nil {
 			return nil, err
 		}
@@ -294,23 +297,6 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		//	return nil, err
 		//}
 	}
-
-	// Create a global constructor for package initialization.
-	//
-	// The llgo-build tool will link modules in the order of
-	// package dependency, i.e. if A requires B, then llgo-build
-	// will link the modules in the order A, B. The "runtime"
-	// package is always last.
-	//
-	// At program initialization, the runtime initialization
-	// function (runtime.main) will invoke the runtime.ctors
-	// constructors in reverse order.
-	initFunction := compiler.module.NamedFunction(importpath + ".init")
-	initFunction = llvm.ConstBitCast(initFunction, llvm.PointerType(llvm.Int8Type(), 0))
-	ctorsInit := llvm.ConstArray(initFunction.Type(), []llvm.Value{initFunction})
-	ctorsVar := llvm.AddGlobal(compiler.module.Module, ctorsInit.Type(), "runtime.ctors")
-	ctorsVar.SetInitializer(ctorsInit)
-	ctorsVar.SetLinkage(llvm.AppendingLinkage)
 
 	return compiler.module, nil
 }

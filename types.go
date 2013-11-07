@@ -15,8 +15,8 @@ func deref(t types.Type) types.Type {
 	return t.Underlying().(*types.Pointer).Elem()
 }
 
-func (c *compiler) exportRuntimeTypes() {
-	if c.pkg.Path() == "runtime" {
+func (c *compiler) exportRuntimeTypes(builtin bool) {
+	if builtin {
 		kinds := [...]types.BasicKind{
 			types.Uint,
 			types.Uint8,

@@ -4,8 +4,10 @@
 
 package runtime
 
-// #llgo linkage: appending
-var ctors [1]*int8 // nil, used to find end of list
+// proginit runs the initializers for all packages in
+// reverse dependency order (runtime first, main last).
+// #llgo name: llgo.main.proginit
+func main_proginit()
 
 // Defined in panic.ll
 func guardedcall1(f func(), errback func())
@@ -18,18 +20,8 @@ func main(argc int32, argv **byte, envp **byte, mainmain *int8) int32 {
 	// Initialise the runtime before calling any constructors.
 	setosargs(argc, argv, envp)
 
-	// Constructors are in reverse order (see llgo/compiler.go for
-	// an explanation). Since runtime module must always come last,
-	// we can use a sentinel nil value to find the end.
-	for i := 0; ; i++ {
-		if ctors[i] == nil {
-			for i > 0 {
-				i--
-				ccall(ctors[i])
-			}
-			break
-		}
-	}
+	// Run package initializers.
+	main_proginit()
 
 	// All done, call "main.main".
 	var rc int32
