@@ -6,14 +6,10 @@ package runtime
 
 import "unsafe"
 
-type map_ struct {
-	length int32
-	head   *mapentry
-}
+type map_ []*mapentry
 
 type mapentry struct {
-	next *mapentry
-	// after this comes the key, then the value.
+	// first comes the key, then the value.
 }
 
 // #llgo name: reflect.ismapkey
@@ -39,7 +35,7 @@ func reflect_maplen(m unsafe.Pointer) int32 {
 
 func maplen(m unsafe.Pointer) int {
 	if m != nil {
-		return int((*map_)(m).length)
+		return len(*(*map_)(m))
 	}
 	return 0
 }
@@ -83,7 +79,7 @@ func maplookup(t unsafe.Pointer, m_, key unsafe.Pointer, insert bool) unsafe.Poi
 	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
-	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+	ptrsize := uintptr(unsafe.Sizeof(m_))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 	elemsize := uintptr(maptyp.elem.size)
@@ -94,29 +90,22 @@ func maplookup(t unsafe.Pointer, m_, key unsafe.Pointer, insert bool) unsafe.Poi
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
 	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
-	var last *mapentry
-	for ptr := m.head; ptr != nil; ptr = ptr.next {
+	for i := 0; i < len(*m); i++ {
+		ptr := (*m)[i]
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		if eqalg(keyeqfun, keysize, key, keyptr) {
 			elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
 			return elemptr
 		}
-		last = ptr
 	}
 
 	// Not found: insert the key if requested.
 	if insert {
 		newentry := (*mapentry)(malloc(entrysize))
-		newentry.next = nil
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + keyoffset)
 		elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + elemoffset)
 		memcpy(keyptr, key, keysize)
-		if last != nil {
-			last.next = newentry
-		} else {
-			m.head = newentry
-		}
-		m.length++
+		*m = append(*m, newentry)
 		return elemptr
 	}
 
@@ -130,7 +119,7 @@ func mapdelete(t unsafe.Pointer, m_, key unsafe.Pointer) {
 	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
-	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+	ptrsize := uintptr(unsafe.Sizeof(m_))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 
@@ -138,20 +127,18 @@ func mapdelete(t unsafe.Pointer, m_, key unsafe.Pointer) {
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
 	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
-	var last *mapentry
-	for ptr := m.head; ptr != nil; ptr = ptr.next {
+	for i := 0; i < len(*m); i++ {
+		ptr := (*m)[i]
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		if eqalg(keyeqfun, keysize, key, keyptr) {
-			if last == nil {
-				m.head = ptr.next
-			} else {
-				last.next = ptr.next
+			var tail []*mapentry
+			if len(*m) > i+1 {
+				tail = (*m)[i+1:]
 			}
+			(*m) = append((*m)[:i], tail...)
 			free(unsafe.Pointer(ptr))
-			m.length--
 			return
 		}
-		last = ptr
 	}
 }
 
@@ -172,25 +159,43 @@ func reflect_mapiternext(it *byte) {
 	// TODO
 }
 
-func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv unsafe.Pointer) {
+type mapiter struct {
+	ptrk unsafe.Pointer
+	ptrv unsafe.Pointer
+
+	typ *mapType
+	m   *map_
+	i   int
+}
+
+// TODO pass pointer to stack allocated block in
+func mapiterinit(t, m unsafe.Pointer) unsafe.Pointer {
 	if m == nil {
-		return
+		return nil
 	}
-	ptr := (*mapentry)(nextin)
-	if ptr == nil {
-		ptr = m.head
-	} else {
-		ptr = ptr.next
+	iter := (*mapiter)(malloc(unsafe.Sizeof(mapiter{})))
+	iter.typ = (*mapType)(t)
+	iter.m = (*map_)(m)
+	return unsafe.Pointer(iter)
+}
+
+func mapiternext(iter_ unsafe.Pointer) bool {
+	if iter_ == nil {
+		return false
 	}
-	if ptr != nil {
-		maptyp := (*mapType)(t)
-		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
-		keysize := uintptr(maptyp.key.size)
-		keyoffset := align(ptrsize, uintptr(maptyp.key.align))
-		elemoffset := align(keyoffset+keysize, uintptr(maptyp.elem.align))
-		nextout = unsafe.Pointer(ptr)
-		pk = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		pv = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
+	iter := (*mapiter)(iter_)
+	if iter.i >= len(*iter.m) {
+		iter.ptrk = nil
+		iter.ptrv = nil
+		return false
 	}
-	return
+	entry := (*iter.m)[iter.i]
+	iter.i++
+	ptrsize := uintptr(unsafe.Sizeof(entry))
+	keysize := uintptr(iter.typ.key.size)
+	keyoffset := align(ptrsize, uintptr(iter.typ.key.align))
+	elemoffset := align(keyoffset+keysize, uintptr(iter.typ.elem.align))
+	iter.ptrk = unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + keyoffset)
+	iter.ptrv = unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + elemoffset)
+	return true
 }

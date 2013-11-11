@@ -5,8 +5,10 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
+
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -54,7 +56,7 @@ func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
 	return result
 }
 
-func (c *compiler) printValues(println_ bool, values ...Value) Value {
+func (c *compiler) printValues(println_ bool, values ...Value) {
 	var args []llvm.Value = nil
 	if len(values) > 0 {
 		format := ""
@@ -156,9 +158,13 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
 	}
 	printf := getPrintf(c.module.Module)
-	result := c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
+	c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
 	fflush := getFflush(c.module.Module)
 	fileptr := llvm.ConstNull(fflush.Type().ElementType().ParamTypes()[0])
 	c.builder.CreateCall(fflush, []llvm.Value{fileptr}, "")
-	return result
+}
+
+func (c *compiler) printf(format string, args ...interface{}) {
+	s := exact.MakeString(fmt.Sprintf(format, args...))
+	c.printValues(true, c.NewConstValue(s, types.Typ[types.String]))
 }

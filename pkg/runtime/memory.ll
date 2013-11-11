@@ -6,8 +6,6 @@ declare void @free(i8*)
 declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, i1) nounwind
 declare void @llvm.memmove.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, i1) nounwind
 declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1) nounwind
-declare void @llvm.stackrestore(i8*)
-declare i8*  @llvm.stacksave()
 
 define void @runtime.free(i64) {
 entry:
@@ -37,16 +35,4 @@ entry:
   %3 = inttoptr i64 %0 to i8*
   call void @llvm.memset.p0i8.i64(i8* %3, i8 %1, i64 %2, i32 1, i1 false)
   ret void
-}
-
-define void @runtime.stackrestore(i8*) {
-entry:
-  call void @llvm.stackrestore(i8* %0)
-  ret void
-}
-
-define i8* @runtime.stacksave() {
-entry:
-  %0 = call i8* @llvm.stacksave()
-  ret i8* %0
 }

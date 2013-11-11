@@ -29,13 +29,12 @@ func (c *compiler) mapLookup(m, k *LLVMValue, commaOk bool) *LLVMValue {
 	dyntyp := c.types.ToRuntime(m.Type())
 	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 
-	defer c.stackrestore(c.stacksave())
+	stackptr := c.stacksave()
 	llk := k.LLVMValue()
 	pk := c.builder.CreateAlloca(llk.Type(), "")
 	c.builder.CreateStore(llk, pk)
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
 	pv := c.builder.CreateAlloca(c.types.ToLLVM(elemtyp), "")
-
 	ok := c.builder.CreateCall(
 		c.runtime.mapaccess.LLVMValue(),
 		[]llvm.Value{
@@ -45,11 +44,12 @@ func (c *compiler) mapLookup(m, k *LLVMValue, commaOk bool) *LLVMValue {
 			c.builder.CreatePtrToInt(pv, c.target.IntPtrType(), ""),
 		}, "",
 	)
-
 	v := c.builder.CreateLoad(pv, "")
+	c.stackrestore(stackptr)
 	if !commaOk {
 		return c.NewValue(v, elemtyp)
 	}
+
 	fields := []*types.Var{
 		types.NewParam(0, nil, "", elemtyp),
 		types.NewParam(0, nil, "", types.Typ[types.Bool]),
@@ -61,30 +61,94 @@ func (c *compiler) mapLookup(m, k *LLVMValue, commaOk bool) *LLVMValue {
 	return c.NewValue(tuple, typ)
 }
 
-// mapSlot gets a pointer to the m[k] value slot; if insert is true
-// and the key does not exist, it is inserted.
-func (c *compiler) mapSlot(m_, k_ *LLVMValue, insert_ bool) *LLVMValue {
+// mapUpdate implements m[k] = v
+func (c *compiler) mapUpdate(m_, k_, v_ *LLVMValue) {
 	f := c.runtime.maplookup.LLVMValue()
 	dyntyp := c.types.ToRuntime(m_.Type())
 	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
 	m := m_.LLVMValue()
 	k := k_.LLVMValue()
 
-	// FIXME require that k is a pointer
-	defer c.stackrestore(c.stacksave())
+	stackptr := c.stacksave()
 	pk := c.builder.CreateAlloca(k.Type(), "")
 	c.builder.CreateStore(k, pk)
 	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
-
-	insert := boolLLVMValue(insert_)
+	insert := boolLLVMValue(true)
 	ptrv := c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk, insert}, "")
+	c.stackrestore(stackptr)
+
 	ptrvtyp := types.NewPointer(m_.Type().Underlying().(*types.Map).Elem())
 	ptrv = c.builder.CreateIntToPtr(ptrv, c.types.ToLLVM(ptrvtyp), "")
-	return c.NewValue(ptrv, ptrvtyp)
+	c.builder.CreateStore(v_.LLVMValue(), ptrv)
 }
 
-// mapUpdate implements m[k] = v
-func (c *compiler) mapUpdate(m, k, v *LLVMValue) {
-	ptrv := c.mapSlot(m, k, true)
-	c.builder.CreateStore(v.LLVMValue(), ptrv.LLVMValue())
+// mapDelete implements delete(m, k)
+func (c *compiler) mapDelete(m_, k_ *LLVMValue) {
+	f := c.runtime.mapdelete.LLVMValue()
+	dyntyp := c.types.ToRuntime(m_.Type())
+	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+	m := m_.LLVMValue()
+	k := k_.LLVMValue()
+	stackptr := c.stacksave()
+	pk := c.builder.CreateAlloca(k.Type(), "")
+	c.builder.CreateStore(k, pk)
+	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
+	c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk}, "")
+	c.stackrestore(stackptr)
+}
+
+// mapIterInit creates a map iterator
+func (c *compiler) mapIterInit(m *LLVMValue) *LLVMValue {
+	// TODO allocate iterator on stack at usage site
+	f := c.runtime.mapiterinit.LLVMValue()
+	dyntyp := c.types.ToRuntime(m.Type())
+	iter := c.builder.CreateCall(f, []llvm.Value{
+		c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), ""),
+		c.builder.CreatePtrToInt(m.LLVMValue(), c.target.IntPtrType(), ""),
+	}, "")
+	return c.NewValue(iter, m.Type())
+}
+
+// mapIterNext advances the iterator, and returns the tuple (ok, k, v).
+func (c *compiler) mapIterNext(iter *LLVMValue) *LLVMValue {
+	maptyp := iter.Type().Underlying().(*types.Map)
+	ktyp := maptyp.Key()
+	vtyp := maptyp.Elem()
+
+	lliter := iter.LLVMValue()
+	mapiternext := c.runtime.mapiternext.LLVMValue()
+	ok := c.builder.CreateCall(mapiternext, []llvm.Value{lliter}, "")
+
+	fields := []*types.Var{
+		types.NewParam(0, nil, "", types.Typ[types.Bool]),
+		types.NewParam(0, nil, "", ktyp),
+		types.NewParam(0, nil, "", vtyp),
+	}
+	typ := types.NewStruct(fields, nil)
+	tuple := llvm.Undef(c.types.ToLLVM(typ))
+	tuple = c.builder.CreateInsertValue(tuple, ok, 0, "")
+
+	currBlock := c.builder.GetInsertBlock()
+	endBlock := llvm.InsertBasicBlock(currBlock, "")
+	endBlock.MoveAfter(currBlock)
+	okBlock := llvm.InsertBasicBlock(endBlock, "")
+	c.builder.CreateCondBr(ok, okBlock, endBlock)
+
+	// TODO when mapIterInit/mapIterNext operate on a
+	// stack-allocated struct, use CreateExtractValue
+	// to load pk/pv.
+	c.builder.SetInsertPointAtEnd(okBlock)
+	lliter = c.builder.CreateIntToPtr(lliter, llvm.PointerType(c.runtime.mapiter.llvm, 0), "")
+	pk := c.builder.CreateLoad(c.builder.CreateStructGEP(lliter, 0, ""), "")
+	pv := c.builder.CreateLoad(c.builder.CreateStructGEP(lliter, 1, ""), "")
+	k := c.builder.CreateLoad(c.builder.CreateIntToPtr(pk, llvm.PointerType(c.types.ToLLVM(ktyp), 0), ""), "")
+	v := c.builder.CreateLoad(c.builder.CreateIntToPtr(pv, llvm.PointerType(c.types.ToLLVM(vtyp), 0), ""), "")
+	tuplekv := c.builder.CreateInsertValue(tuple, k, 1, "")
+	tuplekv = c.builder.CreateInsertValue(tuplekv, v, 2, "")
+	c.builder.CreateBr(endBlock)
+
+	c.builder.SetInsertPointAtEnd(endBlock)
+	phi := c.builder.CreatePHI(tuple.Type(), "")
+	phi.AddIncoming([]llvm.Value{tuple, tuplekv}, []llvm.BasicBlock{currBlock, okBlock})
+	return c.NewValue(phi, typ)
 }

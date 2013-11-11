@@ -21,8 +21,6 @@ func free(unsafe.Pointer)
 func memcpy(dst, src unsafe.Pointer, size uintptr)
 func memmove(dst, src unsafe.Pointer, size uintptr)
 func memset(dst unsafe.Pointer, fill byte, size uintptr)
-func stacksave() *int8
-func stackrestore(*int8)
 
 func bzero(dst unsafe.Pointer, size uintptr) {
 	memset(dst, 0, size)

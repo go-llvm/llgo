@@ -258,13 +258,19 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Call:
 		fn, args, result := fr.prepareCall(instr)
-		if result != nil {
+		// Some builtins may only be used immediately, and not
+		// deferred; in this case, "fn" will be nil, and result
+		// may be non-nil (it will be nil for builtins without
+		// results.)
+		if fn == nil {
+			if result != nil {
+				fr.env[instr] = result
+			}
+		} else {
+			const hasdefers = false // TODO
+			result = fr.createCall(fn, args, hasdefers)
 			fr.env[instr] = result
-			return
 		}
-		const hasdefers = false // TODO
-		result = fr.createCall(fn, args, hasdefers)
-		fr.env[instr] = result
 
 	//case *ssa.Builtin:
 
@@ -333,13 +339,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		var addr llvm.Value
 		var elemtyp types.Type
 		zero := llvm.ConstNull(index.Type())
-		switch typ := instr.X.Type().(type) {
+		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
 			elemtyp = typ.Elem()
 			x = fr.builder.CreateExtractValue(x, 0, "")
 			addr = fr.builder.CreateGEP(x, []llvm.Value{index}, "")
 		case *types.Pointer: // *array
-			elemtyp = deref(typ).(*types.Array).Elem()
+			elemtyp = typ.Elem().Underlying().(*types.Array).Elem()
 			addr = fr.builder.CreateGEP(x, []llvm.Value{zero, index}, "")
 		}
 		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp))
@@ -387,7 +393,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		v := fr.value(instr.Value)
 		fr.mapUpdate(m, k, v)
 
-	//case *ssa.Next:
+	case *ssa.Next:
+		if instr.IsString {
+			panic("unimplemented: Next(stringIter)")
+		} else {
+			iter := fr.value(instr.Iter)
+			fr.env[instr] = fr.mapIterNext(iter)
+		}
 
 	case *ssa.Panic:
 		// TODO
@@ -407,7 +419,14 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 		phi.AddIncoming(values, blocks)
 
-	//case *ssa.Range:
+	case *ssa.Range:
+		x := fr.value(instr.X)
+		switch x.Type().Underlying().(type) {
+		case *types.Map:
+			fr.env[instr] = fr.mapIterInit(x)
+		default:
+			panic(fmt.Sprintf("unhandled range for type %T", x.Type()))
+		}
 
 	case *ssa.Return:
 		switch n := len(instr.Results); n {
@@ -535,6 +554,10 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 
 	case "len":
 		return nil, nil, fr.callLen(args[0])
+
+	case "delete":
+		fr.mapDelete(args[0], args[1])
+		return nil, nil, nil
 
 	case "real":
 		return nil, nil, args[0].extractComplexComponent(0)

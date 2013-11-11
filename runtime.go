@@ -34,6 +34,7 @@ type runtimeInterface struct {
 	imethod,
 	interfaceType,
 	itab,
+	mapiter,
 	mapType,
 	method,
 	ptrType,
@@ -51,6 +52,9 @@ type runtimeInterface struct {
 	makemap,
 	malloc,
 	mapaccess,
+	mapdelete,
+	mapiterinit,
+	mapiternext,
 	maplookup,
 	memcpy,
 	memequal,
@@ -66,8 +70,6 @@ type runtimeInterface struct {
 	sliceappend,
 	slicecopy,
 	sliceslice,
-	stackrestore,
-	stacksave,
 	strcat,
 	strcmp,
 	streqalg,
@@ -79,6 +81,9 @@ type runtimeInterface struct {
 	f64eqalg,
 	c64eqalg,
 	c128eqalg *LLVMValue
+
+	stackrestore,
+	stacksave llvm.Value
 }
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap) (*runtimeInterface, error) {
@@ -94,6 +99,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"imethod":       &ri.imethod,
 		"interfaceType": &ri.interfaceType,
 		"itab":          &ri.itab,
+		"mapiter":       &ri.mapiter,
 		"mapType":       &ri.mapType,
 		"method":        &ri.method,
 		"ptrType":       &ri.ptrType,
@@ -120,6 +126,9 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"makemap":      &ri.makemap,
 		"malloc":       &ri.malloc,
 		"mapaccess":    &ri.mapaccess,
+		"mapdelete":    &ri.mapdelete,
+		"mapiterinit":  &ri.mapiterinit,
+		"mapiternext":  &ri.mapiternext,
 		"maplookup":    &ri.maplookup,
 		"memcpy":       &ri.memcpy,
 		"memequal":     &ri.memequal,
@@ -134,8 +143,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"sliceappend":  &ri.sliceappend,
 		"slicecopy":    &ri.slicecopy,
 		"sliceslice":   &ri.sliceslice,
-		"stackrestore": &ri.stackrestore,
-		"stacksave":    &ri.stacksave,
 		"stringslice":  &ri.stringslice,
 		"strcat":       &ri.strcat,
 		"strcmp":       &ri.strcmp,
@@ -159,6 +166,16 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		llfn := llvm.AddFunction(module, "runtime."+name, llftyp)
 		*field = &LLVMValue{value: llfn, typ: obj.Type()}
 	}
+
+	// stacksave/stackrestore cannot be wrapped, and
+	// are never referenced in the runtime package,
+	// so we just declare them here.
+	ri.stackrestore = llvm.AddFunction(module, "llvm.stackrestore", llvm.FunctionType(
+		llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0)}, false,
+	))
+	ri.stacksave = llvm.AddFunction(module, "llvm.stacksave", llvm.FunctionType(
+		llvm.PointerType(llvm.Int8Type(), 0), nil, false,
+	))
 
 	return &ri, nil
 }
@@ -224,9 +241,9 @@ func (c *compiler) emitPanic(arg *LLVMValue) {
 }
 
 func (c *compiler) stacksave() llvm.Value {
-	return c.builder.CreateCall(c.runtime.stacksave.LLVMValue(), nil, "")
+	return c.builder.CreateCall(c.runtime.stacksave, nil, "")
 }
 
 func (c *compiler) stackrestore(ctx llvm.Value) {
-	c.builder.CreateCall(c.runtime.stackrestore.LLVMValue(), []llvm.Value{ctx}, "")
+	c.builder.CreateCall(c.runtime.stackrestore, []llvm.Value{ctx}, "")
 }
