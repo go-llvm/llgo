@@ -66,3 +66,34 @@ func (c *compiler) callAppend(a, b *LLVMValue) *LLVMValue {
 	result := c.builder.CreateCall(f, args, "")
 	return c.NewValue(c.coerceSlice(result, llaType), a.Type())
 }
+
+// callCopy takes two slices a and b of the same type, and
+// yields the result of calling "copy(a, b)".
+func (c *compiler) callCopy(dest, source *LLVMValue) *LLVMValue {
+	runtimeTyp := c.types.ToRuntime(dest.Type())
+	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+	slicecopy := c.runtime.slicecopy.value
+	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
+	args := []llvm.Value{
+		runtimeTyp,
+		c.coerceSlice(dest.LLVMValue(), i8slice),
+		c.coerceSlice(source.LLVMValue(), i8slice),
+	}
+	result := c.builder.CreateCall(slicecopy, args, "")
+	return c.NewValue(result, types.Typ[types.Int])
+}
+
+// callDelete implements delete(m, k)
+func (c *compiler) callDelete(m_, k_ *LLVMValue) {
+	f := c.runtime.mapdelete.LLVMValue()
+	dyntyp := c.types.ToRuntime(m_.Type())
+	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+	m := m_.LLVMValue()
+	k := k_.LLVMValue()
+	stackptr := c.stacksave()
+	pk := c.builder.CreateAlloca(k.Type(), "")
+	c.builder.CreateStore(k, pk)
+	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
+	c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk}, "")
+	c.stackrestore(stackptr)
+}

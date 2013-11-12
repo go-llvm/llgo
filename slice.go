@@ -58,82 +58,6 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 	return dst
 }
 
-/*
-func (c *compiler) VisitAppend(expr *ast.CallExpr) Value {
-	s := c.VisitExpr(expr.Args[0])
-	elemtyp := s.Type().Underlying().(*types.Slice).Elem()
-	if len(expr.Args) == 1 {
-		return s
-	} else if expr.Ellipsis.IsValid() {
-		c.convertUntyped(expr.Args[1], s.Type())
-	} else {
-		for _, arg := range expr.Args[1:] {
-			c.convertUntyped(arg, elemtyp)
-		}
-	}
-
-	sliceappend := c.RuntimeFunction("runtime.sliceappend", "func(t uintptr, dst, src slice) slice")
-	i8slice := sliceappend.Type().ElementType().ReturnType()
-	i8ptr := c.types.ToLLVM(types.NewPointer(types.Typ[types.Int8]))
-
-	// Coerce first argument into an []int8.
-	a_ := s.LLVMValue()
-	sliceTyp := a_.Type()
-	a := c.coerceSlice(a_, i8slice)
-
-	var b llvm.Value
-	if expr.Ellipsis.IsValid() {
-		// Pass the provided slice straight through. If it's a string,
-		// convert it to a []byte first.
-		elem := c.VisitExpr(expr.Args[1]).Convert(s.Type())
-		b = c.coerceSlice(elem.LLVMValue(), i8slice)
-	} else {
-		// Construct a fresh []int8 for the temporary slice.
-		n := llvm.ConstInt(c.types.inttype, uint64(len(expr.Args)-1), false)
-		mem := c.builder.CreateArrayAlloca(c.types.ToLLVM(elemtyp), n, "")
-		for i, arg := range expr.Args[1:] {
-			elem := c.VisitExpr(arg).Convert(elemtyp)
-			indices := []llvm.Value{llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
-			ptr := c.builder.CreateGEP(mem, indices, "")
-			c.builder.CreateStore(elem.LLVMValue(), ptr)
-		}
-		b = llvm.Undef(i8slice)
-		b = c.builder.CreateInsertValue(b, c.builder.CreateBitCast(mem, i8ptr, ""), 0, "")
-		b = c.builder.CreateInsertValue(b, n, 1, "")
-		b = c.builder.CreateInsertValue(b, n, 2, "")
-	}
-
-	// Call runtime function, then coerce the result.
-	runtimeTyp := c.types.ToRuntime(s.Type())
-	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
-	args := []llvm.Value{runtimeTyp, a, b}
-	result := c.builder.CreateCall(sliceappend, args, "")
-	return c.NewValue(c.coerceSlice(result, sliceTyp), s.Type())
-}
-
-func (c *compiler) VisitCopy(expr *ast.CallExpr) Value {
-	dest := c.VisitExpr(expr.Args[0])
-	source := c.VisitExpr(expr.Args[1])
-
-	// If it's a string, convert it to a []byte first.
-	source = source.Convert(dest.Type())
-
-	slicecopy := c.RuntimeFunction("runtime.slicecopy", "func(t uintptr, dst, src slice) int")
-	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
-
-	// Coerce first argument into an []int8.
-	dest_ := c.coerceSlice(dest.LLVMValue(), i8slice)
-	source_ := c.coerceSlice(source.LLVMValue(), i8slice)
-
-	// Call runtime function.
-	runtimeTyp := c.types.ToRuntime(dest.Type())
-	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
-	args := []llvm.Value{runtimeTyp, dest_, source_}
-	result := c.builder.CreateCall(slicecopy, args, "")
-	return c.NewValue(result, types.Typ[types.Int])
-}
-*/
-
 func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 	if low != nil {
 		low = low.Convert(types.Typ[types.Int]).(*LLVMValue)
@@ -180,9 +104,14 @@ func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 		return c.NewValue(c.coerceSlice(result, sliceTyp), x.Type())
 	case *types.Basic:
 		stringslice := c.runtime.stringslice.LLVMValue()
-		args := []llvm.Value{x.LLVMValue(), low.LLVMValue(), high.LLVMValue()}
+		llv := x.LLVMValue()
+		args := []llvm.Value{
+			c.coerceString(llv, stringslice.Type().ElementType().ParamTypes()[0]),
+			low.LLVMValue(),
+			high.LLVMValue(),
+		}
 		result := c.builder.CreateCall(stringslice, args, "")
-		return c.NewValue(result, x.Type())
+		return c.NewValue(c.coerceString(result, llv.Type()), x.Type())
 	default:
 		panic("unimplemented")
 	}

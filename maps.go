@@ -82,21 +82,6 @@ func (c *compiler) mapUpdate(m_, k_, v_ *LLVMValue) {
 	c.builder.CreateStore(v_.LLVMValue(), ptrv)
 }
 
-// mapDelete implements delete(m, k)
-func (c *compiler) mapDelete(m_, k_ *LLVMValue) {
-	f := c.runtime.mapdelete.LLVMValue()
-	dyntyp := c.types.ToRuntime(m_.Type())
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-	m := m_.LLVMValue()
-	k := k_.LLVMValue()
-	stackptr := c.stacksave()
-	pk := c.builder.CreateAlloca(k.Type(), "")
-	c.builder.CreateStore(k, pk)
-	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
-	c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk}, "")
-	c.stackrestore(stackptr)
-}
-
 // mapIterInit creates a map iterator
 func (c *compiler) mapIterInit(m *LLVMValue) *LLVMValue {
 	// TODO allocate iterator on stack at usage site

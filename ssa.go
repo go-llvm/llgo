@@ -555,8 +555,11 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 	case "len":
 		return nil, nil, fr.callLen(args[0])
 
+	case "copy":
+		return nil, nil, fr.callCopy(args[0], args[1])
+
 	case "delete":
-		fr.mapDelete(args[0], args[1])
+		fr.callDelete(args[0], args[1])
 		return nil, nil, nil
 
 	case "real":
