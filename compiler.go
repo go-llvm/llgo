@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/token"
 	"log"
+	"runtime"
 	"strings"
 
 	"code.google.com/p/go.tools/go/types"
@@ -16,6 +17,16 @@ import (
 	"github.com/axw/gollvm/llvm"
 	llgobuild "github.com/axw/llgo/build"
 )
+
+func assert(cond bool) {
+	if !cond {
+		_, file, line, ok := runtime.Caller(1)
+		if !ok {
+			panic("assertion failed")
+		}
+		panic(fmt.Sprintf("assertion failed [%s:%d]", file, line))
+	}
+}
 
 type Module struct {
 	llvm.Module

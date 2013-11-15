@@ -59,15 +59,44 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 	return c.NewValue(result, types.Typ[types.Bool])
 }
 
-func (c *compiler) stringNext(strval, index llvm.Value) (consumed, value llvm.Value) {
+// stringIndex implements v = m[i]
+func (c *compiler) stringIndex(s, i *LLVMValue) *LLVMValue {
+	ptr := c.builder.CreateExtractValue(s.LLVMValue(), 0, "")
+	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.LLVMValue()}, "")
+	return c.NewValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
+}
+
+// stringIterNext advances the iterator, and returns the tuple (ok, k, v).
+func (c *compiler) stringIterNext(str *LLVMValue, preds []llvm.BasicBlock) *LLVMValue {
+	// While Range/Next expresses a mutating operation, we represent them using
+	// a Phi node where the first incoming branch (before the loop), and all
+	// others take the previous value plus one.
+	//
+	// See ssa.go for comments on (and assertions of) our assumptions.
+	index := c.builder.CreatePHI(c.types.inttype, "index")
 	strnext := c.runtime.strnext.LLVMValue()
-	_string := strnext.Type().ElementType().ParamTypes()[0]
-	strval = c.coerceString(strval, _string)
-	args := []llvm.Value{strval, index}
+	args := []llvm.Value{
+		c.coerceString(str.LLVMValue(), strnext.Type().ElementType().ParamTypes()[0]),
+		index,
+	}
 	result := c.builder.CreateCall(strnext, args, "")
-	consumed = c.builder.CreateExtractValue(result, 0, "")
-	value = c.builder.CreateExtractValue(result, 1, "")
-	return
+	nextindex := c.builder.CreateExtractValue(result, 0, "")
+	runeval := c.builder.CreateExtractValue(result, 1, "")
+	values := make([]llvm.Value, len(preds))
+	values[0] = llvm.ConstNull(index.Type())
+	for i, _ := range preds[1:] {
+		values[i+1] = nextindex
+	}
+	index.AddIncoming(values, preds)
+
+	// Create an (ok, index, rune) tuple.
+	ok := c.builder.CreateIsNotNull(nextindex, "")
+	typ := tupleType(types.Typ[types.Bool], types.Typ[types.Int], types.Typ[types.Rune])
+	tuple := llvm.Undef(c.types.ToLLVM(typ))
+	tuple = c.builder.CreateInsertValue(tuple, ok, 0, "")
+	tuple = c.builder.CreateInsertValue(tuple, index, 1, "")
+	tuple = c.builder.CreateInsertValue(tuple, runeval, 2, "")
+	return c.NewValue(tuple, typ)
 }
 
 func (v *LLVMValue) runeToString() *LLVMValue {
@@ -99,5 +128,3 @@ func (v *LLVMValue) runeSliceToString() *LLVMValue {
 	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
 	return c.NewValue(result, types.Typ[types.String])
 }
-
-// vim: set ft=go:

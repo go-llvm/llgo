@@ -71,30 +71,34 @@ func stringslice(a _string, low, high int) _string {
 }
 
 // strnext returns the rune/codepoint at position i,
-// along with the number of bytes that make it up.
+// along with the index+number of bytes that make up
+// the rune.
 func strnext(s _string, i int) (n int, value rune) {
+	if i >= s.len {
+		return 0, 0
+	}
 	ptr := uintptr(unsafe.Pointer(s.str)) + uintptr(i)
 	c0 := *(*uint8)(unsafe.Pointer(ptr))
 	n = int(ctlz8(^c0))
 	if n == 0 {
-		return 1, rune(c0)
+		return i + 1, rune(c0)
 	} else if i+n > s.len {
-		return 1, '\uFFFD'
+		return i + 1, '\uFFFD'
 	}
 	value = rune(c0 & uint8(0xFF>>uint(n)))
 	for j := 1; j < n; j++ {
 		c := *(*uint8)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + uintptr(j)))
 		// Make sure only the top bit is set.
 		if c&0xC0 != 0x80 {
-			return 1, '\uFFFD'
+			return i + 1, '\uFFFD'
 		}
 		// only take the low 6 bits of continuation bytes.
 		value = (value << 6) | rune(c&0x3F)
 	}
 	if value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff) {
-		return n, '\uFFFD'
+		value = '\uFFFD'
 	}
-	return n, value
+	return i + n, value
 }
 
 // strrune converts a rune to a string.
@@ -150,7 +154,7 @@ func strtorunes(str _string) slice {
 		n, r := strnext(str, i)
 		*(*rune)(unsafe.Pointer(runes)) = r
 		runes += unsafe.Sizeof(r)
-		i += n
+		i = n
 	}
 	return slice{array: (*uint8)(mem), len: len, cap: cap}
 }

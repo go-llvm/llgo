@@ -1,8 +1,11 @@
 package main
 
 func printchars(s string) {
+	var x int
 	for i, c := range s {
-		println(i, c)
+		// test loop-carried dependence (x++), introducing a Phi node
+		x++
+		println(i, c, x)
 	}
 
 	// now test with plain old assignment
@@ -10,6 +13,10 @@ func printchars(s string) {
 	var c rune
 	for i, c = range s {
 		println(i, c)
+		if i == len(s)-1 {
+			// test multiple branches to loop header
+			continue
+		}
 	}
 }
 

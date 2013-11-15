@@ -50,11 +50,7 @@ func (c *compiler) mapLookup(m, k *LLVMValue, commaOk bool) *LLVMValue {
 		return c.NewValue(v, elemtyp)
 	}
 
-	fields := []*types.Var{
-		types.NewParam(0, nil, "", elemtyp),
-		types.NewParam(0, nil, "", types.Typ[types.Bool]),
-	}
-	typ := types.NewStruct(fields, nil)
+	typ := tupleType(elemtyp, types.Typ[types.Bool])
 	tuple := llvm.Undef(c.types.ToLLVM(typ))
 	tuple = c.builder.CreateInsertValue(tuple, v, 0, "")
 	tuple = c.builder.CreateInsertValue(tuple, ok, 1, "")
@@ -104,12 +100,7 @@ func (c *compiler) mapIterNext(iter *LLVMValue) *LLVMValue {
 	mapiternext := c.runtime.mapiternext.LLVMValue()
 	ok := c.builder.CreateCall(mapiternext, []llvm.Value{lliter}, "")
 
-	fields := []*types.Var{
-		types.NewParam(0, nil, "", types.Typ[types.Bool]),
-		types.NewParam(0, nil, "", ktyp),
-		types.NewParam(0, nil, "", vtyp),
-	}
-	typ := types.NewStruct(fields, nil)
+	typ := tupleType(types.Typ[types.Bool], ktyp, vtyp)
 	tuple := llvm.Undef(c.types.ToLLVM(typ))
 	tuple = c.builder.CreateInsertValue(tuple, ok, 0, "")
 

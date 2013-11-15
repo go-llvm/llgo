@@ -358,8 +358,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		x := fr.value(instr.X)
 		index := fr.value(instr.Index)
 		if isString(x.Type().Underlying()) {
-			// TODO
-			panic("unimplemented: string indexing")
+			fr.env[instr] = fr.stringIndex(x, index)
 		} else {
 			fr.env[instr] = fr.mapLookup(x, index, instr.CommaOk)
 		}
@@ -394,12 +393,39 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.mapUpdate(m, k, v)
 
 	case *ssa.Next:
-		if instr.IsString {
-			panic("unimplemented: Next(stringIter)")
-		} else {
-			iter := fr.value(instr.Iter)
+		iter := fr.value(instr.Iter)
+		if !instr.IsString {
 			fr.env[instr] = fr.mapIterNext(iter)
+			return
 		}
+
+		// String range
+		//
+		// We make some assumptions for now around the
+		// current state of affairs in go.tools/ssa.
+		//
+		//  - Range's block is a predecessor of Next's.
+		//      (this is currently true, but may change in the future;
+		//       adonovan says he will expose the dominator tree
+		//       computation in the future, which we can use here).
+		//  - Next is the first non-Phi instruction in its block.
+		//      (this is not strictly necessary; we can move the Phi
+		//       to the top of the block, and defer the tuple creation
+		//       to Extract).
+		assert(instr.Iter.(*ssa.Range).Block() == instr.Block().Preds[0])
+		for _, blockInstr := range instr.Block().Instrs {
+			if instr == blockInstr {
+				break
+			}
+			_, isphi := blockInstr.(*ssa.Phi)
+			assert(isphi)
+		}
+		preds := instr.Block().Preds
+		llpreds := make([]llvm.BasicBlock, len(preds))
+		for i, b := range preds {
+			llpreds[i] = fr.block(b)
+		}
+		fr.env[instr] = fr.stringIterNext(iter, llpreds)
 
 	case *ssa.Panic:
 		// TODO
@@ -424,6 +450,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		switch x.Type().Underlying().(type) {
 		case *types.Map:
 			fr.env[instr] = fr.mapIterInit(x)
+		case *types.Basic: // string
+			fr.env[instr] = x
 		default:
 			panic(fmt.Sprintf("unhandled range for type %T", x.Type()))
 		}
