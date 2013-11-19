@@ -161,27 +161,42 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	rhs := rhs_.(*LLVMValue)
 	switch typ := lhs.typ.Underlying().(type) {
 	case *types.Struct:
-		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
-		if element_types_count > 0 {
-			t := typ.Field(0).Type()
+		if typ.NumFields() == 0 {
+			return c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+		}
+
+		t := typ.Field(0).Type()
+		if typ.NumFields() == 1 {
 			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
 			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
-			first := first_lhs.BinaryOp(op, first_rhs)
-
-			result := first
-			for i := 1; i < element_types_count; i++ {
-				panic("TODO")
-				/*
-					result = c.compileLogicalOp(token.LAND, result, func() Value {
-						t := typ.Field(i).Type()
-						lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
-						rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-						return lhs.BinaryOp(op, rhs)
-					})
-				*/
-			}
-			return result
+			return first_lhs.BinaryOp(token.EQL, first_rhs)
 		}
+
+		blocks := []llvm.BasicBlock{b.GetInsertBlock()}
+		endblock := llvm.InsertBasicBlock(blocks[0], "")
+		endblock.MoveAfter(blocks[0])
+		for i := 1; i < typ.NumFields(); i++ {
+			blocks = append(blocks, llvm.InsertBasicBlock(endblock, ""))
+		}
+		values := make([]llvm.Value, len(blocks))
+		falseValue := boolLLVMValue(false)
+		for i := 0; i < typ.NumFields(); i++ {
+			b.SetInsertPointAtEnd(blocks[i])
+			lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+			rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
+			cond := lhs.BinaryOp(token.EQL, rhs).LLVMValue()
+			if i == typ.NumFields()-1 {
+				values[i] = cond
+				b.CreateBr(endblock)
+			} else {
+				values[i] = falseValue
+				b.CreateCondBr(cond, blocks[i+1], endblock)
+			}
+		}
+		b.SetInsertPointAtEnd(endblock)
+		phi := b.CreatePHI(values[0].Type(), "")
+		phi.AddIncoming(values, blocks)
+		return c.NewValue(phi, types.Typ[types.Bool])
 
 	case *types.Slice:
 		// []T == nil
