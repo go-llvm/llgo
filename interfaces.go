@@ -30,16 +30,23 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 // compareInterfaces emits code to compare two interfaces for
 // equality.
 func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
-	aI := a.Type().Underlying().(*types.Interface).NumMethods() > 0
-	bI := b.Type().Underlying().(*types.Interface).NumMethods() > 0
-	switch {
-	case aI && bI:
-		a = a.convertI2E()
-		b = b.convertI2E()
-	case aI:
-		a = a.convertI2E()
-	case bI:
-		b = b.convertI2E()
+	aNull := a.LLVMValue().IsNull()
+	bNull := b.LLVMValue().IsNull()
+	if aNull && bNull {
+		return c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+	}
+	if !aNull && !bNull {
+		aI := a.Type().Underlying().(*types.Interface).NumMethods() > 0
+		bI := b.Type().Underlying().(*types.Interface).NumMethods() > 0
+		switch {
+		case aI && bI:
+			a = a.convertI2E()
+			b = b.convertI2E()
+		case aI:
+			a = a.convertI2E()
+		case bI:
+			b = b.convertI2E()
+		}
 	}
 	f := c.runtime.compareE2E.LLVMValue()
 	args := []llvm.Value{
