@@ -267,8 +267,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 				fr.env[instr] = result
 			}
 		} else {
-			const hasdefers = false // TODO
-			result = fr.createCall(fn, args, hasdefers)
+			result = fr.createCall(fn, args)
 			fr.env[instr] = result
 		}
 
@@ -311,7 +310,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fieldptrtyp := instr.Type()
 		fr.env[instr] = fr.NewValue(fieldptr, fieldptrtyp)
 
-	//case *ssa.Go:
+	case *ssa.Go:
+		fn, args, result := fr.prepareCall(instr)
+		if result != nil {
+			panic("illegal use of builtin in go statement")
+		}
+		fn = fr.indirectFunction(fn, args)
+		fr.createCall(fr.runtime.Go, []*LLVMValue{fn})
 
 	case *ssa.If:
 		cond := fr.value(instr.Cond).LLVMValue()

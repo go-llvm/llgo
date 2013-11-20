@@ -11,9 +11,7 @@ import (
 
 // createCall emits the code for a function call,
 // taking into account receivers, and panic/defer.
-//
-// dotdotdot is true if the last argument is followed with "...".
-func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue, invoke bool) *LLVMValue {
+func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue) *LLVMValue {
 	fntyp := fn.Type().Underlying().(*types.Signature)
 	args := make([]llvm.Value, len(argValues))
 	for i, arg := range argValues {

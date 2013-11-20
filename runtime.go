@@ -45,7 +45,7 @@ type runtimeInterface struct {
 	compareE2E,
 	convertI2E,
 	eqtyp,
-	//fflush,
+	Go,
 	llvm_trap,
 	main,
 	printfloat,
@@ -116,10 +116,10 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	}
 
 	intrinsics := map[string]**LLVMValue{
-		"compareE2E": &ri.compareE2E,
-		"convertI2E": &ri.convertI2E,
-		"eqtyp":      &ri.eqtyp,
-		//"fflush": &ri.fflush,
+		"compareE2E":  &ri.compareE2E,
+		"convertI2E":  &ri.convertI2E,
+		"eqtyp":       &ri.eqtyp,
+		"Go":          &ri.Go,
 		"llvm_trap":   &ri.llvm_trap,
 		"main":        &ri.main,
 		"printfloat":  &ri.printfloat,
