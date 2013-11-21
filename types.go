@@ -54,7 +54,7 @@ func (c *compiler) exportRuntimeTypes(builtin bool) {
 func tupleType(fieldTypes ...types.Type) types.Type {
 	vars := make([]*types.Var, len(fieldTypes))
 	for i, t := range fieldTypes {
-		vars[i] = types.NewParam(0, nil, "", t)
+		vars[i] = types.NewParam(0, nil, fmt.Sprintf("f%d", i), t)
 	}
 	return types.NewStruct(vars, nil)
 }
