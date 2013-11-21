@@ -5,7 +5,6 @@ import (
 )
 
 func TestChanBuffered(t *testing.T) {
-	t.Skipf("channels not hooked up")
 	checkOutputEqual(t, "chan/buffered.go")
 }
 
@@ -15,7 +14,6 @@ func TestChanSelect(t *testing.T) {
 }
 
 func TestChanRange(t *testing.T) {
-	t.Skipf("channels not hooked up")
 	checkOutputEqual(t, "chan/range.go")
 }
 

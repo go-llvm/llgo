@@ -127,7 +127,7 @@ func reflect_makechan(t *rtype, cap_ int) unsafe.Pointer {
 	return unsafe.Pointer(makechan(unsafe.Pointer(t), cap_))
 }
 
-func makechan(t unsafe.Pointer, cap_ int) *int8 {
+func makechan(t unsafe.Pointer, cap_ int) unsafe.Pointer {
 	typ := (*chanType)(t)
 	size := unsafe.Sizeof(Hchan{})
 	if cap_ > 0 {
@@ -139,7 +139,7 @@ func makechan(t unsafe.Pointer, cap_ int) *int8 {
 	c.elemsize = uint16(typ.elem.size)
 	c.elemalign = uint8(typ.elem.align)
 	c.dataqsiz = uint(cap_)
-	return (*int8)(mem)
+	return mem
 }
 
 // #llgo name: reflect.chancap

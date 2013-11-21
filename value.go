@@ -462,10 +462,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewValue(value, v.typ)
-	case token.ARROW:
-		panic("TODO")
-		//value, _ := v.chanRecv(false)
-		//return value
 	case token.MUL:
 		elemtyp := v.typ.Underlying().(*types.Pointer).Elem()
 		return v.compiler.NewValue(b.CreateLoad(v.LLVMValue(), ""), elemtyp)

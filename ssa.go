@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"fmt"
+	"go/token"
 
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/ssa"
@@ -271,8 +272,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			fr.env[instr] = result
 		}
 
-	//case *ssa.Builtin:
-
 	case *ssa.ChangeInterface:
 		// TODO convI2I, convI2E
 		lliface := llvm.ConstNull(fr.types.ToLLVM(instr.Type()))
@@ -372,7 +371,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			fr.env[instr] = fr.mapLookup(x, index, instr.CommaOk)
 		}
 
-	//case *ssa.MakeChan:
+	case *ssa.MakeChan:
+		fr.env[instr] = fr.makeChan(instr.Type(), fr.value(instr.Size))
 
 	case *ssa.MakeClosure:
 		fn := fr.value(instr.Fn)
@@ -383,7 +383,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		//iface := instr.Type().Underlying().(*types.Interface)
 		receiver := fr.value(instr.X)
 		fr.env[instr] = fr.makeInterface(receiver, instr.Type())
 
@@ -483,7 +482,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
 
 	//case *ssa.Select:
-	//case *ssa.Send:
+
+	case *ssa.Send:
+		fr.chanSend(fr.value(instr.Chan), fr.value(instr.X))
 
 	case *ssa.Slice:
 		x := fr.value(instr.X)
@@ -512,8 +513,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.UnOp:
-		result := fr.value(instr.X).UnaryOp(instr.Op).(*LLVMValue)
-		fr.env[instr] = result
+		operand := fr.value(instr.X)
+		if instr.Op == token.ARROW {
+			fr.env[instr] = fr.chanRecv(operand, instr.CommaOk)
+		} else {
+			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
+		}
 
 	default:
 		panic(fmt.Sprintf("unhandled: %v", instr))
@@ -585,6 +590,9 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 
 	case "append":
 		return nil, nil, fr.callAppend(args[0], args[1])
+
+	case "close":
+		return fr.runtime.chanclose, args, nil
 
 	case "cap":
 		return nil, nil, fr.callCap(args[0])

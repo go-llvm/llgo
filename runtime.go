@@ -42,6 +42,9 @@ type runtimeInterface struct {
 	structType runtimeType
 
 	// intrinsics
+	chanclose,
+	chanrecv,
+	chansend,
 	compareE2E,
 	convertI2E,
 	eqtyp,
@@ -50,6 +53,7 @@ type runtimeInterface struct {
 	main,
 	printfloat,
 	makemap,
+	makechan,
 	malloc,
 	mapaccess,
 	mapdelete,
@@ -117,6 +121,9 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	}
 
 	intrinsics := map[string]**LLVMValue{
+		"chanclose":   &ri.chanclose,
+		"chanrecv":    &ri.chanrecv,
+		"chansend":    &ri.chansend,
 		"compareE2E":  &ri.compareE2E,
 		"convertI2E":  &ri.convertI2E,
 		"eqtyp":       &ri.eqtyp,
@@ -124,6 +131,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"llvm_trap":   &ri.llvm_trap,
 		"main":        &ri.main,
 		"printfloat":  &ri.printfloat,
+		"makechan":    &ri.makechan,
 		"makemap":     &ri.makemap,
 		"malloc":      &ri.malloc,
 		"mapaccess":   &ri.mapaccess,
