@@ -287,8 +287,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	//case *ssa.DebugRef:
 
 	case *ssa.Defer:
-		// TODO: implement defer; requires synthesised function
-		// for loading arg struct and calling function.
+		fn, args, result := fr.prepareCall(instr)
+		if result != nil {
+			panic("illegal use of builtin in defer statement")
+		}
+		fn = fr.indirectFunction(fn, args)
+		fr.createCall(fr.runtime.pushdefer, []*LLVMValue{fn})
 
 	case *ssa.Extract:
 		tuple := fr.value(instr.Tuple).LLVMValue()

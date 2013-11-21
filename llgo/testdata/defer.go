@@ -1,5 +1,13 @@
 package main
 
+// FIXME(axw) this is a workaround for lack of support
+// for the recover builtin. Remove this when we have it.
+func recover() error {
+    return nil
+}
+func panic(interface{}) {
+}
+
 type T struct {
 	value int
 }

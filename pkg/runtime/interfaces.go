@@ -7,8 +7,15 @@ package runtime
 import "unsafe"
 
 func compareE2E(a, b eface) bool {
-	if (a.rtyp != b.rtyp) && (a.rtyp == nil || b.rtyp == nil) {
-		return false
+	typesSame := a.rtyp == b.rtyp
+	if !typesSame {
+		if a.rtyp == nil || b.rtyp == nil {
+			// one, but not both nil
+			return false
+		}
+	} else if a.rtyp == nil {
+		// both nil
+		return true
 	}
 	if eqtyp(a.rtyp, b.rtyp) {
 		algs := unsafe.Pointer(a.rtyp.alg)
