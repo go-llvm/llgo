@@ -53,7 +53,7 @@ func (v *LLVMValue) convertI2E() *LLVMValue {
 	c := v.compiler
 	f := c.runtime.convertI2E.LLVMValue()
 	args := []llvm.Value{c.coerce(v.LLVMValue(), c.runtime.iface.llvm)}
-	return c.NewValue(c.builder.CreateCall(f, args, ""), types.NewInterface(nil))
+	return c.NewValue(c.builder.CreateCall(f, args, ""), types.NewInterface(nil, nil))
 }
 
 // mustConvertI2V calls convertI2V, panicking if the assertion failed.

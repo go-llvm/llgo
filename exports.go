@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/gcimporter"
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"go/ast"
@@ -84,7 +85,7 @@ func (c *importer) Import(imports map[string]*types.Package, path string) (pkg *
 				}
 			}
 		}
-		pkg, err = types.GcImportData(imports, pkgfile, path, bufio.NewReader(bytes.NewBuffer(data)))
+		pkg, err = gcimporter.ImportData(imports, pkgfile, path, bufio.NewReader(bytes.NewBuffer(data)))
 	}
 	if pkg == nil || err != nil {
 		if data != nil {
@@ -92,7 +93,7 @@ func (c *importer) Import(imports map[string]*types.Package, path string) (pkg *
 		}
 		// Package has not been compiled yet, so fall back to
 		// the standard GcImport.
-		pkg, err = types.GcImport(imports, path)
+		pkg, err = gcimporter.Import(imports, path)
 	}
 
 	c.myimports[path] = pkg

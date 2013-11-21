@@ -244,7 +244,7 @@ func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
 
 func (c *compiler) emitPanic(arg *LLVMValue) {
 	// FIXME check if arg is already an interface
-	arg = c.makeInterface(arg, types.NewInterface(nil))
+	arg = c.makeInterface(arg, types.NewInterface(nil, nil))
 	args := []llvm.Value{arg.LLVMValue()}
 	c.builder.CreateCall(c.runtime.panic_.LLVMValue(), args, "")
 	c.builder.CreateUnreachable()
