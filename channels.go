@@ -5,6 +5,8 @@
 package llgo
 
 import (
+	"go/ast"
+
 	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
@@ -59,4 +61,85 @@ func (c *compiler) chanRecv(ch *LLVMValue, commaOk bool) *LLVMValue {
 	tuple = c.builder.CreateInsertValue(tuple, elem, 0, "")
 	tuple = c.builder.CreateInsertValue(tuple, ok, 1, "")
 	return c.NewValue(tuple, typ)
+}
+
+// selectState is equivalent to ssa.SelectState
+type selectState struct {
+	Dir  ast.ChanDir
+	Chan *LLVMValue
+	Send *LLVMValue
+}
+
+func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
+	stackptr := c.stacksave()
+	defer c.stackrestore(stackptr)
+
+	n := uint64(len(states))
+	if !blocking {
+		// blocking means there's no default case
+		n++
+	}
+	lln := llvm.ConstInt(llvm.Int32Type(), n, false)
+	allocsize := c.builder.CreateCall(c.runtime.selectsize.LLVMValue(), []llvm.Value{lln}, "")
+	selectp := c.builder.CreateArrayAlloca(llvm.Int8Type(), allocsize, "selectp")
+	c.memsetZero(selectp, allocsize)
+	selectp = c.builder.CreatePtrToInt(selectp, c.target.IntPtrType(), "")
+	c.builder.CreateCall(c.runtime.selectinit.LLVMValue(), []llvm.Value{lln, selectp}, "")
+
+	// Allocate stack for the values to send/receive.
+	//
+	// TODO(axw) request optimisation in ssa to special-
+	// case receive cases with no assignment, so we know
+	// not to allocate stack space or do a copy.
+	resTypes := []types.Type{types.Typ[types.Int], types.Typ[types.Bool]}
+	for _, state := range states {
+		if state.Dir == ast.RECV {
+			chantyp := state.Chan.Type().Underlying().(*types.Chan)
+			resTypes = append(resTypes, chantyp.Elem())
+		}
+	}
+	resType := tupleType(resTypes...)
+	llResType := c.types.ToLLVM(resType)
+	tupleptr := c.builder.CreateAlloca(llResType, "")
+	c.memsetZero(tupleptr, llvm.SizeOf(llResType))
+
+	var recvindex int
+	ptrs := make([]llvm.Value, len(states))
+	for i, state := range states {
+		chantyp := state.Chan.Type().Underlying().(*types.Chan)
+		elemtyp := c.types.ToLLVM(chantyp.Elem())
+		if state.Dir == ast.SEND {
+			ptrs[i] = c.builder.CreateAlloca(elemtyp, "")
+			c.builder.CreateStore(state.Send.LLVMValue(), ptrs[i])
+		} else {
+			ptrs[i] = c.builder.CreateStructGEP(tupleptr, recvindex+2, "")
+			recvindex++
+		}
+		ptrs[i] = c.builder.CreatePtrToInt(ptrs[i], c.target.IntPtrType(), "")
+	}
+
+	// Create select{send,recv} calls.
+	selectsend := c.runtime.selectsend.LLVMValue()
+	selectrecv := c.runtime.selectrecv.LLVMValue()
+	var received llvm.Value
+	if recvindex > 0 {
+		received = c.builder.CreateStructGEP(tupleptr, 1, "")
+	}
+	if !blocking {
+		c.builder.CreateCall(c.runtime.selectdefault.LLVMValue(), []llvm.Value{selectp}, "")
+	}
+	for i, state := range states {
+		ch := state.Chan.LLVMValue()
+		if state.Dir == ast.SEND {
+			c.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
+		} else {
+			c.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")
+		}
+	}
+
+	// Fire off the select.
+	index := c.builder.CreateCall(c.runtime.selectgo.LLVMValue(), []llvm.Value{selectp}, "")
+	tuple := c.builder.CreateLoad(tupleptr, "")
+	tuple = c.builder.CreateInsertValue(tuple, index, 0, "")
+	return c.NewValue(tuple, resType)
 }

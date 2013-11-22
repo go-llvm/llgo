@@ -9,7 +9,6 @@ func TestChanBuffered(t *testing.T) {
 }
 
 func TestChanSelect(t *testing.T) {
-	t.Skipf("channels not hooked up")
 	checkOutputEqual(t, "chan/select.go")
 }
 

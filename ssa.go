@@ -481,7 +481,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.RunDefers:
 		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
 
-	//case *ssa.Select:
+	case *ssa.Select:
+		states := make([]selectState, len(instr.States))
+		for i, state := range instr.States {
+			states[i] = selectState{
+				Dir:  state.Dir,
+				Chan: fr.value(state.Chan),
+				Send: fr.value(state.Send),
+			}
+		}
+		fr.env[instr] = fr.chanSelect(states, instr.Blocking)
 
 	case *ssa.Send:
 		fr.chanSend(fr.value(instr.Chan), fr.value(instr.X))
