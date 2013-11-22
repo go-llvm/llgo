@@ -94,7 +94,12 @@ func f1() {
 	f2()
 }
 
+func builtins() {
+    defer println("ahoy")
+}
+
 func main() {
 	f1()
 	f6()
+    builtins()
 }

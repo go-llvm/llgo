@@ -23,18 +23,34 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 		ctx = c.builder.CreateBitCast(ctx, fnval.Type().StructElementTypes()[1], "")
 		fnval = c.builder.CreateInsertValue(fnval, ptr, 0, "")
 		fnval = c.builder.CreateInsertValue(fnval, ctx, 1, "")
-		fn = c.NewValue(fnval, nilarytyp)
-		return fn
+		return c.NewValue(fnval, nilarytyp)
 	}
 
-	// TODO check if function pointer is global. I suppose
-	// the same can be done with the context ptr...
+	// Check if function pointer or context pointer is global/null.
 	fnval := fn.LLVMValue()
-	fnptr := c.builder.CreateExtractValue(fnval, 0, "")
-	ctx := c.builder.CreateExtractValue(fnval, 1, "")
-	nctx := 1 // fnptr
-	if !ctx.IsNull() {
-		nctx++ // fnctx
+	fnptr := fnval
+	var nctx int
+	var fnctx llvm.Value
+	var fnctxindex uint64
+	var globalfn bool
+	if fnptr.Type().TypeKind() == llvm.StructTypeKind {
+		fnptr = c.builder.CreateExtractValue(fnval, 0, "")
+		fnctx = c.builder.CreateExtractValue(fnval, 1, "")
+		globalfn = fnptr.IsGlobalConstant()
+		if !globalfn {
+			nctx++
+		}
+		if !fnctx.IsNull() {
+			fnctxindex = uint64(nctx)
+			nctx++
+		}
+	} else {
+		// We've got a raw global function pointer. Convert to <ptr,ctx>.
+		fnval = llvm.ConstNull(c.types.ToLLVM(fn.Type()))
+		fnval = llvm.ConstInsertValue(fnval, fnptr, []uint32{0})
+		fn = c.NewValue(fnval, fn.Type())
+		fnctx = llvm.ConstExtractValue(fnval, []uint32{1})
+		globalfn = true
 	}
 
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
@@ -44,11 +60,13 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 		llvmargs[i+nctx] = arg.LLVMValue()
 		llvmargtypes[i+nctx] = llvmargs[i+nctx].Type()
 	}
-	llvmargtypes[0] = fnptr.Type()
-	llvmargs[0] = fnptr
-	if nctx > 1 {
-		llvmargtypes[1] = ctx.Type()
-		llvmargs[1] = ctx
+	if !globalfn {
+		llvmargtypes[0] = fnptr.Type()
+		llvmargs[0] = fnptr
+	}
+	if !fnctx.IsNull() {
+		llvmargtypes[fnctxindex] = fnctx.Type()
+		llvmargs[fnctxindex] = fnctx
 	}
 
 	// TODO(axw) investigate an option for go statements
@@ -80,20 +98,22 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 		newargs[i] = c.NewValue(c.builder.CreateLoad(argptr, ""), args[i].Type())
 	}
 
-	// Extract the function pointer.
-	// TODO if function is a global, elide.
-	fnval = llvm.Undef(fnval.Type())
-	fnptrptr := c.builder.CreateGEP(argstruct, []llvm.Value{
-		llvm.ConstInt(llvm.Int32Type(), 0, false),
-		llvm.ConstInt(llvm.Int32Type(), 0, false)}, "")
-	fnptr = c.builder.CreateLoad(fnptrptr, "")
-	fnval = c.builder.CreateInsertValue(fnval, fnptr, 0, "")
-	if nctx > 1 {
-		ctxptr := c.builder.CreateGEP(argstruct, []llvm.Value{
+	// Unless we've got a global function, extract the
+	// function pointer from the context.
+	if !globalfn {
+		fnval = llvm.Undef(fnval.Type())
+		fnptrptr := c.builder.CreateGEP(argstruct, []llvm.Value{
 			llvm.ConstInt(llvm.Int32Type(), 0, false),
-			llvm.ConstInt(llvm.Int32Type(), 1, false)}, "")
-		ctx = c.builder.CreateLoad(ctxptr, "")
-		fnval = c.builder.CreateInsertValue(fnval, ctx, 1, "")
+			llvm.ConstInt(llvm.Int32Type(), 0, false)}, "")
+		fnptr = c.builder.CreateLoad(fnptrptr, "")
+		fnval = c.builder.CreateInsertValue(fnval, fnptr, 0, "")
+	}
+	if !fnctx.IsNull() {
+		fnctxptr := c.builder.CreateGEP(argstruct, []llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), 0, false),
+			llvm.ConstInt(llvm.Int32Type(), fnctxindex, false)}, "")
+		fnctx = c.builder.CreateLoad(fnctxptr, "")
+		fnval = c.builder.CreateInsertValue(fnval, fnctx, 1, "")
 		fn = c.NewValue(fnval, fn.Type())
 	}
 	c.createCall(fn, newargs)
