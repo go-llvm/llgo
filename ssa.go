@@ -523,9 +523,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.UnOp:
 		operand := fr.value(instr.X)
-		if instr.Op == token.ARROW {
+		switch instr.Op {
+		case token.ARROW:
 			fr.env[instr] = fr.chanRecv(operand, instr.CommaOk)
-		} else {
+		case token.MUL:
+			llptr := operand.LLVMValue()
+			fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+		default:
 			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
 		}
 

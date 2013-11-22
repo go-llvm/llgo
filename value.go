@@ -462,9 +462,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewValue(value, v.typ)
-	case token.MUL:
-		elemtyp := v.typ.Underlying().(*types.Pointer).Elem()
-		return v.compiler.NewValue(b.CreateLoad(v.LLVMValue(), ""), elemtyp)
 	default:
 		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
@@ -662,13 +659,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
 	if isComplex(srctyp) {
-		var fpcast func(*Builder, llvm.Value, llvm.Type, string) llvm.Value
+		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
 		if srctyp == types.Typ[types.Complex64] {
-			fpcast = (*Builder).CreateFPExt
+			fpcast = (llvm.Builder).CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
-			fpcast = (*Builder).CreateFPTrunc
+			fpcast = (llvm.Builder).CreateFPTrunc
 			fptype = llvm.FloatType()
 		}
 		if fpcast != nil {

@@ -86,6 +86,9 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	voidPtrType := llvm.PointerType(llvm.Int8Type(), 0)
 	boolType := llvm.Int1Type()
 
+	// Create a unique type to represent recursive pointers.
+	tm.ptrstandin = llvm.GlobalContext().StructCreateNamed("")
+
 	// Create runtime algorithm function types.
 	params := []llvm.Type{uintptrType, voidPtrType}
 	tm.hashAlgFunctionType = llvm.FunctionType(uintptrType, params, false)
@@ -240,14 +243,6 @@ func (tm *llvmTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 func (tm *llvmTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	elem := p.Elem()
 	if p, ok := elem.Underlying().(*types.Pointer); ok && p.Elem() == elem {
-		// Recursive pointers must be handled specially, as
-		// LLVM does not permit recursive types except via
-		// named structs.
-		if tm.ptrstandin.IsNil() {
-			ctx := llvm.GlobalContext()
-			unique := ctx.StructCreateNamed("")
-			tm.ptrstandin = unique
-		}
 		return llvm.PointerType(tm.ptrstandin, 0)
 	}
 	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
