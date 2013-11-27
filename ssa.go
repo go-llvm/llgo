@@ -278,7 +278,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(lliface, instr.Type())
 
 	case *ssa.ChangeType:
-		fr.env[instr] = fr.NewValue(fr.value(instr.X).LLVMValue(), instr.Type())
+		value := fr.value(instr.X).LLVMValue()
+		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
+			value = fr.builder.CreateBitCast(value, fr.types.ToLLVM(instr.Type()), "")
+		}
+		fr.env[instr] = fr.NewValue(value, instr.Type())
 
 	case *ssa.Convert:
 		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)

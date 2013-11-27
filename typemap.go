@@ -162,6 +162,10 @@ func (tm *llvmTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 		tm.types[tstr] = lt
 		return lt
 	case *types.Named:
+		// First we set ptrstandin, in case we've got a recursive pointer.
+		if _, ok := t.Underlying().(*types.Pointer); ok {
+			tm.types[tstr] = tm.ptrstandin
+		}
 		lt := tm.nameLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
@@ -241,10 +245,6 @@ func (tm *llvmTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
 }
 
 func (tm *llvmTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
-	elem := p.Elem()
-	if p, ok := elem.Underlying().(*types.Pointer); ok && p.Elem() == elem {
-		return llvm.PointerType(tm.ptrstandin, 0)
-	}
 	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
 }
 
