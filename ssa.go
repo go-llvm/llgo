@@ -10,6 +10,7 @@ import (
 
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/ssa"
+	"code.google.com/p/go.tools/ssa/ssautil"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -43,7 +44,7 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 	// so the IR isn't littered unnecessarily.
 
 	// Translate functions.
-	functions := ssa.AllFunctions(pkg.Prog)
+	functions := ssautil.AllFunctions(pkg.Prog)
 	for f, _ := range functions {
 		u.declareFunction(f)
 	}
