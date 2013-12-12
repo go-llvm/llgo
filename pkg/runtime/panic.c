@@ -7,33 +7,38 @@
 #include <string.h>
 #include <stdio.h>
 
-// typeinfo
-extern void* _ZTI5Eface;
-
 // thread-local
 __thread struct Panic *tlspanic = NULL;
-__thread struct Defer *tlsdefer = NULL;
-
-// extern functions
-void* __cxa_allocate_exception(size_t);
-void __cxa_throw(void *exc, void *typeinfo, void (*dest)(void*)) __attribute__((noreturn));
+__thread struct Defers *tlsdefers = NULL;
 
 // runtime functions
 void panic(struct Eface error)
-		LLGO_ASM_EXPORT("runtime.panic_") __attribute__((noreturn));
+	    LLGO_ASM_EXPORT("runtime.panic_") __attribute__((noreturn));
 struct Eface recover(int32_t indirect)
 	LLGO_ASM_EXPORT("runtime.recover_") __attribute__((noinline));
 void pushdefer(struct Func)
-	LLGO_ASM_EXPORT("runtime.pushdefer") __attribute__((noinline));
+	LLGO_ASM_EXPORT("runtime.pushdefer");
+void initdefers(struct Defers *d)
+	LLGO_ASM_EXPORT("runtime.initdefers") __attribute__((noinline));
 void rundefers(void)
 	LLGO_ASM_EXPORT("runtime.rundefers") __attribute__((noinline));
+void raise() __attribute__((noreturn));
+
+// raise jumps to the next "defers" jmp_buf,
+// aborting if there are none remaining.
+void raise() {
+	if (!tlsdefers) {
+	    abort();
+	}
+	longjmp(tlsdefers->j, 1);
+}
 
 void panic(struct Eface error) {
 	struct Panic *p = (struct Panic*)malloc(sizeof(struct Panic));
 	p->next = tlspanic;
 	memcpy(&p->value, &error, sizeof(struct Eface));
 	tlspanic = p;
-	__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);
+	raise();
 }
 
 struct Panic* current_panic() {
@@ -51,40 +56,48 @@ struct Eface recover(int32_t indirect) {
 	//     catch-site
 	struct Eface value;
 	int depth = 5 + (indirect ? 1 : 0);
-	if (tlspanic && tlsdefer && tlsdefer->caller == runtime_caller_region(depth)) {
-		struct Panic *p = tlspanic;
-		struct Eface value = p->value;
-		while (tlspanic) {
-			p = tlspanic->next;
-			free(tlspanic);
-			tlspanic = p;
-		}
-		return value;
+	int i;
+	if (tlspanic && tlsdefers && tlsdefers->caller == runtime_caller_region(depth)) {
+	    struct Panic *p = tlspanic;
+	    struct Eface value = p->value;
+	    while (tlspanic) {
+	        p = tlspanic->next;
+	        free(tlspanic);
+	        tlspanic = p;
+	    }
+	    return value;
 	} else {
-		value.type = value.data = (void*)0;
-		return value;
+	    value.type = value.data = (void*)0;
+	    return value;
 	}
 }
 
 void pushdefer(struct Func f) {
 	struct Defer *d = (struct Defer*)malloc(sizeof(struct Defer));
+	struct Defers *ds = tlsdefers;
 	d->f = f;
+	d->next = ds->d;
+	ds->d = d;
+}
+
+void initdefers(struct Defers *d) {
 	d->caller = runtime_caller_region(1);
-	d->next = tlsdefer;
-	tlsdefer = d;
+	d->d = NULL;
+	d->next = tlsdefers;
+	tlsdefers = d;
 }
 
 void rundefers(void) {
-	// FIXME cater for recursive calls.
-	const uintptr_t caller = runtime_caller_region(1);
-	for (; tlsdefer && tlsdefer->caller == caller;) {
-		struct Defer *d = tlsdefer;
-		guardedcall0(d->f);
-		tlsdefer = tlsdefer->next;
-		free(d);
+	struct Defers *ds = tlsdefers;
+	while (ds->d) {
+	    struct Defer *d = ds->d;
+	    guardedcall0(d->f);
+	    ds->d = d->next;
+	    free(d);
 	}
+	tlsdefers = ds->next;
 	if (tlspanic) {
-		__cxa_throw(__cxa_allocate_exception(0), &_ZTI5Eface, NULL);
+	    raise();
 	}
 }
 

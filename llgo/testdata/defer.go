@@ -1,10 +1,7 @@
 package main
 
 // FIXME(axw) this is a workaround for lack of support
-// for the recover builtin. Remove this when we have it.
-func recover() error {
-    return nil
-}
+// for interfaces. Remove this when we have it.
 func panic(interface{}) {
 }
 
@@ -95,11 +92,11 @@ func f1() {
 }
 
 func builtins() {
-    defer println("ahoy")
+	defer println("ahoy")
 }
 
 func main() {
 	f1()
 	f6()
-    builtins()
+	builtins()
 }

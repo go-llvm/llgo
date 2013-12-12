@@ -10,6 +10,7 @@ import (
 
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/ssa"
+	"code.google.com/p/go.tools/ssa/ssautil"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -43,7 +44,7 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 	// so the IR isn't littered unnecessarily.
 
 	// Translate functions.
-	functions := ssa.AllFunctions(pkg.Prog)
+	functions := ssautil.AllFunctions(pkg.Prog)
 	for f, _ := range functions {
 		u.declareFunction(f)
 	}
@@ -110,53 +111,124 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := u.globals[f].LLVMValue()
+	llvmFunction := fr.globals[f].LLVMValue()
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
 	}
-	if f.Recover != nil {
-		fr.recoverBlock = llvm.AddBasicBlock(llvmFunction, f.Recover.Comment)
-	}
-	u.builder.SetInsertPointAtEnd(fr.blocks[0])
+	fr.builder.SetInsertPointAtEnd(fr.blocks[0])
 
 	var paramOffset int
 	if len(f.FreeVars) > 0 {
 		// Extract captures from the first implicit parameter.
 		arg0 := llvmFunction.Param(0)
 		for i, fv := range f.FreeVars {
-			addressPtr := u.builder.CreateStructGEP(arg0, i, "")
-			address := u.builder.CreateLoad(addressPtr, "")
-			fr.env[fv] = u.NewValue(address, fv.Type())
+			addressPtr := fr.builder.CreateStructGEP(arg0, i, "")
+			address := fr.builder.CreateLoad(addressPtr, "")
+			fr.env[fv] = fr.NewValue(address, fv.Type())
 		}
 		paramOffset++
 	}
 	for i, param := range f.Params {
-		fr.env[param] = u.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
+		fr.env[param] = fr.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
 	}
 
-	// Allocate stack space for locals in the entry block.
+	// Allocate stack space for locals in the prologue block.
+	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
+	fr.builder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
-		typ := u.types.ToLLVM(deref(local.Type()))
-		alloca := u.builder.CreateAlloca(typ, local.Comment)
+		typ := fr.types.ToLLVM(deref(local.Type()))
+		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
 		fr.env[local] = value
 	}
 
+	// Move any allocs relating to named results from the entry block
+	// to the prologue block, so they dominate the rundefers and recover
+	// blocks.
+	//
+	// TODO(axw) ask adonovan for a cleaner way of doing this, e.g.
+	// have ssa generate an entry block that defines Allocs and related
+	// stores, and then a separate block for function body instructions.
+	if f.Synthetic == "" {
+		if results := f.Signature.Results(); results != nil {
+			for i := 0; i < results.Len(); i++ {
+				result := results.At(i)
+				if result.Name() == "" {
+					break
+				}
+				for i, instr := range f.Blocks[0].Instrs {
+					if instr, ok := instr.(*ssa.Alloc); ok && instr.Heap && instr.Pos() == result.Pos() {
+						fr.instruction(instr)
+						instrs := f.Blocks[0].Instrs
+						instrs = append(instrs[:i], instrs[i+1:]...)
+						f.Blocks[0].Instrs = instrs
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// If the function contains any defers, we must first call
+	// setjmp so we can call rundefers in response to a panic.
+	// We can short-circuit the check for defers with
+	// f.Recover != nil.
+	if f.Recover != nil || hasDefer(f) {
+		rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
+		defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
+		fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
+		jb := fr.builder.CreateStructGEP(defers, 0, "")
+		jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
+		result := fr.builder.CreateCall(fr.runtime.setjmp, []llvm.Value{jb}, "")
+		result = fr.builder.CreateIsNotNull(result, "")
+		fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
+		// We'll only get here via a panic, which must either be
+		// recovered or continue panicking up the stack without
+		// returning from "rundefers". The recover block may be
+		// nil even if we can recover, in which case we just need
+		// to return the zero value for each result (if any).
+		var recoverBlock llvm.BasicBlock
+		if f.Recover != nil {
+			recoverBlock = fr.block(f.Recover)
+		} else {
+			recoverBlock = llvm.AddBasicBlock(llvmFunction, "recover")
+			fr.builder.SetInsertPointAtEnd(recoverBlock)
+			var nresults int
+			results := f.Signature.Results()
+			if results != nil {
+				nresults = results.Len()
+			}
+			switch nresults {
+			case 0:
+				fr.builder.CreateRetVoid()
+			case 1:
+				fr.builder.CreateRet(llvm.ConstNull(fr.types.ToLLVM(results.At(0).Type())))
+			default:
+				values := make([]llvm.Value, nresults)
+				for i := range values {
+					values[i] = llvm.ConstNull(fr.types.ToLLVM(results.At(i).Type()))
+				}
+				fr.builder.CreateAggregateRet(values)
+			}
+		}
+		fr.builder.SetInsertPointAtEnd(rdblock)
+		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+		fr.builder.CreateBr(recoverBlock)
+	} else {
+		fr.builder.CreateBr(fr.blocks[0])
+	}
+
 	for i, block := range f.Blocks {
 		fr.translateBlock(block, fr.blocks[i])
-	}
-	if f.Recover != nil {
-		fr.translateBlock(f.Recover, fr.recoverBlock)
 	}
 }
 
 type frame struct {
 	*unit
-	blocks       []llvm.BasicBlock
-	recoverBlock llvm.BasicBlock
-	backpatch    map[ssa.Value]*LLVMValue
-	env          map[ssa.Value]*LLVMValue
+	blocks    []llvm.BasicBlock
+	backpatch map[ssa.Value]*LLVMValue
+	env       map[ssa.Value]*LLVMValue
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
@@ -247,6 +319,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		var value llvm.Value
 		if instr.Heap {
 			value = fr.createTypeMalloc(typ)
+			value.SetName(instr.Comment)
 			fr.env[instr] = fr.NewValue(value, instr.Type())
 		} else {
 			value = fr.env[instr].LLVMValue()
@@ -440,8 +513,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.stringIterNext(iter, llpreds)
 
 	case *ssa.Panic:
-		// TODO
-		fr.builder.CreateCall(fr.runtime.llvm_trap.LLVMValue(), nil, "")
+		arg := fr.value(instr.X).LLVMValue()
+		fr.builder.CreateCall(fr.runtime.panic_.LLVMValue(), []llvm.Value{arg}, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
@@ -601,7 +674,7 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		panic("TODO: panic")
 
 	case "recover":
-		// TODO determine number of frames to skip in pc check
+		// TODO(axw) determine number of frames to skip in pc check
 		indirect := fr.NewValue(llvm.ConstNull(llvm.Int32Type()), types.Typ[types.Int32])
 		return fr.runtime.recover_, []*LLVMValue{indirect}, nil
 
@@ -642,4 +715,15 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 	default:
 		panic("unimplemented: " + builtin.Name())
 	}
+}
+
+func hasDefer(f *ssa.Function) bool {
+	for _, b := range f.Blocks {
+		for _, instr := range b.Instrs {
+			if _, ok := instr.(*ssa.Defer); ok {
+				return true
+			}
+		}
+	}
+	return false
 }

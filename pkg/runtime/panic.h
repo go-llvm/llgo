@@ -1,20 +1,30 @@
 #ifndef _LLGO_PANIC_H
 #define _LLGO_PANIC_H
 
+#include <setjmp.h>
+
 #include "types.h"
 #include "asm.h"
 
 struct Defer {
-    // f represents the deferred function.
-    struct Func f;
+	// f represents the deferred function.
+	struct Func f;
+
+	// next points to the next deferred function in the chain.
+	struct Defer *next;
+};
+
+struct Defers {
+	jmp_buf j;
 
 	// caller identifies the function which generated
-    // the deferred function; the value is obtained from
+	// the deferred function; the value is obtained from
 	// _Unwind_GetRegionStart.
-    uintptr_t caller;
+	uintptr_t caller;
 
-    // next points to the next deferred function in the chain.
-    struct Defer *next;
+	struct Defer *d;
+
+	struct Defers *next;
 };
 
 struct Eface {
@@ -30,13 +40,13 @@ struct Panic {
 // current_panic returns the panic stack
 // for the calling thread.
 struct Panic* current_panic()
-    LLGO_ASM_EXPORT("runtime.current_panic");
+	LLGO_ASM_EXPORT("runtime.current_panic");
 
 // runtime_caller_region returns the instruction
 // region of the call frame specified by the number
 // of frames to skip from the current location.
 uintptr_t runtime_caller_region(int skip)
-		LLGO_ASM_EXPORT("runtime.caller_region") __attribute__((noinline));
+	    LLGO_ASM_EXPORT("runtime.caller_region") __attribute__((noinline));
 
 // guardedcall0 calls the given niladic function,
 // preventing any panics from escaping.
