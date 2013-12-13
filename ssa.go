@@ -7,6 +7,7 @@ package llgo
 import (
 	"fmt"
 	"go/token"
+	"sort"
 
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/ssa"
@@ -48,8 +49,22 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 	for f, _ := range functions {
 		u.declareFunction(f)
 	}
-	for f, _ := range functions {
-		u.defineFunction(f)
+
+	// Define functions.
+	// Sort if flag is set for more deterministic behavior (for debugging)
+	if !c.OrderedCompilation {
+		for f, _ := range functions {
+			u.defineFunction(f)
+		}
+	} else {
+		fns := []*ssa.Function{}
+		for f, _ := range functions {
+			fns = append(fns, f)
+		}
+		sort.Sort(byName(fns))
+		for _, f := range fns {
+			u.defineFunction(f)
+		}
 	}
 	return u
 }

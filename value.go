@@ -5,11 +5,11 @@
 package llgo
 
 import (
+	"fmt"
+	"go/token"
 	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
-	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/token"
 )
 
 // Value is an interface for representing values returned by Go expressions.
@@ -38,6 +38,10 @@ type LLVMValue struct {
 	compiler *compiler
 	value    llvm.Value
 	typ      types.Type
+}
+
+func (v LLVMValue) String() string {
+	return fmt.Sprintf("[llgo.LLVMValue typ:%s value:%v]", v.typ, v.value)
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.

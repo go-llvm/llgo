@@ -13,13 +13,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo"
 	"go/scanner"
 	"log"
 	"os"
 	"runtime"
 	"sort"
+	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo"
 )
 
 var dump = flag.Bool(
@@ -176,8 +176,11 @@ func computeTriple() string {
 
 func initCompiler() (llgo.Compiler, error) {
 	opts := llgo.CompilerOptions{TargetTriple: computeTriple()}
-	if *trace {
+	if *trace || os.Getenv("LLGO_TRACE") == "1" {
 		opts.Logger = log.New(os.Stderr, "", 0)
+	}
+	if os.Getenv("LLGO_ORDERED_COMPILATION") == "1" {
+		opts.OrderedCompilation = true
 	}
 	opts.GenerateDebug = *generateDebug
 	return llgo.NewCompiler(opts)
@@ -196,12 +199,6 @@ func main() {
 	if *printTriple {
 		fmt.Println(computeTriple())
 		os.Exit(0)
-	}
-
-	opts := llgo.CompilerOptions{}
-	opts.TargetTriple = computeTriple()
-	if *trace {
-		opts.Logger = log.New(os.Stderr, "", 0)
 	}
 
 	compiler, err := initCompiler()
