@@ -5,11 +5,11 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"reflect"
+	"code.google.com/p/go.tools/go/types"
+	"github.com/axw/gollvm/llvm"
 )
 
 // llvmTypeMap is provides a means of mapping from a types.Map
@@ -103,10 +103,14 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 }
 
 func (tm *llvmTypeMap) ToLLVM(t types.Type) llvm.Type {
+	return tm.toLLVM(t, "")
+}
+
+func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 	tstr := tm.TypeKey(t)
 	lt, ok := tm.types[tstr]
 	if !ok {
-		lt = tm.makeLLVMType(tstr, t)
+		lt = tm.makeLLVMType(tstr, t, name)
 		if lt.IsNil() {
 			panic(fmt.Sprint("Failed to create LLVM type for: ", tstr))
 		}
@@ -131,7 +135,7 @@ func (tm *TypeMap) toRuntime(t types.Type) (global, value llvm.Value) {
 	return info.global, info.dyntyp
 }
 
-func (tm *llvmTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
+func (tm *llvmTypeMap) makeLLVMType(tstr string, t types.Type, name string) llvm.Type {
 	switch t := t.(type) {
 	case *types.Basic:
 		lt := tm.basicLLVMType(t)
@@ -142,17 +146,17 @@ func (tm *llvmTypeMap) makeLLVMType(tstr string, t types.Type) llvm.Type {
 		tm.types[tstr] = lt
 		return lt
 	case *types.Slice:
-		return tm.sliceLLVMType(tstr, t)
+		return tm.sliceLLVMType(tstr, t, name)
 	case *types.Struct:
-		return tm.structLLVMType(tstr, t)
+		return tm.structLLVMType(tstr, t, name)
 	case *types.Pointer:
 		lt := tm.pointerLLVMType(t)
 		tm.types[tstr] = lt
 		return lt
 	case *types.Signature:
-		return tm.funcLLVMType(tstr, t)
+		return tm.funcLLVMType(tstr, t, name)
 	case *types.Interface:
-		return tm.interfaceLLVMType(tstr, t)
+		return tm.interfaceLLVMType(tstr, t, name)
 	case *types.Map:
 		lt := tm.mapLLVMType(t)
 		tm.types[tstr] = lt
@@ -213,10 +217,10 @@ func (tm *llvmTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
 	return llvm.ArrayType(tm.ToLLVM(a.Elem()), int(a.Len()))
 }
 
-func (tm *llvmTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
+func (tm *llvmTypeMap) sliceLLVMType(tstr string, s *types.Slice, name string) llvm.Type {
 	typ, ok := tm.types[tstr]
 	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed("")
+		typ = llvm.GlobalContext().StructCreateNamed(name)
 		tm.types[tstr] = typ
 		elements := []llvm.Type{
 			llvm.PointerType(tm.ToLLVM(s.Elem()), 0),
@@ -228,10 +232,10 @@ func (tm *llvmTypeMap) sliceLLVMType(tstr string, s *types.Slice) llvm.Type {
 	return typ
 }
 
-func (tm *llvmTypeMap) structLLVMType(tstr string, s *types.Struct) llvm.Type {
+func (tm *llvmTypeMap) structLLVMType(tstr string, s *types.Struct, name string) llvm.Type {
 	typ, ok := tm.types[tstr]
 	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed("")
+		typ = llvm.GlobalContext().StructCreateNamed(name)
 		tm.types[tstr] = typ
 		elements := make([]llvm.Type, s.NumFields())
 		for i := range elements {
@@ -248,7 +252,7 @@ func (tm *llvmTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
 }
 
-func (tm *llvmTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
+func (tm *llvmTypeMap) funcLLVMType(tstr string, f *types.Signature, name string) llvm.Type {
 	if typ, ok := tm.types[tstr]; ok {
 		return typ
 	}
@@ -269,7 +273,7 @@ func (tm *llvmTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 		return tm.ToLLVM(f)
 	}
 
-	typ := llvm.GlobalContext().StructCreateNamed("")
+	typ := llvm.GlobalContext().StructCreateNamed(name)
 	tm.types[tstr] = typ
 
 	params := f.Params()
@@ -303,7 +307,7 @@ func (tm *llvmTypeMap) funcLLVMType(tstr string, f *types.Signature) llvm.Type {
 	return typ
 }
 
-func (tm *llvmTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.Type {
+func (tm *llvmTypeMap) interfaceLLVMType(tstr string, i *types.Interface, name string) llvm.Type {
 	if typ, ok := tm.types[tstr]; ok {
 		return typ
 	}
@@ -312,7 +316,10 @@ func (tm *llvmTypeMap) interfaceLLVMType(tstr string, i *types.Interface) llvm.T
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	rtypeType := i8ptr
 	valueType := i8ptr
-	typ := llvm.GlobalContext().StructCreateNamed("")
+	if name == "" {
+		name = tstr
+	}
+	typ := llvm.GlobalContext().StructCreateNamed(name)
 	typ.StructSetBody([]llvm.Type{rtypeType, valueType}, false)
 	tm.types[tstr] = typ
 	return typ
@@ -331,8 +338,7 @@ func (tm *llvmTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
 }
 
 func (tm *llvmTypeMap) nameLLVMType(n *types.Named) llvm.Type {
-	// TODO propagate name through to underlying type.
-	return tm.ToLLVM(n.Underlying())
+	return tm.toLLVM(n.Underlying(), n.String())
 }
 
 func (tm *llvmTypeMap) Alignof(typ types.Type) int64 {
