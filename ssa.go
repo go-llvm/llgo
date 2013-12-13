@@ -346,9 +346,19 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.ChangeInterface:
-		// TODO convI2I, convI2E
-		lliface := llvm.ConstNull(fr.types.ToLLVM(instr.Type()))
-		fr.env[instr] = fr.NewValue(lliface, instr.Type())
+		x := fr.value(instr.X)
+		// The source type must be a non-empty interface,
+		// as ChangeInterface cannot fail (E2I may fail).
+		if instr.Type().Underlying().(*types.Interface).NumMethods() > 0 {
+			// TODO(axw) optimisation for I2I case where we
+			// know statically the methods to carry over.
+			x = x.convertI2E()
+			x = x.convertE2I(instr.Type())
+		} else {
+			x = x.convertI2E()
+			x = fr.NewValue(x.LLVMValue(), instr.Type())
+		}
+		fr.env[instr] = x
 
 	case *ssa.ChangeType:
 		value := fr.value(instr.X).LLVMValue()

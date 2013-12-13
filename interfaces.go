@@ -62,6 +62,9 @@ func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	rtype = c.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
 	value = c.builder.CreateInsertValue(value, rtype, 0, "")
 	value = c.builder.CreateInsertValue(value, v.interfaceValue(), 1, "")
-	// TODO convE2I
+	if iface.Underlying().(*types.Interface).NumMethods() > 0 {
+		result := c.NewValue(value, types.NewInterface(nil, nil))
+		return result.convertE2I(iface)
+	}
 	return c.NewValue(value, iface)
 }

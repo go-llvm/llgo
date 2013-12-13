@@ -87,6 +87,14 @@ func convertI2E(i iface) eface {
 	return eface{i.tab.typ, i.data}
 }
 
+func convertE2I(e eface, typ unsafe.Pointer) (result iface) {
+	result.tab = new(itab)
+	result.data = e.data
+	result.tab.inter = (*interfaceType)(typ)
+	result.tab.typ = (*rtype)(typ)
+	return result
+}
+
 // #llgo name: reflect.ifaceE2I
 func reflect_ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	// TODO
