@@ -89,6 +89,10 @@ type CompilerOptions struct {
 
 	// Logger is a logger used for tracing compilation.
 	Logger *log.Logger
+
+	// OrderedCompilation attempts to do some sorting to compile
+	// functions in a deterministic order
+	OrderedCompilation bool
 }
 
 // Based on parseArch from LLVM's lib/Support/Triple.cpp.
