@@ -271,7 +271,16 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
-		return fr.globals[v]
+		if g, ok := fr.globals[v]; ok {
+			return g
+		}
+		// Create an external global. Globals for this package are defined
+		// on entry to translatePackage, and have initialisers.
+		llelemtyp := fr.types.ToLLVM(deref(v.Type()))
+		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
+		global := fr.NewValue(llglobal, v.Type())
+		fr.globals[v] = global
+		return global
 	}
 	if value, ok := fr.env[v]; ok {
 		return value
