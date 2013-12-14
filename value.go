@@ -5,11 +5,11 @@
 package llgo
 
 import (
-	"fmt"
-	"go/token"
 	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
+	"fmt"
 	"github.com/axw/gollvm/llvm"
+	"go/token"
 )
 
 // Value is an interface for representing values returned by Go expressions.
@@ -146,7 +146,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		}
 	}
 
-	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", c.types.TypeString(typ), typ, v, v))
+	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", typ, typ, v, v))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -683,10 +683,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	}
-
-	srcstr := v.compiler.types.TypeString(v.typ)
-	dststr := v.compiler.types.TypeString(origdsttyp)
-	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", srcstr, lv.Type(), dststr))
+	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", v.typ, lv.Type(), origdsttyp))
 }
 
 func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
