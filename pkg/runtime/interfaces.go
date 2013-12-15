@@ -91,7 +91,7 @@ func convertE2I(e eface, typ unsafe.Pointer) (result iface) {
 	result.tab = new(itab)
 	result.data = e.data
 	result.tab.inter = (*interfaceType)(typ)
-	result.tab.typ = (*rtype)(typ)
+	result.tab.typ = e.rtyp
 	return result
 }
 
