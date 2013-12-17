@@ -64,7 +64,8 @@ func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	value = c.builder.CreateInsertValue(value, v.interfaceValue(), 1, "")
 	if iface.Underlying().(*types.Interface).NumMethods() > 0 {
 		result := c.NewValue(value, types.NewInterface(nil, nil))
-		return result.convertE2I(iface)
+		result, _ = result.convertE2I(iface)
+		return result
 	}
 	return c.NewValue(value, iface)
 }

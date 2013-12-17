@@ -245,13 +245,18 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		return nil, err
 	}
 
+	// Create a new translation unit.
+	unit := newUnit(compiler, mainpkg)
+
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
+	var functionResolver FunctionResolver = unit
 	compiler.types = NewTypeMap(
 		importpath,
 		compiler.llvmtypes,
 		compiler.module.Module,
 		compiler.runtime,
+		functionResolver,
 	)
 
 	// Create a Builder, for building LLVM instructions.
@@ -259,7 +264,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	defer compiler.builder.Dispose()
 
 	mainpkg.Build()
-	unit := compiler.translatePackage(mainpkg)
+	unit.translatePackage(mainpkg)
 	compiler.processAnnotations(unit, pkginfo)
 
 	/*

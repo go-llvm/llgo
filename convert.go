@@ -12,8 +12,8 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-// convertI2V converts (type asserts) an interface value to a concrete type.
-func (v *LLVMValue) convertI2V(typ types.Type) (result, success *LLVMValue) {
+// convertE2V converts (type asserts) an interface value to a concrete type.
+func (v *LLVMValue) convertE2V(typ types.Type) (result, success *LLVMValue) {
 	builder := v.compiler.builder
 	predicate := v.interfaceTypeEquals(typ).LLVMValue()
 
@@ -25,7 +25,7 @@ func (v *LLVMValue) convertI2V(typ types.Type) (result, success *LLVMValue) {
 	builder.CreateCondBr(predicate, match, nonmatch)
 
 	builder.SetInsertPointAtEnd(match)
-	matchResultValue := v.loadI2V(typ).LLVMValue()
+	matchResultValue := v.loadE2V(typ).LLVMValue()
 	builder.CreateBr(end)
 
 	builder.SetInsertPointAtEnd(nonmatch)
@@ -57,18 +57,35 @@ func (v *LLVMValue) convertI2E() *LLVMValue {
 }
 
 // convertE2I converts an empty interface value to a non-empty interface.
-func (v *LLVMValue) convertE2I(iface types.Type) *LLVMValue {
+func (v *LLVMValue) convertE2I(iface types.Type) (result, success *LLVMValue) {
 	c := v.compiler
 	f := c.runtime.convertE2I.LLVMValue()
 	typ := c.builder.CreatePtrToInt(c.types.ToRuntime(iface), c.target.IntPtrType(), "")
 	args := []llvm.Value{c.coerce(v.LLVMValue(), c.runtime.eface.llvm), typ}
-	result := c.coerce(c.builder.CreateCall(f, args, ""), c.types.ToLLVM(iface))
-	return c.NewValue(result, iface)
+	res := c.coerce(c.builder.CreateCall(f, args, ""), c.types.ToLLVM(iface))
+	succ := c.builder.CreateIsNotNull(c.builder.CreateExtractValue(res, 0, ""), "")
+	return c.NewValue(res, iface), c.NewValue(succ, types.Typ[types.Bool])
 }
 
-// mustConvertI2V calls convertI2V, panicking if the assertion failed.
-func (v *LLVMValue) mustConvertI2V(typ types.Type) *LLVMValue {
-	result, ok := v.convertI2V(typ)
+// mustConvertE2I calls convertE2I, panicking if the assertion failed.
+func (v *LLVMValue) mustConvertE2I(typ types.Type) *LLVMValue {
+	result, ok := v.convertE2I(typ)
+	builder := v.compiler.builder
+	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
+	end.MoveAfter(builder.GetInsertBlock())
+	failed := llvm.InsertBasicBlock(end, "failed")
+	builder.CreateCondBr(ok.LLVMValue(), end, failed)
+	builder.SetInsertPointAtEnd(failed)
+	c := v.compiler
+	s := fmt.Sprintf("convertE2I(%s, %s) failed", v.typ, typ)
+	c.emitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
+	builder.SetInsertPointAtEnd(end)
+	return result
+}
+
+// mustConvertE2V calls convertE2V, panicking if the assertion failed.
+func (v *LLVMValue) mustConvertE2V(typ types.Type) *LLVMValue {
+	result, ok := v.convertE2V(typ)
 
 	builder := v.compiler.builder
 	end := llvm.InsertBasicBlock(builder.GetInsertBlock(), "end")
@@ -78,15 +95,15 @@ func (v *LLVMValue) mustConvertI2V(typ types.Type) *LLVMValue {
 	builder.SetInsertPointAtEnd(failed)
 
 	c := v.compiler
-	s := fmt.Sprintf("convertI2V(%s, %s) failed", v.typ, typ)
+	s := fmt.Sprintf("convertE2V(%s, %s) failed", v.typ, typ)
 	c.emitPanic(c.NewConstValue(exact.MakeString(s), types.Typ[types.String]))
 	builder.SetInsertPointAtEnd(end)
 	return result
 }
 
-// loadI2V loads an interface value to the specified type, without
+// loadE2V loads an interface value to the specified type, without
 // checking that the interface type matches.
-func (v *LLVMValue) loadI2V(typ types.Type) *LLVMValue {
+func (v *LLVMValue) loadE2V(typ types.Type) *LLVMValue {
 	c := v.compiler
 	if c.types.Sizeof(typ) == 0 {
 		value := llvm.ConstNull(c.types.ToLLVM(typ))

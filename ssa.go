@@ -21,38 +21,39 @@ type unit struct {
 	globals map[ssa.Value]*LLVMValue
 }
 
-// translatePackage translates an *ssa.Package into an LLVM module, and returns
-// the translation unit information.
-func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
+func newUnit(c *compiler, pkg *ssa.Package) *unit {
 	u := &unit{
 		compiler: c,
 		pkg:      pkg,
 		globals:  make(map[ssa.Value]*LLVMValue),
 	}
+	return u
+}
 
+// translatePackage translates an *ssa.Package into an LLVM module, and returns
+// the translation unit information.
+func (u *unit) translatePackage(pkg *ssa.Package) {
 	// Initialize global storage.
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
-			llelemtyp := c.types.ToLLVM(deref(v.Type()))
-			global := llvm.AddGlobal(c.module.Module, llelemtyp, v.String())
+			llelemtyp := u.types.ToLLVM(deref(v.Type()))
+			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
-			u.globals[v] = c.NewValue(global, v.Type())
+			u.globals[v] = u.NewValue(global, v.Type())
 		}
 	}
 
-	// TODO prune off unreferenced functions from imported packages,
-	// so the IR isn't littered unnecessarily.
-
-	// Translate functions.
+	// TODO(axw) prune off unreferenced functions from imported
+	// packages, so the IR isn't littered unnecessarily.
 	functions := ssautil.AllFunctions(pkg.Prog)
 	for f, _ := range functions {
 		u.declareFunction(f)
 	}
 
 	// Define functions.
-	// Sort if flag is set for more deterministic behavior (for debugging)
-	if !c.OrderedCompilation {
+	// Sort if flag is set for deterministic behaviour (for debugging)
+	if !u.compiler.OrderedCompilation {
 		for f, _ := range functions {
 			u.defineFunction(f)
 		}
@@ -66,48 +67,52 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 			u.defineFunction(f)
 		}
 	}
-	return u
 }
 
-// declareFunction adds a function declaration with the given name
-// and type to the module.
-func (u *unit) declareFunction(f *ssa.Function) {
-	name := f.Name()
-	// TODO use f.String() for the name, which includes path,
-	// receiver and function name. Runtime type generation
-	// must be changed at the same time.
-	if recv := f.Signature.Recv(); recv != nil {
-		// receiver name includes package
-		name = fmt.Sprintf("%s.%s", recv.Type(), name)
-	} else if f.Pkg != nil {
-		name = fmt.Sprintf("%s.%s", f.Pkg.Object.Path(), name)
+// ResolveFunc implements FunctionResolver.ResolveFunc.
+func (u *unit) ResolveFunction(f *types.Func) llvm.Value {
+	ssafunc := u.pkg.Prog.FuncValue(f)
+	return u.resolveFunction(ssafunc)
+}
+
+func (u *unit) resolveFunction(f *ssa.Function) llvm.Value {
+	if v, ok := u.globals[f]; ok {
+		return v.LLVMValue()
 	}
-	llvmType := u.types.ToLLVM(f.Signature)
-	llvmType = llvmType.StructElementTypes()[0].ElementType()
-	if len(f.FreeVars) > 0 {
-		// Add an implicit first argument.
-		returnType := llvmType.ReturnType()
-		paramTypes := llvmType.ParamTypes()
-		vararg := llvmType.IsFunctionVarArg()
-		blockElementTypes := make([]llvm.Type, len(f.FreeVars))
-		for i, fv := range f.FreeVars {
-			blockElementTypes[i] = u.types.ToLLVM(fv.Type())
-		}
-		blockType := llvm.StructType(blockElementTypes, false)
-		blockPtrType := llvm.PointerType(blockType, 0)
-		paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
-		llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
-	}
+	name := f.String()
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
 	llvmFunction := u.module.Module.NamedFunction(name)
 	if llvmFunction.IsNil() {
+		llvmType := u.types.ToLLVM(f.Signature)
+		llvmType = llvmType.StructElementTypes()[0].ElementType()
+		if len(f.FreeVars) > 0 {
+			// Add an implicit first argument.
+			returnType := llvmType.ReturnType()
+			paramTypes := llvmType.ParamTypes()
+			vararg := llvmType.IsFunctionVarArg()
+			blockElementTypes := make([]llvm.Type, len(f.FreeVars))
+			for i, fv := range f.FreeVars {
+				blockElementTypes[i] = u.types.ToLLVM(fv.Type())
+			}
+			blockType := llvm.StructType(blockElementTypes, false)
+			blockPtrType := llvm.PointerType(blockType, 0)
+			paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
+			llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
+		}
 		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
 	}
 	u.globals[f] = u.NewValue(llvmFunction, f.Signature)
+	return llvmFunction
+}
+
+// declareFunction adds a function declaration with the given name
+// and type to the module.
+func (u *unit) declareFunction(f *ssa.Function) {
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
+	llvmFunction := u.resolveFunction(f)
 	if f.Recover != nil {
 		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
 	}
@@ -377,7 +382,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			// TODO(axw) optimisation for I2I case where we
 			// know statically the methods to carry over.
 			x = x.convertI2E()
-			x = x.convertE2I(instr.Type())
+			x, _ = x.convertE2I(instr.Type())
 		} else {
 			x = x.convertI2E()
 			x = fr.NewValue(x.LLVMValue(), instr.Type())
@@ -619,12 +624,24 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.TypeAssert:
 		x := fr.value(instr.X)
+		if iface, ok := x.Type().Underlying().(*types.Interface); ok && iface.NumMethods() > 0 {
+			x = x.convertI2E()
+		}
 		if !instr.CommaOk {
-			fr.env[instr] = x.mustConvertI2V(instr.AssertedType)
+			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
+				fr.env[instr] = x.mustConvertE2I(instr.AssertedType)
+			} else {
+				fr.env[instr] = x.mustConvertE2V(instr.AssertedType)
+			}
 		} else {
-			result, ok := x.convertI2V(instr.AssertedType)
+			var result, success *LLVMValue
+			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
+				result, success = x.convertE2I(instr.AssertedType)
+			} else {
+				result, success = x.convertE2V(instr.AssertedType)
+			}
 			resultval := result.LLVMValue()
-			okval := ok.LLVMValue()
+			okval := success.LLVMValue()
 			pairtyp := llvm.StructType([]llvm.Type{resultval.Type(), okval.Type()}, false)
 			pair := llvm.Undef(pairtyp)
 			pair = fr.builder.CreateInsertValue(pair, resultval, 0, "")
