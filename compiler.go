@@ -182,7 +182,7 @@ func (c *compiler) logf(format string, v ...interface{}) {
 func (compiler *compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.exportedtypes = nil
-	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
+	compiler.llvmtypes = NewLLVMTypeMap(llvm.GlobalContext(), compiler.target)
 
 	buildctx, err := llgobuild.Context(compiler.TargetTriple)
 	if err != nil {
