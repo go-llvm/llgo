@@ -47,11 +47,16 @@ type TypeMap struct {
 	types   typemap.M // Type -> *typeDescInfo
 	runtime *runtimeInterface
 
-	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType llvm.Type
+	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
 
-	typeSliceType llvm.Type
+	imethodType llvm.Type
+
+	typeSliceType, imethodSliceType llvm.Type
 
 	hashFnType, equalFnType llvm.Type
+
+	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity llvm.Value
+	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity llvm.Value
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
@@ -75,18 +80,18 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 	}
 }
 
-func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface) *TypeMap {
+func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface, mc *manglerContext) *TypeMap {
 	tm := &TypeMap{
 		llvmTypeMap: llvmtm,
+		mc:          mc,
+		ctx:         module.Context(),
 		module:      module,
 		pkgpath:     pkgpath,
 		runtime:     r,
 	}
 
-	ctx := module.Context()
-
 	uintptrType := tm.inttype
-	voidPtrType := llvm.PointerType(ctx.Int8Type(), 0)
+	voidPtrType := llvm.PointerType(tm.ctx.Int8Type(), 0)
 	boolType := llvm.Int1Type()
 	stringPtrType := llvm.PointerType(tm.stringType, 0)
 
@@ -96,20 +101,34 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	params = []llvm.Type{voidPtrType, voidPtrType, uintptrType}
 	tm.equalFnType = llvm.FunctionType(boolType, params, false)
 
-	tm.uncommonTypeType = ctx.StructCreateNamed("uncommonType")
+	tm.hashFnEmptyInterface = llvm.AddFunction(tm.module, "__go_type_hash_empty_interface", tm.hashFnType)
+	tm.hashFnInterface = llvm.AddFunction(tm.module, "__go_type_hash_interface", tm.hashFnType)
+	tm.hashFnFloat = llvm.AddFunction(tm.module, "__go_type_hash_float", tm.hashFnType)
+	tm.hashFnComplex = llvm.AddFunction(tm.module, "__go_type_hash_complex", tm.hashFnType)
+	tm.hashFnString = llvm.AddFunction(tm.module, "__go_type_hash_string", tm.hashFnType)
+	tm.hashFnIdentity = llvm.AddFunction(tm.module, "__go_type_hash_identity", tm.hashFnType)
+
+	tm.equalFnEmptyInterface = llvm.AddFunction(tm.module, "__go_type_equal_empty_interface", tm.equalFnType)
+	tm.equalFnInterface = llvm.AddFunction(tm.module, "__go_type_equal_interface", tm.equalFnType)
+	tm.equalFnFloat = llvm.AddFunction(tm.module, "__go_type_equal_float", tm.equalFnType)
+	tm.equalFnComplex = llvm.AddFunction(tm.module, "__go_type_equal_complex", tm.equalFnType)
+	tm.equalFnString = llvm.AddFunction(tm.module, "__go_type_equal_string", tm.equalFnType)
+	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
+
+	tm.uncommonTypeType = tm.ctx.StructCreateNamed("uncommonType")
 	tm.uncommonTypeType.StructSetBody([]llvm.Type{
 		stringPtrType, // name
 		stringPtrType, // pkgPath
 		// TODO: methods
 	}, false)
 
-	tm.commonTypeType = ctx.StructCreateNamed("commonType")
+	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
 	tm.commonTypeType.StructSetBody([]llvm.Type{
-		ctx.Int8Type(),                           // Kind
-		ctx.Int8Type(),                           // align
-		ctx.Int8Type(),                           // fieldAlign
+		tm.ctx.Int8Type(),                        // Kind
+		tm.ctx.Int8Type(),                        // align
+		tm.ctx.Int8Type(),                        // fieldAlign
 		uintptrType,                              // size
-		ctx.Int32Type(),                          // hash
+		tm.ctx.Int32Type(),                       // hash
 		llvm.PointerType(tm.hashFnType, 0),       // hashfn
 		llvm.PointerType(tm.equalFnType, 0),      // equalfn
 		stringPtrType,                            // string
@@ -119,28 +138,23 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
 
-	tm.typeSliceType = ctx.StructCreateNamed("typeSliceType")
-	tm.typeSliceType.StructSetBody([]llvm.Type{
-		llvm.PointerType(commonTypeTypePtr, 0),
-		tm.inttype,
-		tm.inttype,
-	}, false)
+	tm.typeSliceType = tm.makeNamedSliceType("typeSlice", commonTypeTypePtr)
 
-	tm.ptrTypeType = ctx.StructCreateNamed("ptrType")
+	tm.ptrTypeType = tm.ctx.StructCreateNamed("ptrType")
 	tm.ptrTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr,
 	}, false)
 
-	tm.funcTypeType = ctx.StructCreateNamed("funcType")
+	tm.funcTypeType = tm.ctx.StructCreateNamed("funcType")
 	tm.funcTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
-		ctx.Int8Type(),   // dotdotdot
-		tm.typeSliceType, // in
-		tm.typeSliceType, // out
+		tm.ctx.Int8Type(), // dotdotdot
+		tm.typeSliceType,  // in
+		tm.typeSliceType,  // out
 	}, false)
 
-	tm.arrayTypeType = ctx.StructCreateNamed("arrayType")
+	tm.arrayTypeType = tm.ctx.StructCreateNamed("arrayType")
 	tm.arrayTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr, // elem
@@ -148,24 +162,39 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 		tm.inttype,        // len
 	}, false)
 
-	tm.sliceTypeType = ctx.StructCreateNamed("sliceType")
+	tm.sliceTypeType = tm.ctx.StructCreateNamed("sliceType")
 	tm.sliceTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr, // elem
 	}, false)
 
-	tm.mapTypeType = ctx.StructCreateNamed("mapType")
+	tm.mapTypeType = tm.ctx.StructCreateNamed("mapType")
 	tm.mapTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr, // key
 		commonTypeTypePtr, // elem
 	}, false)
 
-	tm.chanTypeType = ctx.StructCreateNamed("chanType")
+	tm.chanTypeType = tm.ctx.StructCreateNamed("chanType")
 	tm.chanTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr, // elem
 		tm.inttype,        // dir
+	}, false)
+
+	tm.imethodType = tm.ctx.StructCreateNamed("imethod")
+	tm.imethodType.StructSetBody([]llvm.Type{
+		stringPtrType,     // name
+		stringPtrType,     // pkgPath
+		commonTypeTypePtr, // typ
+	}, false)
+
+	tm.imethodSliceType = tm.makeNamedSliceType("imethodSlice", tm.imethodType)
+
+	tm.interfaceTypeType = tm.ctx.StructCreateNamed("interfaceType")
+	tm.interfaceTypeType.StructSetBody([]llvm.Type{
+		tm.commonTypeType,
+		tm.imethodSliceType,
 	}, false)
 
 	return tm
@@ -421,8 +450,7 @@ func (ctx *manglerContext) init(prog *ssa.Program) {
 		addNamedTypesToMap = func(scope *types.Scope) {
 			hasNamedTypes := false
 			for _, n := range scope.Names() {
-				tn := scope.Lookup(n).(*types.TypeName)
-				if tn != nil {
+				if tn, ok := scope.Lookup(n).(*types.TypeName); ok {
 					hasNamedTypes = true
 					ctx.ti[tn.Type().(*types.Named)] = localNamedTypeInfo{f.Name(), scopeNum}
 				}
@@ -434,7 +462,9 @@ func (ctx *manglerContext) init(prog *ssa.Program) {
 				addNamedTypesToMap(scope.Child(i))
 			}
 		}
-		addNamedTypesToMap(f.Object().(*types.Func).Scope())
+		if f.Synthetic == "" {
+			addNamedTypesToMap(f.Object().(*types.Func).Scope())
+		}
 	}
 }
 
@@ -455,7 +485,9 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 
 	case *types.Named:
 		obj := t.Obj()
-		nti.pkgpath = obj.Pkg().Path()
+		if pkg := obj.Pkg(); pkg != nil {
+			nti.pkgpath = obj.Pkg().Path()
+		}
 		nti.name = obj.Name()
 		nti.localNamedTypeInfo = ctx.ti[t]
 
@@ -610,12 +642,70 @@ func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 		return tm.mapTypeType
 	case *types.Chan:
 		return tm.chanTypeType
+	case *types.Struct:
+		return tm.commonTypeType // FIXME
+	case *types.Interface:
+		return tm.interfaceTypeType
 	default:
 		panic(fmt.Sprintf("unhandled type: %#v", t))
 	}
 }
 
-func (tm *TypeMap) makeTypeDescInitializer(tstr string, t types.Type) llvm.Value {
+func (tm *TypeMap) getNamedTypeLinkage(nt *types.Named) (linkage llvm.Linkage, emit bool) {
+	if pkg := nt.Obj().Pkg(); pkg != nil {
+		linkage = llvm.ExternalLinkage
+		emit = pkg.Path() == tm.pkgpath
+	} else {
+		linkage = llvm.LinkOnceODRLinkage
+		emit = true
+	}
+
+	return
+}
+
+func (tm *TypeMap) getTypeDescLinkage(t types.Type) (linkage llvm.Linkage, emit bool) {
+	switch t := t.(type) {
+	case *types.Named:
+		linkage, emit = tm.getNamedTypeLinkage(t)
+
+	case *types.Pointer:
+		elem := t.Elem()
+		if nt, ok := elem.(*types.Named); ok {
+			// Thanks to the ptrToThis member, pointers to named types appear
+			// in exactly the same objects as the named types themselves, so
+			// we can give them the same linkage.
+			linkage, emit = tm.getNamedTypeLinkage(nt)
+			return
+		}
+		linkage = llvm.LinkOnceODRLinkage
+		emit = true
+
+	default:
+		linkage = llvm.LinkOnceODRLinkage
+		emit = true
+	}
+
+	return
+}
+
+func (tm *TypeMap) finalize() {
+	for changed := true; changed; {
+		changed = false
+		tm.types.Iterate(func(key types.Type, value interface{}) {
+			tdi := value.(*typeDescInfo)
+			if tdi.global.Initializer().C == nil {
+				linkage, emit := tm.getTypeDescLinkage(key)
+				tdi.global.SetLinkage(linkage)
+				if emit {
+					changed = true
+					tdi.global.SetInitializer(tm.makeTypeDescInitializer(key))
+				}
+			}
+		})
+	}
+}
+
+func (tm *TypeMap) makeTypeDescInitializer(t types.Type) llvm.Value {
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
 		return tm.makeBasicType(t, u)
@@ -631,14 +721,46 @@ func (tm *TypeMap) makeTypeDescInitializer(tstr string, t types.Type) llvm.Value
 		return tm.makeMapType(t, u)
 	case *types.Chan:
 		return tm.makeChanType(t, u)
+	case *types.Struct:
+		return tm.makeCommonType(t) // FIXME
+	case *types.Interface:
+		return tm.makeInterfaceType(t, u)
 	default:
 		panic(fmt.Sprintf("unhandled type: %#v", t))
 	}
 }
 
-func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
-	elems := []llvm.Value{}
-	return llvm.ConstStruct(elems, false)
+func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal llvm.Value) {
+	switch t := t.Underlying().(type) {
+	case *types.Interface:
+		if t.NumMethods() == 0 {
+			hash = tm.hashFnEmptyInterface
+			equal = tm.equalFnEmptyInterface
+		} else {
+			hash = tm.hashFnInterface
+			equal = tm.equalFnInterface
+		}
+	case *types.Basic:
+		switch t.Kind() {
+		case types.Float32, types.Float64:
+			hash = tm.hashFnFloat
+			equal = tm.equalFnFloat
+		case types.Complex64, types.Complex128:
+			hash = tm.hashFnComplex
+			equal = tm.equalFnComplex
+		case types.String:
+			hash = tm.hashFnString
+			equal = tm.equalFnString
+		default:
+			hash = tm.hashFnIdentity
+			equal = tm.equalFnIdentity
+		}
+	default: // FIXME
+		hash = tm.hashFnIdentity
+		equal = tm.equalFnIdentity
+	}
+
+	return
 }
 
 func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
@@ -654,13 +776,6 @@ func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
 	tm.types.Set(t, &typeDescInfo{global: global, commonTypePtr: ptr})
 
 	return ptr
-}
-
-func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) {
-	global = llvm.AddGlobal(tm.module, v.Type(), "")
-	global.SetInitializer(v)
-	ptr = llvm.ConstBitCast(global, llvm.PointerType(tm.runtime.rtype.llvm, 0))
-	return global, ptr
 }
 
 const (
@@ -800,8 +915,9 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	vals[2] = vals[1]
 	vals[3] = llvm.ConstInt(tm.inttype, uint64(tm.Sizeof(t)), false)
 	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), 42, false)
-	vals[5] = llvm.ConstPointerNull(llvm.PointerType(tm.hashFnType, 0))
-	vals[6] = llvm.ConstPointerNull(llvm.PointerType(tm.equalFnType, 0))
+	hash, equal := tm.getAlgorithmFunctions(t)
+	vals[5] = hash
+	vals[6] = equal
 	vals[7] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
 	vals[8] = llvm.ConstPointerNull(llvm.PointerType(tm.uncommonTypeType, 0))
 	if _, ok := t.(*types.Named); ok {
@@ -880,35 +996,25 @@ func (tm *TypeMap) makeFuncType(t types.Type, f *types.Signature) llvm.Value {
 	return llvm.ConstNamedStruct(tm.funcTypeType, vals[:])
 }
 
-/*
-func (tm *TypeMap) interfaceRuntimeType(tstr string, i *types.Interface) (global, ptr llvm.Value) {
-	rtype := tm.makeRtype(i, reflect.Interface)
-	interfaceType := llvm.ConstNull(tm.runtime.interfaceType.llvm)
-	global, ptr = tm.makeRuntimeTypeGlobal(interfaceType)
-	tm.types.record(tstr, global, ptr)
-	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
+func (tm *TypeMap) makeInterfaceType(t types.Type, i *types.Interface) llvm.Value {
+	var vals [2]llvm.Value
+	vals[0] = tm.makeCommonType(t)
+
 	methodset := i.MethodSet()
 	imethods := make([]llvm.Value, methodset.Len())
 	for index := 0; index < methodset.Len(); index++ {
 		method := methodset.At(index).Obj()
-		imethod := llvm.ConstNull(tm.runtime.imethod.llvm)
-		name := tm.globalStringPtr(method.Name())
-		name = llvm.ConstBitCast(name, tm.runtime.imethod.llvm.StructElementTypes()[0])
-		//pkgpath := tm.globalStringPtr(tm.functions.objectdata[method].Package.Path())
-		//pkgpath = llvm.ConstBitCast(name, tm.runtime.imethod.llvm.StructElementTypes()[1])
-		mtyp := tm.ToRuntime(method.Type())
-		imethod = llvm.ConstInsertValue(imethod, name, []uint32{0})
-		//imethod = llvm.ConstInsertValue(imethod, pkgpath, []uint32{1})
-		imethod = llvm.ConstInsertValue(imethod, mtyp, []uint32{2})
-		imethods[index] = imethod
+		var imvals [3]llvm.Value
+		imvals[0] = tm.globalStringPtr(method.Name())
+		imvals[1] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+		imvals[2] = tm.getTypeDescriptorPointer(method.Type())
+
+		imethods[index] = llvm.ConstNamedStruct(tm.imethodType, imvals[:])
 	}
-	imethodsSliceType := tm.runtime.interfaceType.llvm.StructElementTypes()[1]
-	imethodsSlice := tm.makeSlice(imethods, imethodsSliceType)
-	interfaceType = llvm.ConstInsertValue(interfaceType, imethodsSlice, []uint32{1})
-	global.SetInitializer(interfaceType)
-	return global, ptr
+	vals[1] = tm.makeSlice(imethods, tm.imethodSliceType)
+
+	return llvm.ConstNamedStruct(tm.interfaceTypeType, vals[:])
 }
-*/
 
 func (tm *TypeMap) makeMapType(t types.Type, m *types.Map) llvm.Value {
 	var vals [3]llvm.Value
@@ -1074,13 +1180,25 @@ func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
 func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	strval := llvm.ConstString(value, false)
 	strglobal := llvm.AddGlobal(tm.module, strval.Type(), "")
+	strglobal.SetLinkage(llvm.InternalLinkage)
 	strglobal.SetInitializer(strval)
 	strglobal = llvm.ConstBitCast(strglobal, llvm.PointerType(llvm.Int8Type(), 0))
 	strlen := llvm.ConstInt(tm.inttype, uint64(len(value)), false)
 	str := llvm.ConstStruct([]llvm.Value{strglobal, strlen}, false)
 	g := llvm.AddGlobal(tm.module, str.Type(), "")
+	g.SetLinkage(llvm.InternalLinkage)
 	g.SetInitializer(str)
 	return g
+}
+
+func (tm *TypeMap) makeNamedSliceType(tname string, elemtyp llvm.Type) llvm.Type {
+	t := tm.ctx.StructCreateNamed(tname)
+	t.StructSetBody([]llvm.Type{
+		llvm.PointerType(elemtyp, 0),
+		tm.inttype,
+		tm.inttype,
+	}, false)
+	return t
 }
 
 func (tm *TypeMap) makeSlice(values []llvm.Value, slicetyp llvm.Type) llvm.Value {
@@ -1089,6 +1207,7 @@ func (tm *TypeMap) makeSlice(values []llvm.Value, slicetyp llvm.Type) llvm.Value
 	if len(values) > 0 {
 		array := llvm.ConstArray(ptrtyp.ElementType(), values)
 		globalptr = llvm.AddGlobal(tm.module, array.Type(), "")
+		globalptr.SetLinkage(llvm.InternalLinkage)
 		globalptr.SetInitializer(array)
 		globalptr = llvm.ConstBitCast(globalptr, ptrtyp)
 	} else {
