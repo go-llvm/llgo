@@ -20,8 +20,8 @@ import (
 type llvmTypeMap struct {
 	TypeStringer
 	*types.StdSizes
-	target  llvm.TargetData
-	inttype llvm.Type
+	target     llvm.TargetData
+	inttype    llvm.Type
 	stringType llvm.Type
 
 	// ptrstandin is a type used to represent the base of a
@@ -33,7 +33,7 @@ type llvmTypeMap struct {
 }
 
 type typeDescInfo struct {
-	global llvm.Value
+	global        llvm.Value
 	commonTypePtr llvm.Value
 }
 
@@ -55,7 +55,7 @@ type TypeMap struct {
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
-	// spec says int is either 32-bit or 64-bit. 
+	// spec says int is either 32-bit or 64-bit.
 	// ABI currently requires sizeof(int) == sizeof(uint) == sizeof(uintptr).
 	inttype := ctx.IntType(target.PointerSize())
 
@@ -68,9 +68,9 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 			WordSize: int64(target.PointerSize()),
 			MaxAlign: 8,
 		},
-		target:  target,
-		types:   make(map[string]llvm.Type),
-		inttype: inttype,
+		target:     target,
+		types:      make(map[string]llvm.Type),
+		inttype:    inttype,
 		stringType: stringType,
 	}
 }
@@ -105,16 +105,16 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 
 	tm.commonTypeType = ctx.StructCreateNamed("commonType")
 	tm.commonTypeType.StructSetBody([]llvm.Type{
-		ctx.Int8Type(), // Kind
-		ctx.Int8Type(), // align
-		ctx.Int8Type(), // fieldAlign
-		uintptrType,    // size
-		ctx.Int32Type(),// hash
-		llvm.PointerType(tm.hashFnType, 0),// hashfn
-		llvm.PointerType(tm.equalFnType, 0),// equalfn
-		stringPtrType, // string
+		ctx.Int8Type(),                           // Kind
+		ctx.Int8Type(),                           // align
+		ctx.Int8Type(),                           // fieldAlign
+		uintptrType,                              // size
+		ctx.Int32Type(),                          // hash
+		llvm.PointerType(tm.hashFnType, 0),       // hashfn
+		llvm.PointerType(tm.equalFnType, 0),      // equalfn
+		stringPtrType,                            // string
 		llvm.PointerType(tm.uncommonTypeType, 0), // uncommonType
-		llvm.PointerType(tm.commonTypeType, 0), // ptrToThis
+		llvm.PointerType(tm.commonTypeType, 0),   // ptrToThis
 	}, false)
 
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
@@ -135,7 +135,7 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	tm.funcTypeType = ctx.StructCreateNamed("funcType")
 	tm.funcTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
-		ctx.Int8Type(), // dotdotdot
+		ctx.Int8Type(),   // dotdotdot
 		tm.typeSliceType, // in
 		tm.typeSliceType, // out
 	}, false)
@@ -145,7 +145,7 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 		tm.commonTypeType,
 		commonTypeTypePtr, // elem
 		commonTypeTypePtr, // slice
-		tm.inttype, // len
+		tm.inttype,        // len
 	}, false)
 
 	tm.sliceTypeType = ctx.StructCreateNamed("sliceType")
@@ -165,7 +165,7 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	tm.chanTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		commonTypeTypePtr, // elem
-		tm.inttype, // dir
+		tm.inttype,        // dir
 	}, false)
 
 	return tm
@@ -401,12 +401,12 @@ func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 
 type localNamedTypeInfo struct {
 	functionName string
-	scopeNum int
+	scopeNum     int
 }
 
 type namedTypeInfo struct {
 	pkgpath string
-	name string
+	name    string
 	localNamedTypeInfo
 }
 
@@ -503,10 +503,10 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 	case *types.Chan:
 		b.WriteRune('C')
 		ctx.mangleType(t.Elem(), b)
-		if t.Dir() & ast.SEND != 0 {
+		if t.Dir()&ast.SEND != 0 {
 			b.WriteRune('s')
 		}
-		if t.Dir() & ast.RECV != 0 {
+		if t.Dir()&ast.RECV != 0 {
 			b.WriteRune('r')
 		}
 		b.WriteRune('e')
@@ -649,33 +649,33 @@ func (tm *TypeMap) makeRuntimeTypeGlobal(v llvm.Value) (global, ptr llvm.Value) 
 
 const (
 	// From gofrontend/types.h
-	gccgoRuntimeTypeKindBOOL = 1
-	gccgoRuntimeTypeKindINT = 2
-	gccgoRuntimeTypeKindINT8 = 3
-	gccgoRuntimeTypeKindINT16 = 4
-	gccgoRuntimeTypeKindINT32 = 5
-	gccgoRuntimeTypeKindINT64 = 6
-	gccgoRuntimeTypeKindUINT = 7
-	gccgoRuntimeTypeKindUINT8 = 8
-	gccgoRuntimeTypeKindUINT16 = 9
-	gccgoRuntimeTypeKindUINT32 = 10
-	gccgoRuntimeTypeKindUINT64 = 11
-	gccgoRuntimeTypeKindUINTPTR = 12
-	gccgoRuntimeTypeKindFLOAT32 = 13
-	gccgoRuntimeTypeKindFLOAT64 = 14
-	gccgoRuntimeTypeKindCOMPLEX64 = 15
-	gccgoRuntimeTypeKindCOMPLEX128 = 16
-	gccgoRuntimeTypeKindARRAY = 17
-	gccgoRuntimeTypeKindCHAN = 18
-	gccgoRuntimeTypeKindFUNC = 19
-	gccgoRuntimeTypeKindINTERFACE = 20
-	gccgoRuntimeTypeKindMAP = 21
-	gccgoRuntimeTypeKindPTR = 22
-	gccgoRuntimeTypeKindSLICE = 23
-	gccgoRuntimeTypeKindSTRING = 24
-	gccgoRuntimeTypeKindSTRUCT = 25
+	gccgoRuntimeTypeKindBOOL           = 1
+	gccgoRuntimeTypeKindINT            = 2
+	gccgoRuntimeTypeKindINT8           = 3
+	gccgoRuntimeTypeKindINT16          = 4
+	gccgoRuntimeTypeKindINT32          = 5
+	gccgoRuntimeTypeKindINT64          = 6
+	gccgoRuntimeTypeKindUINT           = 7
+	gccgoRuntimeTypeKindUINT8          = 8
+	gccgoRuntimeTypeKindUINT16         = 9
+	gccgoRuntimeTypeKindUINT32         = 10
+	gccgoRuntimeTypeKindUINT64         = 11
+	gccgoRuntimeTypeKindUINTPTR        = 12
+	gccgoRuntimeTypeKindFLOAT32        = 13
+	gccgoRuntimeTypeKindFLOAT64        = 14
+	gccgoRuntimeTypeKindCOMPLEX64      = 15
+	gccgoRuntimeTypeKindCOMPLEX128     = 16
+	gccgoRuntimeTypeKindARRAY          = 17
+	gccgoRuntimeTypeKindCHAN           = 18
+	gccgoRuntimeTypeKindFUNC           = 19
+	gccgoRuntimeTypeKindINTERFACE      = 20
+	gccgoRuntimeTypeKindMAP            = 21
+	gccgoRuntimeTypeKindPTR            = 22
+	gccgoRuntimeTypeKindSLICE          = 23
+	gccgoRuntimeTypeKindSTRING         = 24
+	gccgoRuntimeTypeKindSTRUCT         = 25
 	gccgoRuntimeTypeKindUNSAFE_POINTER = 26
-	gccgoRuntimeTypeKindNO_POINTERS = (1 << 7)
+	gccgoRuntimeTypeKindNO_POINTERS    = (1 << 7)
 )
 
 func hasPointers(t types.Type) bool {
