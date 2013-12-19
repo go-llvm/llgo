@@ -548,8 +548,24 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 		ctx.mangleType(t.Elem(), b)
 		b.WriteRune('e')
 
+	case *types.Struct:
+		b.WriteRune('S')
+		for i := 0; i != t.NumFields(); i++ {
+			f := t.Field(i)
+			if f.Anonymous() {
+				b.WriteString("0_")
+			} else {
+				b.WriteString(strconv.Itoa(len(f.Name())))
+				b.WriteRune('_')
+				b.WriteString(f.Name())
+			}
+			ctx.mangleType(f.Type(), b)
+			// TODO: tags are mangled here
+		}
+		b.WriteRune('e')
+
 	default:
-		panic("type not handled yet")
+		panic(fmt.Sprintf("unhandled type: %#v", t))
 	}
 }
 
@@ -631,7 +647,7 @@ func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
 	}
 
 	var b bytes.Buffer
-	tm.mc.mangleType(t, &b)
+	tm.mc.mangleTypeDescriptorName(t, &b)
 
 	global := llvm.AddGlobal(tm.module, tm.getTypeDescType(t), b.String())
 	ptr := llvm.ConstBitCast(global, llvm.PointerType(tm.commonTypeType, 0))
