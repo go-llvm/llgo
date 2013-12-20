@@ -60,7 +60,7 @@ func (v *LLVMValue) convertI2E() *LLVMValue {
 func (v *LLVMValue) convertE2I(iface types.Type) (result, success *LLVMValue) {
 	c := v.compiler
 	f := c.runtime.convertE2I.LLVMValue()
-	typ := c.builder.CreatePtrToInt(c.types.ToRuntime(iface), c.target.IntPtrType(), "")
+	typ := c.builder.CreatePtrToInt(c.types.ToRuntime(iface.Underlying()), c.target.IntPtrType(), "")
 	args := []llvm.Value{c.coerce(v.LLVMValue(), c.runtime.eface.llvm), typ}
 	res := c.coerce(c.builder.CreateCall(f, args, ""), c.types.ToLLVM(iface))
 	succ := c.builder.CreateIsNotNull(c.builder.CreateExtractValue(res, 0, ""), "")
