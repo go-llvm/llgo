@@ -39,16 +39,19 @@ type runtimeInterface struct {
 	method,
 	ptrType,
 	sliceType,
-	structType runtimeType
+	structType,
+	defers runtimeType
 
 	// intrinsics
 	chanclose,
 	chanrecv,
 	chansend,
 	compareE2E,
+	convertE2I,
 	convertI2E,
 	eqtyp,
 	Go,
+	initdefers,
 	llvm_trap,
 	main,
 	printfloat,
@@ -94,7 +97,8 @@ type runtimeInterface struct {
 	c128eqalg *LLVMValue
 
 	stackrestore,
-	stacksave llvm.Value
+	stacksave,
+	setjmp llvm.Value
 }
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap) (*runtimeInterface, error) {
@@ -116,6 +120,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"ptrType":       &ri.ptrType,
 		"sliceType":     &ri.sliceType,
 		"structType":    &ri.structType,
+		"defers":        &ri.defers,
 	}
 	for name, field := range types {
 		obj := pkg.Scope().Lookup(name)
@@ -131,9 +136,11 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"chanrecv":      &ri.chanrecv,
 		"chansend":      &ri.chansend,
 		"compareE2E":    &ri.compareE2E,
+		"convertE2I":    &ri.convertE2I,
 		"convertI2E":    &ri.convertI2E,
 		"eqtyp":         &ri.eqtyp,
 		"Go":            &ri.Go,
+		"initdefers":    &ri.initdefers,
 		"llvm_trap":     &ri.llvm_trap,
 		"main":          &ri.main,
 		"printfloat":    &ri.printfloat,
@@ -197,6 +204,12 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	))
 	ri.stacksave = llvm.AddFunction(module, "llvm.stacksave", llvm.FunctionType(
 		llvm.PointerType(llvm.Int8Type(), 0), nil, false,
+	))
+
+	// setjmp mustn't be wrapped either. It should
+	// work, but the standard doesn't allow it.
+	ri.setjmp = llvm.AddFunction(module, "llvm.setjmp", llvm.FunctionType(
+		llvm.Int32Type(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0)}, false,
 	))
 
 	return &ri, nil

@@ -49,7 +49,7 @@ type Compiler interface {
 type compiler struct {
 	CompilerOptions
 
-	builder *Builder
+	builder llvm.Builder
 	module  *Module
 	machine llvm.TargetMachine
 	target  llvm.TargetData
@@ -89,6 +89,10 @@ type CompilerOptions struct {
 
 	// Logger is a logger used for tracing compilation.
 	Logger *log.Logger
+
+	// OrderedCompilation attempts to do some sorting to compile
+	// functions in a deterministic order
+	OrderedCompilation bool
 }
 
 // Based on parseArch from LLVM's lib/Support/Triple.cpp.
@@ -255,7 +259,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	)
 
 	// Create a Builder, for building LLVM instructions.
-	compiler.builder = newBuilder(compiler.types)
+	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
 	mainpkg.Build()

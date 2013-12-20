@@ -77,7 +77,7 @@ func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
 		sliceslice := c.runtime.sliceslice.LLVMValue()
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
-		arraytyp := typ.Elem().(*types.Array)
+		arraytyp := typ.Elem().Underlying().(*types.Array)
 		arrayptr := x.LLVMValue()
 		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
 		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(arraytyp.Len()), false)

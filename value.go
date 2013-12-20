@@ -40,6 +40,10 @@ type LLVMValue struct {
 	typ      types.Type
 }
 
+func (v LLVMValue) String() string {
+	return fmt.Sprintf("[llgo.LLVMValue typ:%s value:%v]", v.typ, v.value)
+}
+
 // Create a new dynamic value from a (LLVM Value, Type) pair.
 func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
 	return &LLVMValue{c, v, t}
@@ -142,7 +146,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		}
 	}
 
-	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", c.types.TypeString(typ), typ, v, v))
+	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", typ, typ, v, v))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -462,9 +466,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewValue(value, v.typ)
-	case token.MUL:
-		elemtyp := v.typ.Underlying().(*types.Pointer).Elem()
-		return v.compiler.NewValue(b.CreateLoad(v.LLVMValue(), ""), elemtyp)
 	default:
 		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
@@ -662,13 +663,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
 	if isComplex(srctyp) {
-		var fpcast func(*Builder, llvm.Value, llvm.Type, string) llvm.Value
+		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
 		if srctyp == types.Typ[types.Complex64] {
-			fpcast = (*Builder).CreateFPExt
+			fpcast = (llvm.Builder).CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
-			fpcast = (*Builder).CreateFPTrunc
+			fpcast = (llvm.Builder).CreateFPTrunc
 			fptype = llvm.FloatType()
 		}
 		if fpcast != nil {
@@ -682,10 +683,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	}
-
-	srcstr := v.compiler.types.TypeString(v.typ)
-	dststr := v.compiler.types.TypeString(origdsttyp)
-	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", srcstr, lv.Type(), dststr))
+	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", v.typ, lv.Type(), origdsttyp))
 }
 
 func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {

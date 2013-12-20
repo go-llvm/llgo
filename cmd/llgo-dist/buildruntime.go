@@ -14,6 +14,9 @@ import (
 func buildRuntime() (reterr error) {
 	log.Println("Building runtime")
 
+	// TODO(axw) generate platform-specific parts of runtime,
+	// e.g. Go-equivalent jmp_buf structs.
+
 	badPackages := []string{
 		"crypto/x509",         // Issue #70
 		"database/sql/driver", // Issue #65
