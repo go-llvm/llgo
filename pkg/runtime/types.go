@@ -211,5 +211,5 @@ type itab struct {
 	link   *itab
 	bad    int32
 	unused int32
-	fun    *func()
+	fun    unsafe.Pointer
 }

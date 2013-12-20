@@ -250,13 +250,12 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
-	var functionResolver FunctionResolver = unit
 	compiler.types = NewTypeMap(
 		importpath,
 		compiler.llvmtypes,
 		compiler.module.Module,
 		compiler.runtime,
-		functionResolver,
+		MethodResolver(unit),
 	)
 
 	// Create a Builder, for building LLVM instructions.

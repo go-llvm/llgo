@@ -754,34 +754,6 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 	return v.compiler.NewValue(component, types.Typ[types.Float64])
 }
 
-func (v *LLVMValue) interfaceValue() llvm.Value {
-	c := v.compiler
-	value := v.LLVMValue()
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-
-	typ := value.Type()
-	if typ.TypeKind() == llvm.PointerTypeKind {
-		return c.builder.CreateBitCast(value, i8ptr, "")
-	}
-
-	// If the value fits exactly in a pointer, then we can just
-	// bitcast it. Otherwise we need to malloc.
-	ptrsize := c.target.PointerSize()
-	if c.target.TypeStoreSize(typ) <= uint64(ptrsize) {
-		bits := c.target.TypeSizeInBits(typ)
-		if bits > 0 {
-			value = c.coerce(value, llvm.IntType(int(bits)))
-			return c.builder.CreateIntToPtr(value, i8ptr, "")
-		} else {
-			return llvm.ConstNull(i8ptr)
-		}
-	} else {
-		ptr := c.createTypeMalloc(value.Type())
-		c.builder.CreateStore(value, ptr)
-		return c.builder.CreateBitCast(ptr, i8ptr, "")
-	}
-}
-
 func boolLLVMValue(v bool) (lv llvm.Value) {
 	if v {
 		lv = llvm.ConstAllOnes(llvm.Int1Type())

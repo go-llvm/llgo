@@ -13,16 +13,33 @@ import (
 // interface and method pair.
 func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMValue {
 	lliface := iface.LLVMValue()
+	llitab := c.builder.CreateExtractValue(lliface, 0, "")
 	llvalue := c.builder.CreateExtractValue(lliface, 1, "")
-	// TODO represent iface properly, as {*itab, value},
-	// and extract interface pointer here.
-	//llitab := ll
-
-	// Strip receiver.
 	sig := method.Type().(*types.Signature)
+	methodset := sig.Recv().Type().MethodSet()
+	// TODO(axw) cache ordered method index
+	var index int
+	for i := 0; i < methodset.Len(); i++ {
+		if methodset.At(i).Obj() == method {
+			index = i
+			break
+		}
+	}
+	llitab = c.builder.CreateBitCast(llitab, llvm.PointerType(c.runtime.itab.llvm, 0), "")
+	llifn := c.builder.CreateGEP(llitab, []llvm.Value{
+		llvm.ConstInt(llvm.Int32Type(), 0, false),
+		llvm.ConstInt(llvm.Int32Type(), 5, false), // index of itab.fun
+	}, "")
+	_ = index
+	llifn = c.builder.CreateGEP(llifn, []llvm.Value{
+		llvm.ConstInt(llvm.Int32Type(), uint64(index), false),
+	}, "")
+	llifn = c.builder.CreateLoad(llifn, "")
+	// Strip receiver.
 	sig = types.NewSignature(nil, nil, sig.Params(), sig.Results(), sig.IsVariadic())
-
-	llfn := llvm.ConstNull(c.types.ToLLVM(sig))
+	llfn := llvm.Undef(c.types.ToLLVM(sig))
+	llifn = c.builder.CreateIntToPtr(llifn, llfn.Type().StructElementTypes()[0], "")
+	llfn = c.builder.CreateInsertValue(llfn, llifn, 0, "")
 	llfn = c.builder.CreateInsertValue(llfn, llvalue, 1, "")
 	return c.NewValue(llfn, sig)
 }
@@ -57,11 +74,33 @@ func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 }
 
 func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
+	llv := v.LLVMValue()
+	lltyp := llv.Type()
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	if lltyp.TypeKind() == llvm.PointerTypeKind {
+		llv = c.builder.CreateBitCast(llv, i8ptr, "")
+	} else {
+		// If the value fits exactly in a pointer, then we can just
+		// bitcast it. Otherwise we need to malloc.
+		if c.target.TypeStoreSize(lltyp) <= uint64(c.target.PointerSize()) {
+			bits := c.target.TypeSizeInBits(lltyp)
+			if bits > 0 {
+				llv = c.coerce(llv, llvm.IntType(int(bits)))
+				llv = c.builder.CreateIntToPtr(llv, i8ptr, "")
+			} else {
+				llv = llvm.ConstNull(i8ptr)
+			}
+		} else {
+			ptr := c.createTypeMalloc(lltyp)
+			c.builder.CreateStore(llv, ptr)
+			llv = c.builder.CreateBitCast(ptr, i8ptr, "")
+		}
+	}
 	value := llvm.Undef(c.types.ToLLVM(iface))
 	rtype := c.types.ToRuntime(v.Type())
 	rtype = c.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
 	value = c.builder.CreateInsertValue(value, rtype, 0, "")
-	value = c.builder.CreateInsertValue(value, v.interfaceValue(), 1, "")
+	value = c.builder.CreateInsertValue(value, llv, 1, "")
 	if iface.Underlying().(*types.Interface).NumMethods() > 0 {
 		result := c.NewValue(value, types.NewInterface(nil, nil))
 		result, _ = result.convertE2I(iface)

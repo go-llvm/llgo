@@ -69,15 +69,14 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	}
 }
 
-// ResolveFunc implements FunctionResolver.ResolveFunc.
-func (u *unit) ResolveFunction(f *types.Func) llvm.Value {
-	ssafunc := u.pkg.Prog.FuncValue(f)
-	return u.resolveFunction(ssafunc)
+// ResolveMethod implements MethodResolver.ResolveMethod.
+func (u *unit) ResolveMethod(s *types.Selection) *LLVMValue {
+	return u.resolveFunction(u.pkg.Prog.Method(s))
 }
 
-func (u *unit) resolveFunction(f *ssa.Function) llvm.Value {
+func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	if v, ok := u.globals[f]; ok {
-		return v.LLVMValue()
+		return v
 	}
 	name := f.String()
 	// It's possible that the function already exists in the module;
@@ -103,8 +102,9 @@ func (u *unit) resolveFunction(f *ssa.Function) llvm.Value {
 		}
 		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
 	}
-	u.globals[f] = u.NewValue(llvmFunction, f.Signature)
-	return llvmFunction
+	v := u.NewValue(llvmFunction, f.Signature)
+	u.globals[f] = v
+	return v
 }
 
 // declareFunction adds a function declaration with the given name
@@ -112,7 +112,7 @@ func (u *unit) resolveFunction(f *ssa.Function) llvm.Value {
 func (u *unit) declareFunction(f *ssa.Function) {
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
-	llvmFunction := u.resolveFunction(f)
+	llvmFunction := u.resolveFunction(f).LLVMValue()
 	if f.Recover != nil {
 		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
 	}

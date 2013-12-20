@@ -44,6 +44,8 @@ func convertI2E(i iface) eface {
 	return eface{i.tab.typ, i.data}
 }
 
+const ptrsize = unsafe.Sizeof(uintptr(0))
+
 func convertE2I(e eface, typ unsafe.Pointer) (result iface) {
 	if e.rtyp == nil || e.rtyp.uncommonType == nil {
 		return iface{}
@@ -52,26 +54,28 @@ func convertE2I(e eface, typ unsafe.Pointer) (result iface) {
 	if len(targetType.methods) > len(e.rtyp.methods) {
 		return iface{}
 	}
+	size := unsafe.Sizeof(*result.tab)
+	size += (uintptr(len(targetType.methods)) - 1) * ptrsize
+	tab := (*itab)(malloc(size))
 	for i, tm := range targetType.methods {
 		found := false
 		for _, sm := range e.rtyp.methods {
 			if *sm.name == *tm.name {
 				if eqtyp(sm.typ, tm.typ) {
-                    _ = i
-                    // TODO(axw) record function pointer
-					//fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
-					//fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
-					//*fnptrslot = uintptr(sm.ifn)
+					tabptr := unsafe.Pointer(tab)
+					fnptraddr := uintptr(tabptr) + unsafe.Sizeof(*tab) - ptrsize + uintptr(i)*ptrsize
+					*(*unsafe.Pointer)(unsafe.Pointer(fnptraddr)) = sm.ifn
 					found = true
 				}
 				break
 			}
 		}
 		if !found {
+			free(unsafe.Pointer(tab))
 			return iface{}
 		}
 	}
-	result.tab = new(itab)
+	result.tab = tab
 	result.data = e.data
 	result.tab.inter = targetType
 	result.tab.typ = e.rtyp
