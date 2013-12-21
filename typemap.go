@@ -769,10 +769,13 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 	}
 
 	// Store methods.
-	methods := make([]llvm.Value, methodset.Len())
+	methods := make([]llvm.Value, 0, methodset.Len())
 	for i := range methods {
 		sel := methodset.At(i)
 		mname := sel.Obj().Name()
+		if !ast.IsExported(mname) {
+			continue
+		}
 		mfunc := tm.methodResolver.ResolveMethod(sel)
 		ftyp := mfunc.Type().(*types.Signature)
 
@@ -808,7 +811,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
 		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods[i] = method
+		methods = append(methods, method)
 	}
 	methodsSliceType := tm.runtime.uncommonType.llvm.StructElementTypes()[2]
 	methodsSlice := tm.makeSlice(methods, methodsSliceType)
