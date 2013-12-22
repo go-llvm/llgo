@@ -45,6 +45,7 @@ type TypeMap struct {
 	types          typemap.M
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
+	alg            *algorithmMap
 
 	hashAlgFunctionType,
 	equalAlgFunctionType,
@@ -65,39 +66,21 @@ func NewLLVMTypeMap(target llvm.TargetData) *llvmTypeMap {
 			WordSize: int64(target.PointerSize()),
 			MaxAlign: 8,
 		},
-		target:  target,
-		inttype: inttype,
+		target:     target,
+		inttype:    inttype,
+		ptrstandin: llvm.GlobalContext().StructCreateNamed(""),
 	}
 }
 
 func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface, mr MethodResolver) *TypeMap {
-	tm := &TypeMap{
+	return &TypeMap{
 		llvmTypeMap:    llvmtm,
 		module:         module,
 		pkgpath:        pkgpath,
 		runtime:        r,
 		methodResolver: mr,
+		alg:            newAlgorithmMap(module, r, llvmtm.target),
 	}
-
-	// Types for algorithms. See 'runtime/runtime.h'.
-	uintptrType := tm.target.IntPtrType()
-	voidPtrType := llvm.PointerType(llvm.Int8Type(), 0)
-	boolType := llvm.Int1Type()
-
-	// Create a unique type to represent recursive pointers.
-	tm.ptrstandin = llvm.GlobalContext().StructCreateNamed("")
-
-	// Create runtime algorithm function types.
-	params := []llvm.Type{uintptrType, voidPtrType}
-	tm.hashAlgFunctionType = llvm.FunctionType(uintptrType, params, false)
-	params = []llvm.Type{uintptrType, uintptrType, uintptrType}
-	tm.equalAlgFunctionType = llvm.FunctionType(boolType, params, false)
-	params = []llvm.Type{uintptrType, voidPtrType}
-	tm.printAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
-	params = []llvm.Type{uintptrType, voidPtrType, voidPtrType}
-	tm.copyAlgFunctionType = llvm.FunctionType(llvm.VoidType(), params, false)
-
-	return tm
 }
 
 func (tm *llvmTypeMap) ToLLVM(t types.Type) llvm.Type {
@@ -121,6 +104,7 @@ func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 	return lt
 }
 
+// ToRuntime returns a pointer to the specified type's runtime type descriptor.
 func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
 	_, r := tm.toRuntime(t)
 	return r
@@ -440,31 +424,16 @@ func (tm *TypeMap) makeRuntimeType(t types.Type) (global, ptr llvm.Value) {
 
 func (tm *TypeMap) makeAlgorithmTable(t types.Type) llvm.Value {
 	// TODO set these to actual functions.
-	hashAlg := llvm.ConstNull(llvm.PointerType(tm.hashAlgFunctionType, 0))
-	printAlg := llvm.ConstNull(llvm.PointerType(tm.printAlgFunctionType, 0))
-	copyAlg := llvm.ConstNull(llvm.PointerType(tm.copyAlgFunctionType, 0))
-
-	const eqalgsig = "func(uintptr, unsafe.Pointer, unsafe.Pointer) bool"
-	var equalAlg llvm.Value
-	switch t := t.Underlying().(type) {
-	case *types.Basic:
-		switch t.Kind() {
-		case types.String:
-			equalAlg = tm.runtime.streqalg.LLVMValue()
-		case types.Float32:
-			equalAlg = tm.runtime.f32eqalg.LLVMValue()
-		case types.Float64:
-			equalAlg = tm.runtime.f64eqalg.LLVMValue()
-		case types.Complex64:
-			equalAlg = tm.runtime.c64eqalg.LLVMValue()
-		case types.Complex128:
-			equalAlg = tm.runtime.c128eqalg.LLVMValue()
-		}
+	hashAlg := llvm.ConstNull(llvm.PointerType(tm.alg.hashAlgFunctionType, 0))
+	printAlg := llvm.ConstNull(llvm.PointerType(tm.alg.printAlgFunctionType, 0))
+	copyAlg := llvm.ConstNull(llvm.PointerType(tm.alg.copyAlgFunctionType, 0))
+	equalAlg := tm.alg.eqalg(t)
+	elems := []llvm.Value{
+		AlgorithmHash:  hashAlg,
+		AlgorithmEqual: equalAlg,
+		AlgorithmPrint: printAlg,
+		AlgorithmCopy:  copyAlg,
 	}
-	if equalAlg.IsNil() {
-		equalAlg = tm.runtime.memequal.LLVMValue()
-	}
-	elems := []llvm.Value{hashAlg, equalAlg, printAlg, copyAlg}
 	return llvm.ConstStruct(elems, false)
 }
 
@@ -770,7 +739,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 	// Store methods.
 	methods := make([]llvm.Value, 0, methodset.Len())
-	for i := range methods {
+	for i := 0; i < cap(methods); i++ {
 		sel := methodset.At(i)
 		mname := sel.Obj().Name()
 		if !ast.IsExported(mname) {

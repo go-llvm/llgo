@@ -165,42 +165,17 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	rhs := rhs_.(*LLVMValue)
 	switch typ := lhs.typ.Underlying().(type) {
 	case *types.Struct:
-		if typ.NumFields() == 0 {
-			return c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
-		}
-
-		t := typ.Field(0).Type()
-		if typ.NumFields() == 1 {
-			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
-			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
-			return first_lhs.BinaryOp(token.EQL, first_rhs)
-		}
-
-		blocks := []llvm.BasicBlock{b.GetInsertBlock()}
-		endblock := llvm.InsertBasicBlock(blocks[0], "")
-		endblock.MoveAfter(blocks[0])
-		for i := 1; i < typ.NumFields(); i++ {
-			blocks = append(blocks, llvm.InsertBasicBlock(endblock, ""))
-		}
-		values := make([]llvm.Value, len(blocks))
-		falseValue := boolLLVMValue(false)
+		// TODO(axw) use runtime equality algorithm (will be suitably inlined).
+		// For now, we use compare all fields unconditionally and bitwise AND
+		// to avoid branching (i.e. so we don't create additional blocks).
+		var value Value = c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
 		for i := 0; i < typ.NumFields(); i++ {
-			b.SetInsertPointAtEnd(blocks[i])
+			t := typ.Field(i).Type()
 			lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 			rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-			cond := lhs.BinaryOp(token.EQL, rhs).LLVMValue()
-			if i == typ.NumFields()-1 {
-				values[i] = cond
-				b.CreateBr(endblock)
-			} else {
-				values[i] = falseValue
-				b.CreateCondBr(cond, blocks[i+1], endblock)
-			}
+			value = value.BinaryOp(token.AND, lhs.BinaryOp(token.EQL, rhs))
 		}
-		b.SetInsertPointAtEnd(endblock)
-		phi := b.CreatePHI(values[0].Type(), "")
-		phi.AddIncoming(values, blocks)
-		return c.NewValue(phi, types.Typ[types.Bool])
+		return value
 
 	case *types.Slice:
 		// []T == nil
