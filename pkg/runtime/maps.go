@@ -160,9 +160,6 @@ func reflect_mapiternext(it *byte) {
 }
 
 type mapiter struct {
-	ptrk unsafe.Pointer
-	ptrv unsafe.Pointer
-
 	typ *mapType
 	m   *map_
 	i   int
@@ -179,23 +176,24 @@ func mapiterinit(t, m unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(iter)
 }
 
-func mapiternext(iter_ unsafe.Pointer) bool {
+func mapiternext(iter_, pk, pv unsafe.Pointer) bool {
 	if iter_ == nil {
 		return false
 	}
 	iter := (*mapiter)(iter_)
+	keysize := uintptr(iter.typ.key.size)
+	elemsize := uintptr(iter.typ.elem.size)
 	if iter.i >= len(*iter.m) {
-		iter.ptrk = nil
-		iter.ptrv = nil
+		bzero(pk, keysize)
+		bzero(pv, elemsize)
 		return false
 	}
 	entry := (*iter.m)[iter.i]
 	iter.i++
 	ptrsize := uintptr(unsafe.Sizeof(entry))
-	keysize := uintptr(iter.typ.key.size)
 	keyoffset := align(ptrsize, uintptr(iter.typ.key.align))
 	elemoffset := align(keyoffset+keysize, uintptr(iter.typ.elem.align))
-	iter.ptrk = unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + keyoffset)
-	iter.ptrv = unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + elemoffset)
+	memcpy(pk, unsafe.Pointer(uintptr(unsafe.Pointer(entry))+keyoffset), keysize)
+	memcpy(pv, unsafe.Pointer(uintptr(unsafe.Pointer(entry))+elemoffset), elemsize)
 	return true
 }
