@@ -5,8 +5,6 @@
 package llgo
 
 import (
-	"go/ast"
-
 	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
@@ -65,7 +63,7 @@ func (c *compiler) chanRecv(ch *LLVMValue, commaOk bool) *LLVMValue {
 
 // selectState is equivalent to ssa.SelectState
 type selectState struct {
-	Dir  ast.ChanDir
+	Dir  types.ChanDir
 	Chan *LLVMValue
 	Send *LLVMValue
 }
@@ -93,7 +91,7 @@ func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
 	// not to allocate stack space or do a copy.
 	resTypes := []types.Type{types.Typ[types.Int], types.Typ[types.Bool]}
 	for _, state := range states {
-		if state.Dir == ast.RECV {
+		if state.Dir == types.RecvOnly {
 			chantyp := state.Chan.Type().Underlying().(*types.Chan)
 			resTypes = append(resTypes, chantyp.Elem())
 		}
@@ -108,7 +106,7 @@ func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
 	for i, state := range states {
 		chantyp := state.Chan.Type().Underlying().(*types.Chan)
 		elemtyp := c.types.ToLLVM(chantyp.Elem())
-		if state.Dir == ast.SEND {
+		if state.Dir == types.SendOnly {
 			ptrs[i] = c.builder.CreateAlloca(elemtyp, "")
 			c.builder.CreateStore(state.Send.LLVMValue(), ptrs[i])
 		} else {
@@ -130,7 +128,7 @@ func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
 	}
 	for i, state := range states {
 		ch := state.Chan.LLVMValue()
-		if state.Dir == ast.SEND {
+		if state.Dir == types.SendOnly {
 			c.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
 		} else {
 			c.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")

@@ -155,11 +155,11 @@ func (c *exporter) exportName(t interface{}) {
 		c.write("]")
 		c.exportName(t.Elem())
 	case *types.Chan:
-		if t.Dir() == ast.RECV {
+		if t.Dir() == types.RecvOnly {
 			c.write("<-")
 		}
 		c.write("chan")
-		if t.Dir() == ast.SEND {
+		if t.Dir() == types.SendOnly {
 			c.write("<-")
 		}
 		c.write(" ")

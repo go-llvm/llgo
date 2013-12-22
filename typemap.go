@@ -703,11 +703,13 @@ func (tm *TypeMap) chanRuntimeType(c *types.Chan) (global, ptr llvm.Value) {
 
 	// go/ast and reflect disagree on values for direction.
 	var dir reflect.ChanDir
-	if c.Dir()&ast.SEND != 0 {
+	switch c.Dir() {
+	case types.SendOnly:
 		dir = reflect.SendDir
-	}
-	if c.Dir()&ast.RECV != 0 {
-		dir |= reflect.RecvDir
+	case types.RecvOnly:
+		dir = reflect.RecvDir
+	case types.SendRecv:
+		dir = reflect.SendDir | reflect.RecvDir
 	}
 	uintptrdir := llvm.ConstInt(tm.target.IntPtrType(), uint64(dir), false)
 	chanType = llvm.ConstInsertValue(chanType, uintptrdir, []uint32{2})
