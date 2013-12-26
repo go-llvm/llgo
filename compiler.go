@@ -212,8 +212,8 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	if pkgname := astFiles[0].Name.String(); importpath == "" || pkgname == "main" {
 		importpath = pkgname
 	}
-	pkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
-	if pkginfo.Err != nil {
+	mainPkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
+	if mainPkginfo.Err != nil {
 		return nil, err
 	}
 	// First call CreatePackages to resolve imports, and then CreatePackage
@@ -222,7 +222,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	if err := program.CreatePackages(compiler.importer); err != nil {
 		return nil, err
 	}
-	mainpkg := program.CreatePackage(pkginfo)
+	mainpkg := program.CreatePackage(mainPkginfo)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
@@ -233,20 +233,33 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	compiler.module.SetDataLayout(compiler.target.String())
 
 	// Map runtime types and functions.
-	runtimePkg := mainpkg.Object
+	runtimePkginfo := mainPkginfo
+	runtimePkg := mainpkg
 	if importpath != "runtime" {
-		runtimePkg, err = parseRuntime(buildctx, compiler.typechecker)
+		astFiles, err := parseRuntime(buildctx, compiler.importer.Fset)
 		if err != nil {
 			return nil, err
 		}
-	}
-	compiler.runtime, err = newRuntimeInterface(runtimePkg, compiler.module.Module, compiler.llvmtypes)
-	if err != nil {
-		return nil, err
+		runtimePkginfo = compiler.importer.CreatePackage("runtime", astFiles...)
+		if runtimePkginfo.Err != nil {
+			return nil, err
+		}
+		runtimePkg = program.CreatePackage(runtimePkginfo)
 	}
 
 	// Create a new translation unit.
 	unit := newUnit(compiler, mainpkg)
+
+	// Create the runtime interface.
+	compiler.runtime, err = newRuntimeInterface(
+		runtimePkg.Object,
+		compiler.module.Module,
+		compiler.llvmtypes,
+		FuncResolver(unit),
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
@@ -264,7 +277,10 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 
 	mainpkg.Build()
 	unit.translatePackage(mainpkg)
-	compiler.processAnnotations(unit, pkginfo)
+	compiler.processAnnotations(unit, mainPkginfo)
+	if runtimePkginfo != mainPkginfo {
+		compiler.processAnnotations(unit, runtimePkginfo)
+	}
 
 	/*
 		compiler.debug_info = &llvm.DebugInfo{}
@@ -364,8 +380,13 @@ func (c *compiler) createMainFunction() error {
 	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(nil))
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
-	mainMain = c.builder.CreateBitCast(mainMain, runtimeMain.Type().ElementType().ParamTypes()[3], "")
-	args := []llvm.Value{main.Param(0), main.Param(1), main.Param(2), mainMain}
+	runtimeMainParamTypes := runtimeMain.Type().ElementType().ParamTypes()
+	args := []llvm.Value{
+		main.Param(0), // argc
+		main.Param(1), // argv
+		main.Param(2), // argp
+		c.builder.CreateBitCast(mainMain, runtimeMainParamTypes[3], ""),
+	}
 	result := c.builder.CreateCall(runtimeMain, args, "")
 	c.builder.CreateRet(result)
 	return nil

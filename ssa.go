@@ -37,22 +37,16 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
-			llelemtyp := u.types.ToLLVM(deref(v.Type()))
+			llelemtyp := u.llvmtypes.ToLLVM(deref(v.Type()))
 			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			u.globals[v] = u.NewValue(global, v.Type())
 		}
 	}
 
-	// TODO(axw) prune off unreferenced functions from imported
-	// packages, so the IR isn't littered unnecessarily.
-	functions := ssautil.AllFunctions(pkg.Prog)
-	for f, _ := range functions {
-		u.declareFunction(f)
-	}
-
 	// Define functions.
 	// Sort if flag is set for deterministic behaviour (for debugging)
+	functions := ssautil.AllFunctions(pkg.Prog)
 	if !u.compiler.OrderedCompilation {
 		for f, _ := range functions {
 			u.defineFunction(f)
@@ -74,6 +68,11 @@ func (u *unit) ResolveMethod(s *types.Selection) *LLVMValue {
 	return u.resolveFunction(u.pkg.Prog.Method(s))
 }
 
+// ResolveFunc implements FuncResolver.ResolveFunc.
+func (u *unit) ResolveFunc(f *types.Func) *LLVMValue {
+	return u.resolveFunction(u.pkg.Prog.FuncValue(f))
+}
+
 func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	if v, ok := u.globals[f]; ok {
 		return v
@@ -84,7 +83,7 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	// has already referenced.
 	llvmFunction := u.module.Module.NamedFunction(name)
 	if llvmFunction.IsNil() {
-		llvmType := u.types.ToLLVM(f.Signature)
+		llvmType := u.llvmtypes.ToLLVM(f.Signature)
 		llvmType = llvmType.StructElementTypes()[0].ElementType()
 		if len(f.FreeVars) > 0 {
 			// Add an implicit first argument.
@@ -93,7 +92,7 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 			vararg := llvmType.IsFunctionVarArg()
 			blockElementTypes := make([]llvm.Type, len(f.FreeVars))
 			for i, fv := range f.FreeVars {
-				blockElementTypes[i] = u.types.ToLLVM(fv.Type())
+				blockElementTypes[i] = u.llvmtypes.ToLLVM(fv.Type())
 			}
 			blockType := llvm.StructType(blockElementTypes, false)
 			blockPtrType := llvm.PointerType(blockType, 0)
@@ -131,7 +130,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := fr.globals[f].LLVMValue()
+	llvmFunction := fr.resolveFunction(f).LLVMValue()
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
 	}
@@ -156,7 +155,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
-		typ := fr.types.ToLLVM(deref(local.Type()))
+		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
@@ -200,7 +199,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
 		jb := fr.builder.CreateStructGEP(defers, 0, "")
 		jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-		result := fr.builder.CreateCall(fr.runtime.setjmp, []llvm.Value{jb}, "")
+		result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
 		result = fr.builder.CreateIsNotNull(result, "")
 		fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
 		// We'll only get here via a panic, which must either be
@@ -223,11 +222,11 @@ func (u *unit) defineFunction(f *ssa.Function) {
 			case 0:
 				fr.builder.CreateRetVoid()
 			case 1:
-				fr.builder.CreateRet(llvm.ConstNull(fr.types.ToLLVM(results.At(0).Type())))
+				fr.builder.CreateRet(llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(0).Type())))
 			default:
 				values := make([]llvm.Value, nresults)
 				for i := range values {
-					values[i] = llvm.ConstNull(fr.types.ToLLVM(results.At(i).Type()))
+					values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
 				}
 				fr.builder.CreateAggregateRet(values)
 			}
@@ -269,8 +268,8 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case *ssa.Function:
 		// fr.globals[v] has the function in raw pointer form;
 		// we must convert it to <f,ctx> form.
-		f := fr.globals[v]
-		pair := llvm.ConstNull(fr.types.ToLLVM(f.Type()))
+		f := fr.resolveFunction(v)
+		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(f.Type()))
 		pair = llvm.ConstInsertValue(pair, f.LLVMValue(), []uint32{0})
 		return fr.NewValue(pair, f.Type())
 	case *ssa.Const:
@@ -281,7 +280,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 		}
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
-		llelemtyp := fr.types.ToLLVM(deref(v.Type()))
+		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
 		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
 		global := fr.NewValue(llglobal, v.Type())
 		fr.globals[v] = global
@@ -306,7 +305,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	// dispose of it after replacing.
 	currBlock := fr.builder.GetInsertBlock()
 	fr.builder.SetInsertPointAtEnd(llvm.AddBasicBlock(currBlock.Parent(), ""))
-	placeholder := fr.compiler.builder.CreatePHI(fr.types.ToLLVM(v.Type()), "")
+	placeholder := fr.compiler.builder.CreatePHI(fr.llvmtypes.ToLLVM(v.Type()), "")
 	fr.builder.SetInsertPointAtEnd(currBlock)
 	value := fr.NewValue(placeholder, v.Type())
 	fr.backpatch[v] = value
@@ -344,7 +343,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
-		typ := fr.types.ToLLVM(deref(instr.Type()))
+		typ := fr.llvmtypes.ToLLVM(deref(instr.Type()))
 		var value llvm.Value
 		if instr.Heap {
 			value = fr.createTypeMalloc(typ)
@@ -392,7 +391,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.ChangeType:
 		value := fr.value(instr.X).LLVMValue()
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
-			value = fr.builder.CreateBitCast(value, fr.types.ToLLVM(instr.Type()), "")
+			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
 		fr.env[instr] = fr.NewValue(value, instr.Type())
 
@@ -558,7 +557,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Phi:
 		typ := instr.Type()
-		phi := fr.builder.CreatePHI(fr.types.ToLLVM(typ), instr.Comment)
+		phi := fr.builder.CreatePHI(fr.llvmtypes.ToLLVM(typ), instr.Comment)
 		fr.env[instr] = fr.NewValue(phi, typ)
 		values := make([]llvm.Value, len(instr.Edges))
 		blocks := make([]llvm.BasicBlock, len(instr.Edges))
@@ -706,7 +705,7 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 			params[i] = types.NewParam(arg.Pos(), nil, arg.Name(), args[i].Type())
 		}
 		sig := types.NewSignature(nil, nil, types.NewTuple(params...), nil, false)
-		fntyp := fr.types.ToLLVM(sig).StructElementTypes()[0].ElementType()
+		fntyp := fr.llvmtypes.ToLLVM(sig).StructElementTypes()[0].ElementType()
 		llvmfn := llvm.AddFunction(fr.module.Module, "", fntyp)
 		currBlock := fr.builder.GetInsertBlock()
 		entry := llvm.AddBasicBlock(llvmfn, "entry")
@@ -758,7 +757,7 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		r := args[0].LLVMValue()
 		i := args[1].LLVMValue()
 		typ := instr.Value().Type()
-		cmplx := llvm.Undef(fr.types.ToLLVM(typ))
+		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
 		return nil, nil, fr.NewValue(cmplx, typ)
