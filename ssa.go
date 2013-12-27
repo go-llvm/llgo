@@ -19,6 +19,13 @@ type unit struct {
 	*compiler
 	pkg     *ssa.Package
 	globals map[ssa.Value]*LLVMValue
+
+	// funcvals is a map of *ssa.Function to LLVM functions that
+	// may be stored. Non-receiver functions in this map will have
+	// an additional context parameter, to enable non-branching
+	// calls with a pair-of-pointer function representation,
+	// without forcing the additional parameter on all functions.
+	funcvals map[*ssa.Function]*LLVMValue
 }
 
 func newUnit(c *compiler, pkg *ssa.Package) *unit {
@@ -26,6 +33,7 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 		compiler: c,
 		pkg:      pkg,
 		globals:  make(map[ssa.Value]*LLVMValue),
+		funcvals: make(map[*ssa.Function]*LLVMValue),
 	}
 	return u
 }
@@ -266,12 +274,23 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	case nil:
 		return nil
 	case *ssa.Function:
+		result, ok := fr.funcvals[v]
+		if ok {
+			return result
+		}
 		// fr.globals[v] has the function in raw pointer form;
-		// we must convert it to <f,ctx> form.
+		// we must convert it to <f,ctx> form. If the function
+		// does not have a receiver, then create a wrapper
+		// function that has an additional "context" parameter.
 		f := fr.resolveFunction(v)
+		if v.Signature.Recv() == nil && len(v.FreeVars) == 0 {
+			f = contextFunction(fr.compiler, f)
+		}
 		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(f.Type()))
 		pair = llvm.ConstInsertValue(pair, f.LLVMValue(), []uint32{0})
-		return fr.NewValue(pair, f.Type())
+		result = fr.NewValue(pair, f.Type())
+		fr.funcvals[v] = result
+		return result
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
@@ -682,9 +701,17 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		return fn, args, nil
 	}
 
-	switch call.Value.(type) {
+	switch v := call.Value.(type) {
 	case *ssa.Builtin:
 		// handled below
+	case *ssa.Function:
+		// Function handled specially; value() will convert
+		// a function to one with a context argument.
+		fn = fr.resolveFunction(v)
+		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(fn.Type()))
+		pair = llvm.ConstInsertValue(pair, fn.LLVMValue(), []uint32{0})
+		fn = fr.NewValue(pair, fn.Type())
+		return fn, args, nil
 	default:
 		fn = fr.value(call.Value)
 		return fn, args, nil
@@ -705,20 +732,19 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 			params[i] = types.NewParam(arg.Pos(), nil, arg.Name(), args[i].Type())
 		}
 		sig := types.NewSignature(nil, nil, types.NewTuple(params...), nil, false)
-		fntyp := fr.llvmtypes.ToLLVM(sig).StructElementTypes()[0].ElementType()
-		llvmfn := llvm.AddFunction(fr.module.Module, "", fntyp)
+		llfntyp := fr.llvmtypes.ToLLVM(sig)
+		llfnptr := llvm.AddFunction(fr.module.Module, "", llfntyp.StructElementTypes()[0].ElementType())
 		currBlock := fr.builder.GetInsertBlock()
-		entry := llvm.AddBasicBlock(llvmfn, "entry")
+		entry := llvm.AddBasicBlock(llfnptr, "entry")
 		fr.builder.SetInsertPointAtEnd(entry)
 		internalArgs := make([]Value, len(args))
 		for i, arg := range args {
-			internalArgs[i] = fr.NewValue(llvmfn.Param(i), arg.Type())
+			internalArgs[i] = fr.NewValue(llfnptr.Param(i), arg.Type())
 		}
 		fr.printValues(builtin.Name() == "println", internalArgs...)
 		fr.builder.CreateRetVoid()
 		fr.builder.SetInsertPointAtEnd(currBlock)
-		fn = fr.NewValue(llvmfn, sig)
-		return fn, args, nil
+		return fr.NewValue(llfnptr, sig), args, nil
 
 	case "panic":
 		panic("TODO: panic")
@@ -776,4 +802,47 @@ func hasDefer(f *ssa.Function) bool {
 		}
 	}
 	return false
+}
+
+// contextFunction creates a wrapper function that
+// has the same signature as the specified function,
+// but has an additional first parameter that accepts
+// and ignores the function context value.
+//
+// contextFunction must be called with a global function
+// pointer.
+func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
+	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	resultType := c.llvmtypes.ToLLVM(f.Type())
+	fnptr := f.LLVMValue()
+	contextType := resultType.StructElementTypes()[1]
+	llfntyp := fnptr.Type().ElementType()
+	llfntyp = llvm.FunctionType(
+		llfntyp.ReturnType(),
+		append([]llvm.Type{contextType}, llfntyp.ParamTypes()...),
+		llfntyp.IsFunctionVarArg(),
+	)
+	wrapper := llvm.AddFunction(c.module.Module, fnptr.Name()+".ctx", llfntyp)
+	entry := llvm.AddBasicBlock(wrapper, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
+	args := make([]llvm.Value, len(llfntyp.ParamTypes())-1)
+	for i := range args {
+		args[i] = wrapper.Param(i + 1)
+	}
+	result := c.builder.CreateCall(fnptr, args, "")
+	switch nresults := f.Type().(*types.Signature).Results().Len(); nresults {
+	case 0:
+		c.builder.CreateRetVoid()
+	case 1:
+		c.builder.CreateRet(result)
+	default:
+		results := make([]llvm.Value, nresults)
+		for i := range results {
+			results[i] = c.builder.CreateExtractValue(result, i, "")
+		}
+		c.builder.CreateAggregateRet(results)
+	}
+	fnptr = c.builder.CreateBitCast(wrapper, fnptr.Type(), "")
+	fnval := c.builder.CreateInsertValue(llvm.ConstNull(resultType), fnptr, 0, "")
+	return c.NewValue(fnval, f.Type())
 }
