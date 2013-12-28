@@ -114,20 +114,18 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	return v
 }
 
-// declareFunction adds a function declaration with the given name
-// and type to the module.
-func (u *unit) declareFunction(f *ssa.Function) {
-	// Functions that call recover must not be inlined, or we
-	// can't tell whether the recover call is valid at runtime.
-	llvmFunction := u.resolveFunction(f).LLVMValue()
-	if f.Recover != nil {
-		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
-	}
-}
-
 func (u *unit) defineFunction(f *ssa.Function) {
 	// Nothing to do for functions without bodies.
 	if len(f.Blocks) == 0 {
+		return
+	}
+
+	// Ignore functions not of this package.
+	if f.Pkg == nil {
+		if r := f.Signature.Recv(); r != nil && r.Pkg() != u.pkg.Object {
+			return
+		}
+	} else if f.Pkg != u.pkg {
 		return
 	}
 
@@ -138,7 +136,13 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
+
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
+	// Functions that call recover must not be inlined, or we
+	// can't tell whether the recover call is valid at runtime.
+	if f.Recover != nil {
+		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
+	}
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, fmt.Sprintf(".%d.%s", i, block.Comment))
 	}
