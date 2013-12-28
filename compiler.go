@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"log"
 	"runtime"
@@ -55,9 +56,8 @@ type compiler struct {
 	target  llvm.TargetData
 	fileset *token.FileSet
 
-	typechecker   *types.Config
-	importer      *goimporter.Importer
-	exportedtypes []types.Type
+	typechecker *types.Config
+	importer    *goimporter.Importer
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -185,7 +185,6 @@ func (c *compiler) logf(format string, v ...interface{}) {
 
 func (compiler *compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
-	compiler.exportedtypes = nil
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 
 	buildctx, err := llgobuild.Context(compiler.TargetTriple)
@@ -314,16 +313,22 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	*/
 
 	// Export runtime type information.
-	compiler.exportRuntimeTypes(importpath == "runtime")
+	var exportedTypes []types.Type
+	for _, m := range mainpkg.Members {
+		if t, ok := m.(*ssa.Type); ok && ast.IsExported(t.Name()) {
+			exportedTypes = append(exportedTypes, t.Type())
+		}
+	}
+	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
 	if importpath == "main" {
 		// Create "main.proginit", which will perform program initialization.
 		if err = compiler.createProginit(mainpkg.Object, buildctx); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create main.proginit: %v", err)
 		}
 		// Wrap "main.main" in a call to runtime.main.
 		if err = compiler.createMainFunction(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create main.main: %v", err)
 		}
 	} else {
 		// TODO reenable when everything's working

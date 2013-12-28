@@ -616,14 +616,16 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 
 	// Set ptrToThis in the base type's rtype.
 	baseType := baseTypeGlobal.Initializer()
-	if baseType.Type() == tm.runtime.rtype.llvm {
-		baseType = llvm.ConstInsertValue(baseType, ptr, []uint32{10})
-	} else {
-		rtype := llvm.ConstExtractValue(baseType, []uint32{0})
-		rtype = llvm.ConstInsertValue(rtype, ptr, []uint32{10})
-		baseType = llvm.ConstInsertValue(baseType, rtype, []uint32{0})
+	if !baseType.IsNull() {
+		if baseType.Type() == tm.runtime.rtype.llvm {
+			baseType = llvm.ConstInsertValue(baseType, ptr, []uint32{10})
+		} else {
+			rtype := llvm.ConstExtractValue(baseType, []uint32{0})
+			rtype = llvm.ConstInsertValue(rtype, ptr, []uint32{10})
+			baseType = llvm.ConstInsertValue(baseType, rtype, []uint32{0})
+		}
+		baseTypeGlobal.SetInitializer(baseType)
 	}
-	baseTypeGlobal.SetInitializer(baseType)
 
 	return global, ptr
 }
