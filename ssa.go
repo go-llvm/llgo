@@ -287,7 +287,8 @@ func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 			f = contextFunction(fr.compiler, f)
 		}
 		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(f.Type()))
-		pair = llvm.ConstInsertValue(pair, f.LLVMValue(), []uint32{0})
+		fnptr := llvm.ConstBitCast(f.LLVMValue(), pair.Type().StructElementTypes()[0])
+		pair = llvm.ConstInsertValue(pair, fnptr, []uint32{0})
 		result = fr.NewValue(pair, f.Type())
 		fr.funcvals[v] = result
 		return result
@@ -517,7 +518,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeChan(instr.Type(), fr.value(instr.Size))
 
 	case *ssa.MakeClosure:
-		fn := fr.value(instr.Fn)
+		fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
 		bindings := make([]*LLVMValue, len(instr.Bindings))
 		for i, binding := range instr.Bindings {
 			bindings[i] = fr.value(binding)
@@ -609,7 +610,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		switch n := len(instr.Results); n {
 		case 0:
-			fr.builder.CreateRetVoid()
+			// https://code.google.com/p/go/issues/detail?id=7022
+			if r := instr.Parent().Signature.Results(); r != nil && r.Len() > 0 {
+				fr.builder.CreateUnreachable()
+			} else {
+				fr.builder.CreateRetVoid()
+			}
 		case 1:
 			fr.builder.CreateRet(fr.value(instr.Results[0]).LLVMValue())
 		default:
@@ -850,9 +856,7 @@ func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 		}
 		c.builder.CreateAggregateRet(results)
 	}
-	fnptr = c.builder.CreateBitCast(wrapper, fnptr.Type(), "")
-	fnval := c.builder.CreateInsertValue(llvm.ConstNull(resultType), fnptr, 0, "")
-	return c.NewValue(fnval, f.Type())
+	return c.NewValue(wrapper, f.Type())
 }
 
 // phiValue returns a new value with the same value and type as the given Phi.

@@ -36,7 +36,7 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 	if fnptr.Type().TypeKind() == llvm.StructTypeKind {
 		fnptr = c.builder.CreateExtractValue(fnval, 0, "")
 		fnctx = c.builder.CreateExtractValue(fnval, 1, "")
-		globalfn = fnptr.IsGlobalConstant()
+		globalfn = !fnptr.IsAFunction().IsNil()
 		if !globalfn {
 			nctx++
 		}
