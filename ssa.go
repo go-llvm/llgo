@@ -140,7 +140,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
 	for i, block := range f.Blocks {
-		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
+		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, fmt.Sprintf(".%d.%s", i, block.Comment))
 	}
 	fr.builder.SetInsertPointAtEnd(fr.blocks[0])
 
@@ -269,7 +269,7 @@ func (fr *frame) block(b *ssa.BasicBlock) llvm.BasicBlock {
 	return fr.blocks[b.Index]
 }
 
-func (fr *frame) value(v ssa.Value) *LLVMValue {
+func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 	switch v := v.(type) {
 	case nil:
 		return nil
@@ -412,10 +412,18 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
-		fr.env[instr] = fr.NewValue(value, instr.Type())
+		v := fr.NewValue(value, instr.Type())
+		if _, ok := instr.X.(*ssa.Phi); ok {
+			v = phiValue(fr.compiler, v)
+		}
+		fr.env[instr] = v
 
 	case *ssa.Convert:
-		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)
+		v := fr.value(instr.X)
+		if _, ok := instr.X.(*ssa.Phi); ok {
+			v = phiValue(fr.compiler, v)
+		}
+		fr.env[instr] = v.Convert(instr.Type()).(*LLVMValue)
 
 	//case *ssa.DebugRef:
 
@@ -845,4 +853,13 @@ func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 	fnptr = c.builder.CreateBitCast(wrapper, fnptr.Type(), "")
 	fnval := c.builder.CreateInsertValue(llvm.ConstNull(resultType), fnptr, 0, "")
 	return c.NewValue(fnval, f.Type())
+}
+
+// phiValue returns a new value with the same value and type as the given Phi.
+// This is used for go.tools/ssa instructions that introduce new ssa.Values,
+// but would otherwise not generate a new LLVM value.
+func phiValue(c *compiler, v *LLVMValue) *LLVMValue {
+	llv := v.LLVMValue()
+	llv = c.builder.CreateSelect(llvm.ConstAllOnes(llvm.Int1Type()), llv, llv, "")
+	return c.NewValue(llv, v.Type())
 }
