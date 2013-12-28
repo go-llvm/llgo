@@ -20,6 +20,10 @@ type unit struct {
 	pkg     *ssa.Package
 	globals map[ssa.Value]*LLVMValue
 
+	// undefinedFuncs contains functions that have been resolved
+	// (declared) but not defined.
+	undefinedFuncs map[*ssa.Function]bool
+
 	// funcvals is a map of *ssa.Function to LLVM functions that
 	// may be stored. Non-receiver functions in this map will have
 	// an additional context parameter, to enable non-branching
@@ -30,10 +34,11 @@ type unit struct {
 
 func newUnit(c *compiler, pkg *ssa.Package) *unit {
 	u := &unit{
-		compiler: c,
-		pkg:      pkg,
-		globals:  make(map[ssa.Value]*LLVMValue),
-		funcvals: make(map[*ssa.Function]*LLVMValue),
+		compiler:       c,
+		pkg:            pkg,
+		globals:        make(map[ssa.Value]*LLVMValue),
+		undefinedFuncs: make(map[*ssa.Function]bool),
+		funcvals:       make(map[*ssa.Function]*LLVMValue),
 	}
 	return u
 }
@@ -68,6 +73,12 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 		for _, f := range fns {
 			u.defineFunction(f)
 		}
+	}
+
+	// Define remaining functions that were resolved during
+	// runtime type mapping, but not defined.
+	for f, _ := range u.undefinedFuncs {
+		u.defineFunction(f)
 	}
 }
 
@@ -108,6 +119,7 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 			llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
 		}
 		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
+		u.undefinedFuncs[f] = true
 	}
 	v := u.NewValue(llvmFunction, f.Signature)
 	u.globals[f] = v
@@ -120,9 +132,9 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	// Ignore functions not of this package.
+	// Only define functions from this package.
 	if f.Pkg == nil {
-		if r := f.Signature.Recv(); r != nil && r.Pkg() != u.pkg.Object {
+		if r := f.Signature.Recv(); r != nil && r.Pkg() != nil && r.Pkg() != u.pkg.Object {
 			return
 		}
 	} else if f.Pkg != u.pkg {
@@ -136,13 +148,15 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
+	delete(u.undefinedFuncs, f)
+
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
 	if f.Recover != nil {
 		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
 	}
+
 	for i, block := range f.Blocks {
 		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, fmt.Sprintf(".%d.%s", i, block.Comment))
 	}
