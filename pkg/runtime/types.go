@@ -146,7 +146,13 @@ func eqtyp(t1, t2 *rtype) bool {
 		// types.
 		switch t1.kind {
 		case arrayKind:
+			t1 := (*arrayType)(unsafe.Pointer(t1))
+			t2 := (*arrayType)(unsafe.Pointer(t2))
+			return t1.len == t2.len && eqtyp(t1.elem, t2.elem)
 		case chanKind:
+			t1 := (*chanType)(unsafe.Pointer(t1))
+			t2 := (*chanType)(unsafe.Pointer(t2))
+			return t1.dir == t2.dir && eqtyp(t1.elem, t2.elem)
 		case funcKind:
 			t1 := (*funcType)(unsafe.Pointer(t1))
 			t2 := (*funcType)(unsafe.Pointer(t2))
@@ -167,13 +173,21 @@ func eqtyp(t1, t2 *rtype) bool {
 				}
 			}
 		case interfaceKind:
+			// TODO
 		case mapKind:
+			t1 := (*mapType)(unsafe.Pointer(t1))
+			t2 := (*mapType)(unsafe.Pointer(t2))
+			return eqtyp(t1.key, t2.key) && eqtyp(t1.elem, t2.elem)
 		case ptrKind:
 			t1 := (*ptrType)(unsafe.Pointer(t1))
 			t2 := (*ptrType)(unsafe.Pointer(t2))
 			return eqtyp(t1.elem, t2.elem)
 		case sliceKind:
+			t1 := (*sliceType)(unsafe.Pointer(t1))
+			t2 := (*sliceType)(unsafe.Pointer(t2))
+			return eqtyp(t1.elem, t2.elem)
 		case structKind:
+			// TODO
 		}
 	}
 	return false
