@@ -322,10 +322,6 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
 	if importpath == "main" {
-		// Create "main.proginit", which will perform program initialization.
-		if err = compiler.createProginit(mainpkg.Object, buildctx); err != nil {
-			return nil, fmt.Errorf("failed to create main.proginit: %v", err)
-		}
 		// Wrap "main.main" in a call to runtime.main.
 		if err = compiler.createMainFunction(); err != nil {
 			return nil, fmt.Errorf("failed to create main.main: %v", err)
