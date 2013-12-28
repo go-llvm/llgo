@@ -775,7 +775,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 			if pmethodset == nil {
 				pmethodset = types.NewPointer(n).MethodSet()
 			}
-			pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(n.Obj().Pkg(), mname))
+			pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
 			ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())
 		}
 
