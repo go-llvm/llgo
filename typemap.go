@@ -9,7 +9,6 @@ import (
 	"code.google.com/p/go.tools/go/types/typemap"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 	"reflect"
 )
 
@@ -741,14 +740,12 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		methodset = n.MethodSet()
 	}
 
-	// Store methods.
-	methods := make([]llvm.Value, 0, methodset.Len())
-	for i := 0; i < cap(methods); i++ {
+	// Store methods. All methods must be stored, not only exported ones;
+	// this is to allow satisfying of interfaces with non-exported methods.
+	methods := make([]llvm.Value, methodset.Len())
+	for i := range methods {
 		sel := methodset.At(i)
 		mname := sel.Obj().Name()
-		if !ast.IsExported(mname) {
-			continue
-		}
 		mfunc := tm.methodResolver.ResolveMethod(sel)
 		ftyp := mfunc.Type().(*types.Signature)
 
@@ -784,7 +781,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
 		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods = append(methods, method)
+		methods[i] = method
 	}
 	methodsSliceType := tm.runtime.uncommonType.llvm.StructElementTypes()[2]
 	methodsSlice := tm.makeSlice(methods, methodsSliceType)
