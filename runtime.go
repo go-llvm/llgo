@@ -44,6 +44,7 @@ type runtimeInterface struct {
 	method,
 	ptrType,
 	sliceType,
+	structField,
 	structType,
 	defers runtimeType
 
@@ -125,6 +126,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"method":        &ri.method,
 		"ptrType":       &ri.ptrType,
 		"sliceType":     &ri.sliceType,
+		"structField":   &ri.structField,
 		"structType":    &ri.structType,
 		"defers":        &ri.defers,
 	}

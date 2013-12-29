@@ -156,24 +156,40 @@ func eqtyp(t1, t2 *rtype) bool {
 		case funcKind:
 			t1 := (*funcType)(unsafe.Pointer(t1))
 			t2 := (*funcType)(unsafe.Pointer(t2))
-			if t1.dotdotdot == t2.dotdotdot {
-				nin, nout := len(t1.in), len(t1.out)
-				if nin == len(t2.in) && nout == len(t2.out) {
-					for i := 0; i < nin; i++ {
-						if !eqtyp(t1.in[i], t2.in[i]) {
-							return false
-						}
-					}
-					for i := 0; i < nout; i++ {
-						if !eqtyp(t1.out[i], t2.out[i]) {
-							return false
-						}
-					}
-					return true
+			if t1.dotdotdot != t2.dotdotdot {
+				return false
+			}
+			nin, nout := len(t1.in), len(t1.out)
+			if nin != len(t2.in) || nout != len(t2.out) {
+				return false
+			}
+			for i := 0; i < nin; i++ {
+				if !eqtyp(t1.in[i], t2.in[i]) {
+					return false
 				}
 			}
+			for i := 0; i < nout; i++ {
+				if !eqtyp(t1.out[i], t2.out[i]) {
+					return false
+				}
+			}
+			return true
 		case interfaceKind:
-			// TODO
+			t1 := (*arrayType)(unsafe.Pointer(t1))
+			t2 := (*arrayType)(unsafe.Pointer(t2))
+			if len(t1.methods) != len(t2.methods) {
+				return false
+			}
+			for i, m1 := range t1.methods {
+				m2 := t2.methods[i]
+				if !sameString(m1.pkgPath, m2.pkgPath) {
+					return false
+				}
+				if !eqtyp(m1.typ, m2.typ) {
+					return false
+				}
+			}
+			return true
 		case mapKind:
 			t1 := (*mapType)(unsafe.Pointer(t1))
 			t2 := (*mapType)(unsafe.Pointer(t2))
@@ -187,10 +203,39 @@ func eqtyp(t1, t2 *rtype) bool {
 			t2 := (*sliceType)(unsafe.Pointer(t2))
 			return eqtyp(t1.elem, t2.elem)
 		case structKind:
-			// TODO
+			t1 := (*structType)(unsafe.Pointer(t1))
+			t2 := (*structType)(unsafe.Pointer(t2))
+			if len(t1.fields) != len(t2.fields) {
+				return false
+			}
+			for i, f1 := range t1.fields {
+				f2 := t2.fields[i]
+				if !sameString(f1.pkgPath, f2.pkgPath) {
+					return false
+				}
+				if !sameString(f1.name, f2.name) {
+					return false
+				}
+				if !sameString(f1.tag, f2.tag) {
+					return false
+				}
+				if !eqtyp(f1.typ, f2.typ) {
+					return false
+				}
+			}
+			return true
 		}
 	}
 	return false
+}
+
+func sameString(a, b *string) bool {
+	if a == nil {
+		return b == nil
+	} else if b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 ///////////////////////////////////////////////////////////////////////////////

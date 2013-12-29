@@ -9,6 +9,7 @@ import (
 	"code.google.com/p/go.tools/go/types/typemap"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
+	"go/ast"
 	"reflect"
 )
 
@@ -554,7 +555,40 @@ func (tm *TypeMap) structRuntimeType(s *types.Struct) (global, ptr llvm.Value) {
 	structType = llvm.ConstInsertValue(structType, rtype, []uint32{0})
 	global, ptr = tm.makeRuntimeTypeGlobal(structType)
 	tm.types.Set(s, runtimeTypeInfo{global, ptr})
-	// TODO set fields, reset initialiser
+	fieldVars := make([]*types.Var, s.NumFields())
+	for i := range fieldVars {
+		fieldVars[i] = s.Field(i)
+	}
+	offsets := tm.Offsetsof(fieldVars)
+	structFields := make([]llvm.Value, len(fieldVars))
+	for i := range structFields {
+		field := fieldVars[i]
+		structField := llvm.ConstNull(tm.runtime.structField.llvm)
+		if !field.Anonymous() {
+			name := tm.globalStringPtr(field.Name())
+			name = llvm.ConstBitCast(name, tm.runtime.structField.llvm.StructElementTypes()[0])
+			structField = llvm.ConstInsertValue(structField, name, []uint32{0})
+		}
+		if !ast.IsExported(field.Name()) {
+			pkgpath := tm.globalStringPtr(field.Pkg().Path())
+			pkgpath = llvm.ConstBitCast(pkgpath, tm.runtime.structField.llvm.StructElementTypes()[1])
+			structField = llvm.ConstInsertValue(structField, pkgpath, []uint32{1})
+		}
+		fieldType := tm.ToRuntime(field.Type())
+		structField = llvm.ConstInsertValue(structField, fieldType, []uint32{2})
+		if tag := s.Tag(i); tag != "" {
+			tag := tm.globalStringPtr(tag)
+			tag = llvm.ConstBitCast(tag, tm.runtime.structField.llvm.StructElementTypes()[3])
+			structField = llvm.ConstInsertValue(structField, tag, []uint32{3})
+		}
+		offset := llvm.ConstInt(tm.runtime.structField.llvm.StructElementTypes()[4], uint64(offsets[i]), false)
+		structField = llvm.ConstInsertValue(structField, offset, []uint32{4})
+		structFields[i] = structField
+	}
+	structFieldsSliceType := tm.runtime.structType.llvm.StructElementTypes()[1]
+	structFieldsSlice := tm.makeSlice(structFields, structFieldsSliceType)
+	structType = llvm.ConstInsertValue(structType, structFieldsSlice, []uint32{1})
+	global.SetInitializer(structType)
 	return global, ptr
 }
 
@@ -672,11 +706,13 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 		imethod := llvm.ConstNull(tm.runtime.imethod.llvm)
 		name := tm.globalStringPtr(method.Name())
 		name = llvm.ConstBitCast(name, tm.runtime.imethod.llvm.StructElementTypes()[0])
-		//pkgpath := tm.globalStringPtr(tm.functions.objectdata[method].Package.Path())
-		//pkgpath = llvm.ConstBitCast(name, tm.runtime.imethod.llvm.StructElementTypes()[1])
 		mtyp := tm.ToRuntime(method.Type())
 		imethod = llvm.ConstInsertValue(imethod, name, []uint32{0})
-		//imethod = llvm.ConstInsertValue(imethod, pkgpath, []uint32{1})
+		if !ast.IsExported(method.Name()) {
+			pkgpath := tm.globalStringPtr(method.Pkg().Path())
+			pkgpath = llvm.ConstBitCast(pkgpath, tm.runtime.imethod.llvm.StructElementTypes()[1])
+			imethod = llvm.ConstInsertValue(imethod, pkgpath, []uint32{1})
+		}
 		imethod = llvm.ConstInsertValue(imethod, mtyp, []uint32{2})
 		imethods[index] = imethod
 	}
