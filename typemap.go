@@ -509,7 +509,7 @@ var basicReflectKinds = [...]reflect.Kind{
 func (tm *TypeMap) basicRuntimeType(b *types.Basic, underlying bool) (global, ptr llvm.Value) {
 	var globalname string
 	if !underlying {
-		globalname = "__llgo.type.runtime." + b.String()
+		globalname = "__llgo.type.runtime." + types.Typ[b.Kind()].Name()
 		if tm.pkgpath != "runtime" {
 			global := llvm.AddGlobal(tm.module, tm.runtime.rtype.llvm, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtime.rtype.llvm))
@@ -598,7 +598,7 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 	var globalname string
 	switch elem := p.Elem().(type) {
 	case *types.Basic:
-		globalname = "__llgo.type.*runtime." + elem.String()
+		globalname = "__llgo.type.*runtime." + types.Typ[elem.Kind()].Name()
 		if tm.pkgpath != "runtime" {
 			global := llvm.AddGlobal(tm.module, tm.runtime.rtype.llvm, globalname)
 			global.SetInitializer(llvm.ConstNull(tm.runtime.rtype.llvm))
@@ -607,6 +607,9 @@ func (tm *TypeMap) pointerRuntimeType(p *types.Pointer) (global, ptr llvm.Value)
 		}
 	case *types.Named:
 		qname, path := tm.qualifiedName(elem)
+		if path == "" {
+			path = "runtime"
+		}
 		globalname = "__llgo.type.*" + qname
 		if path != tm.pkgpath {
 			global := llvm.AddGlobal(tm.module, tm.runtime.rtype.llvm, globalname)
@@ -836,6 +839,9 @@ func (tm *TypeMap) qualifiedName(n *types.Named) (qname, path string) {
 
 func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
 	qname, path := tm.qualifiedName(n)
+	if path == "" {
+		path = "runtime"
+	}
 	globalname := "__llgo.type." + qname
 	if path != tm.pkgpath {
 		// We're not compiling the package from whence the type came,
