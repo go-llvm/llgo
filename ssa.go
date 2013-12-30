@@ -858,6 +858,7 @@ func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 		llfntyp.IsFunctionVarArg(),
 	)
 	wrapper := llvm.AddFunction(c.module.Module, fnptr.Name()+".ctx", llfntyp)
+	wrapper.SetLinkage(llvm.PrivateLinkage)
 	entry := llvm.AddBasicBlock(wrapper, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 	args := make([]llvm.Value, len(llfntyp.ParamTypes())-1)
