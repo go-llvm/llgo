@@ -11,21 +11,28 @@ import (
 	"strings"
 )
 
-// Context returns a new go/build.Context with GOOS and GOARCH
+type Context struct {
+	build.Context
+
+	// LLVM triple
+	Triple string
+}
+
+// ContextFromTriple returns a new go/build.Context with GOOS and GOARCH
 // configured from the given triple.
-func Context(triple string) (*build.Context, error) {
+func ContextFromTriple(triple string) (*Context, error) {
 	goos, goarch, err := parseTriple(triple)
 	if err != nil {
 		return nil, err
 	}
-	ctx := build.Default
+	ctx := &Context{Context: build.Default, Triple: triple}
 	ctx.GOOS = goos
 	ctx.GOARCH = goarch
 	ctx.BuildTags = append(ctx.BuildTags, "llgo")
 	if triple == "pnacl" {
 		ctx.BuildTags = append(ctx.BuildTags, "pnacl")
 	}
-	return &ctx, nil
+	return ctx, nil
 }
 
 func parseTriple(triple string) (goos string, goarch string, err error) {

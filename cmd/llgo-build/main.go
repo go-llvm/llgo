@@ -58,11 +58,11 @@ func main() {
 		clang = "clang"
 	}
 
-	var err error
-	buildctx, err = llgobuild.Context(triple)
+	llgobuildctx, err := llgobuild.ContextFromTriple(triple)
 	if err != nil {
 		log.Fatal(err)
 	}
+	buildctx = &llgobuildctx.Context
 
 	// pkgroot = $GOPATH/pkg/llgo/<triple>
 	gopath := os.Getenv("GOPATH")

@@ -12,11 +12,13 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/axw/gollvm/llvm"
+	llgobuild "github.com/axw/llgo/build"
+	llgoimporter "github.com/axw/llgo/importer"
+
 	"code.google.com/p/go.tools/go/types"
 	goimporter "code.google.com/p/go.tools/importer"
 	"code.google.com/p/go.tools/ssa"
-	"github.com/axw/gollvm/llvm"
-	llgobuild "github.com/axw/llgo/build"
 )
 
 func assert(cond bool) {
@@ -187,16 +189,18 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	// FIXME create a compilation state, rather than storing in 'compiler'.
 	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
 
-	buildctx, err := llgobuild.Context(compiler.TargetTriple)
+	buildctx, err := llgobuild.ContextFromTriple(compiler.TargetTriple)
 	if err != nil {
 		return nil, err
 	}
 	impcfg := &goimporter.Config{
 		TypeChecker: types.Config{
-			Import: (&importer{compiler: compiler}).Import,
+			Import: llgoimporter.NewImporter(buildctx).Import,
 			Sizes:  compiler.llvmtypes,
 		},
-		Build: buildctx,
+		// TODO(axw) remove the below line to enable binary imports when
+		// https://code.google.com/p/go/issues/detail?id=7028 is fixed.
+		Build: &buildctx.Context,
 	}
 	compiler.typechecker = &impcfg.TypeChecker
 	compiler.importer = goimporter.New(impcfg)
@@ -235,7 +239,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	runtimePkginfo := mainPkginfo
 	runtimePkg := mainpkg
 	if importpath != "runtime" {
-		astFiles, err := parseRuntime(buildctx, compiler.importer.Fset)
+		astFiles, err := parseRuntime(&buildctx.Context, compiler.importer.Fset)
 		if err != nil {
 			return nil, err
 		}
@@ -327,11 +331,9 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 			return nil, fmt.Errorf("failed to create main.main: %v", err)
 		}
 	} else {
-		// TODO reenable when everything's working
-		//var e = exporter{compiler: compiler}
-		//if err := e.Export(mainpkg.Object); err != nil {
-		//	return nil, err
-		//}
+		if err := llgoimporter.Export(buildctx, mainpkg.Object); err != nil {
+			return nil, fmt.Errorf("failed to export package data: %v", err)
+		}
 	}
 
 	return compiler.module, nil
