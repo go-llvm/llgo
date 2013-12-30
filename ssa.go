@@ -668,9 +668,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.slice(x, low, high)
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr)
-		value := fr.value(instr.Val)
-		fr.builder.CreateStore(value.LLVMValue(), addr.LLVMValue())
+		addr := fr.value(instr.Addr).LLVMValue()
+		value := fr.value(instr.Val).LLVMValue()
+		// The bitcast is necessary to handle recursive pointer stores.
+		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
+		fr.builder.CreateStore(value, addr)
 
 	case *ssa.TypeAssert:
 		x := fr.value(instr.X)
@@ -705,7 +707,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		case token.ARROW:
 			fr.env[instr] = fr.chanRecv(operand, instr.CommaOk)
 		case token.MUL:
-			llptr := operand.LLVMValue()
+			// The bitcast is necessary to handle recursive pointer loads.
+			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
 			fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
 		default:
 			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
