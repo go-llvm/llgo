@@ -380,41 +380,21 @@ func (lhs *LLVMValue) shift(rhs *LLVMValue, op token.Token) *LLVMValue {
 	lhsval := lhs.LLVMValue()
 	bits := rhs.LLVMValue()
 	unsigned := isUnsigned(lhs.Type())
-	if !bits.IsAConstant().IsNil() {
-		if bits.ZExtValue() >= uint64(lhsval.Type().IntTypeWidth()) {
-			var fix llvm.Value
-			if unsigned || op == token.SHL {
-				fix = llvm.ConstNull(lhsval.Type())
-			} else {
-				fix = llvm.ConstAllOnes(lhsval.Type())
-			}
-			return lhs.compiler.NewValue(fix, lhs.typ)
-		}
-	}
 	b := lhs.compiler.builder
+	// Shifting >= width of lhs yields undefined behaviour, so we must select.
+	max := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()-1), false)
 	var result llvm.Value
-	if op == token.SHL {
-		result = b.CreateShl(lhsval, bits, "")
+	if !unsigned && op == token.SHR {
+		bits := b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), bits, max, "")
+		result = b.CreateAShr(lhsval, bits, "")
 	} else {
-		if unsigned {
+		if op == token.SHL {
+			result = b.CreateShl(lhsval, bits, "")
+		} else {
 			result = b.CreateLShr(lhsval, bits, "")
-		} else {
-			result = b.CreateAShr(lhsval, bits, "")
 		}
-	}
-	if bits.IsAConstant().IsNil() {
-		// Shifting >= the width of the lhs
-		// yields undefined behaviour, so we
-		// must generate runtime branching logic.
-		width := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()), false)
-		less := b.CreateICmp(llvm.IntULT, bits, width, "")
-		var fix llvm.Value
-		if unsigned || op == token.SHL {
-			fix = llvm.ConstNull(lhsval.Type())
-		} else {
-			fix = llvm.ConstAllOnes(lhsval.Type())
-		}
-		result = b.CreateSelect(less, result, fix, "")
+		zero := llvm.ConstNull(lhsval.Type())
+		result = b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), result, zero, "")
 	}
 	return lhs.compiler.NewValue(result, lhs.typ)
 }
