@@ -661,7 +661,7 @@ func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
 		if c.target.TypeStoreSize(fnctx.Type()) <= uint64(ptrsize) {
 			bits := c.target.TypeSizeInBits(fnctx.Type())
 			if bits > 0 {
-				fnctx = c.coerce(fnctx, llvm.IntType(int(bits)))
+				fnctx = coerce(c.builder, fnctx, llvm.IntType(int(bits)))
 				fnctx = b.CreateIntToPtr(fnctx, dstltelems[1], "")
 			} else {
 				fnctx = llvm.ConstNull(dstltelems[1])

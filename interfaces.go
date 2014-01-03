@@ -67,8 +67,8 @@ func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	}
 	f := c.runtime.compareE2E.LLVMValue()
 	args := []llvm.Value{
-		c.coerce(a.LLVMValue(), c.runtime.eface.llvm),
-		c.coerce(b.LLVMValue(), c.runtime.eface.llvm),
+		coerce(c.builder, a.LLVMValue(), c.runtime.eface.llvm),
+		coerce(c.builder, b.LLVMValue(), c.runtime.eface.llvm),
 	}
 	return c.NewValue(c.builder.CreateCall(f, args, ""), types.Typ[types.Bool])
 }
@@ -85,7 +85,7 @@ func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 		if c.target.TypeStoreSize(lltyp) <= uint64(c.target.PointerSize()) {
 			bits := c.target.TypeSizeInBits(lltyp)
 			if bits > 0 {
-				llv = c.coerce(llv, llvm.IntType(int(bits)))
+				llv = coerce(c.builder, llv, llvm.IntType(int(bits)))
 				llv = c.builder.CreateIntToPtr(llv, i8ptr, "")
 			} else {
 				llv = llvm.ConstNull(i8ptr)

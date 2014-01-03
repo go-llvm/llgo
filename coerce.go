@@ -15,24 +15,22 @@ import (
 // the same size. If the source is an aggregate, then the target
 // must also be an aggregate with the same number of fields, each
 // of which must have the same size.
-func (c *compiler) coerce(v llvm.Value, t llvm.Type) llvm.Value {
+func coerce(b llvm.Builder, v llvm.Value, t llvm.Type) llvm.Value {
 	// FIXME don't do this with alloca
 	switch t.TypeKind() {
 	case llvm.ArrayTypeKind, llvm.StructTypeKind:
-		ptr := c.builder.CreateAlloca(t, "")
-		ptrv := c.builder.CreateBitCast(ptr, llvm.PointerType(v.Type(), 0), "")
-		c.builder.CreateStore(v, ptrv)
-		return c.builder.CreateLoad(ptr, "")
+		ptr := b.CreateAlloca(t, "")
+		ptrv := b.CreateBitCast(ptr, llvm.PointerType(v.Type(), 0), "")
+		b.CreateStore(v, ptrv)
+		return b.CreateLoad(ptr, "")
 	}
-
 	vt := v.Type()
 	switch vt.TypeKind() {
 	case llvm.ArrayTypeKind, llvm.StructTypeKind:
-		ptr := c.builder.CreateAlloca(vt, "")
-		c.builder.CreateStore(v, ptr)
-		ptrt := c.builder.CreateBitCast(ptr, llvm.PointerType(t, 0), "")
-		return c.builder.CreateLoad(ptrt, "")
+		ptr := b.CreateAlloca(vt, "")
+		b.CreateStore(v, ptr)
+		ptrt := b.CreateBitCast(ptr, llvm.PointerType(t, 0), "")
+		return b.CreateLoad(ptrt, "")
 	}
-
-	return c.builder.CreateBitCast(v, t, "")
+	return b.CreateBitCast(v, t, "")
 }

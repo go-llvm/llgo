@@ -810,12 +810,19 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 		// ifn (single-word receiver function pointer for interface calls)
 		ifn := tfn
-		if p == nil && tm.Sizeof(n) > int64(tm.target.PointerSize()) {
-			if pmethodset == nil {
-				pmethodset = types.NewPointer(n).MethodSet()
+		if p == nil {
+			if tm.Sizeof(n) > int64(tm.target.PointerSize()) {
+				if pmethodset == nil {
+					pmethodset = types.NewPointer(n).MethodSet()
+				}
+				pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
+				ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())
+			} else if _, ok := n.Underlying().(*types.Pointer); !ok {
+				// Create a wrapper function that takes an *int8,
+				// and coerces to the receiver type.
+				ifn = tm.interfaceFuncWrapper(mfunc.LLVMValue())
+				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
 			}
-			pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
-			ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())
 		}
 
 		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
@@ -933,4 +940,33 @@ func (tm *TypeMap) makeSlice(values []llvm.Value, slicetyp llvm.Type) llvm.Value
 func isGlobalObject(obj types.Object) bool {
 	pkg := obj.Pkg()
 	return pkg == nil || obj.Parent() == pkg.Scope()
+}
+
+func (tm *TypeMap) interfaceFuncWrapper(f llvm.Value) llvm.Value {
+	ftyp := f.Type().ElementType()
+	paramTypes := ftyp.ParamTypes()
+	recvType := paramTypes[0]
+	paramTypes[0] = llvm.PointerType(llvm.Int8Type(), 0)
+	newf := llvm.AddFunction(f.GlobalParent(), f.Name()+".ifn", llvm.FunctionType(
+		ftyp.ReturnType(),
+		paramTypes,
+		ftyp.IsFunctionVarArg(),
+	))
+
+	b := llvm.GlobalContext().NewBuilder()
+	defer b.Dispose()
+	entry := llvm.AddBasicBlock(newf, "entry")
+	b.SetInsertPointAtEnd(entry)
+	args := make([]llvm.Value, len(paramTypes))
+	for i := range paramTypes {
+		args[i] = newf.Param(i)
+	}
+	args[0] = coerce(b, b.CreatePtrToInt(args[0], tm.target.IntPtrType(), ""), recvType)
+	result := b.CreateCall(f, args, "")
+	if result.Type().TypeKind() == llvm.VoidTypeKind {
+		b.CreateRetVoid()
+	} else {
+		b.CreateRet(result)
+	}
+	return newf
 }
