@@ -961,7 +961,18 @@ func (tm *TypeMap) interfaceFuncWrapper(f llvm.Value) llvm.Value {
 	for i := range paramTypes {
 		args[i] = newf.Param(i)
 	}
-	args[0] = coerce(b, b.CreatePtrToInt(args[0], tm.target.IntPtrType(), ""), recvType)
+
+	recvBits := int(tm.target.TypeSizeInBits(recvType))
+	if recvBits > 0 {
+		args[0] = b.CreatePtrToInt(args[0], tm.target.IntPtrType(), "")
+		if args[0].Type().IntTypeWidth() > recvBits {
+			args[0] = b.CreateTrunc(args[0], llvm.IntType(recvBits), "")
+		}
+		args[0] = coerce(b, args[0], recvType)
+	} else {
+		args[0] = llvm.ConstNull(recvType)
+	}
+
 	result := b.CreateCall(f, args, "")
 	if result.Type().TypeKind() == llvm.VoidTypeKind {
 		b.CreateRetVoid()
