@@ -18,10 +18,7 @@ func buildRuntime() (reterr error) {
 	// e.g. Go-equivalent jmp_buf structs.
 
 	badPackages := []string{
-		"crypto/x509",         // Issue #70
-		"database/sql/driver", // Issue #65
 		"net",         // Issue #71
-		"net/http",    // Issue #68
 		"os/user",     // Issue #72
 		"runtime/cgo", // Issue #73
 	}
@@ -35,12 +32,6 @@ outer:
 	for _, pkg := range runtimePackages {
 		// cmd's aren't packages
 		if strings.HasPrefix(pkg, "cmd/") {
-			continue
-		}
-		// drone.io keeps various appengine packages in std,
-		// which fail due to required third-party dependencies.
-		// this is a kludge. FIXME
-		if strings.HasPrefix(pkg, "appengine") {
 			continue
 		}
 		for _, bad := range badPackages {
