@@ -42,7 +42,6 @@ func (c *compiler) exportRuntimeTypes(exportedTypes []types.Type, builtin bool) 
 		exportedTypes = append(exportedTypes, error_)
 	}
 	for _, typ := range exportedTypes {
-		c.types.ToRuntime(typ)
 		c.types.ToRuntime(types.NewPointer(typ))
 	}
 }

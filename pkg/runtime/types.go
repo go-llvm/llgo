@@ -37,14 +37,14 @@ type method struct {
 }
 
 type sliceType struct {
-	rtype
-	elem *rtype
+	rtype `runtime:"slice"`
+	elem  *rtype
 }
 
 type mapType struct {
-	rtype
-	key  *rtype
-	elem *rtype
+	rtype `runtime:"map"`
+	key   *rtype
+	elem  *rtype
 }
 
 type imethod struct {
@@ -54,30 +54,30 @@ type imethod struct {
 }
 
 type interfaceType struct {
-	rtype
+	rtype   `runtime:"interface"`
 	methods []imethod
 }
 
 type ptrType struct {
-	rtype
-	elem *rtype
+	rtype `runtime:"ptr"`
+	elem  *rtype
 }
 
 type arrayType struct {
-	rtype
+	rtype `runtime:"array"`
 	elem  *rtype
 	slice *rtype
 	len   uintptr
 }
 
 type chanType struct {
-	rtype
-	elem *rtype
-	dir  uintptr
+	rtype `runtime:"chan"`
+	elem  *rtype
+	dir   uintptr
 }
 
 type funcType struct {
-	rtype
+	rtype     `runtime:"func"`
 	dotdotdot bool
 	in        []*rtype
 	out       []*rtype
@@ -92,7 +92,7 @@ type structField struct {
 }
 
 type structType struct {
-	rtype
+	rtype  `runtime:"struct"`
 	fields []structField
 }
 
