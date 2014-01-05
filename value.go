@@ -562,8 +562,11 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			delta := srcBits - dstBits
 			switch {
 			case delta < 0:
-				// TODO check if (un)signed, use S/ZExt accordingly.
-				lv = b.CreateZExt(lv, llvm_type, "")
+				if !isUnsigned(srctyp) {
+					lv = b.CreateSExt(lv, llvm_type, "")
+				} else {
+					lv = b.CreateZExt(lv, llvm_type, "")
+				}
 			case delta > 0:
 				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
