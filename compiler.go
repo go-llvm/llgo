@@ -217,7 +217,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	}
 	mainPkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
 	if mainPkginfo.Err != nil {
-		return nil, err
+		return nil, mainPkginfo.Err
 	}
 	// First call CreatePackages to resolve imports, and then CreatePackage
 	// to obtain the main package. The latter simply returns the package
