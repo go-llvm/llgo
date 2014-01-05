@@ -1,3 +1,8 @@
+//
+
+// +build linux
+// +build amd64
+
 // Created by cgo - DO NOT EDIT
 
 //line /media/msata/code/src/github.com/axw/llgo/pkg/runtime/ctypes.go:9

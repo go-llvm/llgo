@@ -1,3 +1,8 @@
+//
+
+// +build linux
+// +build amd64
+
 // Created by cgo - DO NOT EDIT
 
 package runtime

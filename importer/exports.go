@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
 
 	"github.com/axw/llgo/build"
 
@@ -325,7 +326,12 @@ func (x *exporter) exportObject(obj types.Object) {
 func (x *exporter) export(pkg *types.Package) error {
 	x.pkg = pkg
 	x.writeFunc = true
-	f2, err := os.Create(packageExportsFile(x.context, pkg.Path()))
+	exportsFile := packageExportsFile(x.context, pkg.Path())
+	err := os.MkdirAll(filepath.Dir(exportsFile), 0755)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	f2, err := os.Create(exportsFile)
 	if err != nil {
 		return err
 	}

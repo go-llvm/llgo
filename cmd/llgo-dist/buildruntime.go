@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"go/build"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -48,8 +49,20 @@ func buildRuntimeCgo() error {
 		src := filepath.Join(objdir, prefix+".go")
 		dst := fmt.Sprintf("z%s_%s_%s.go", prefix, buildctx.GOOS, buildctx.GOARCH)
 		log.Printf("   - runtime/%s", dst)
+		data, err := ioutil.ReadFile(src)
+		if err != nil {
+			return err
+		}
 		dst = filepath.Join(runtimepkg.Dir, dst)
-		if err := os.Rename(src, dst); err != nil {
+		// The GOOS/GOARCH llgo generates may not be known by the go tool,
+		// and so will not be considered in filename filtering (file_$GOOS_$GOARCH).
+		// Add tags to the generated files.
+		data = append([]byte(
+			"//\n\n"+
+				"// +build "+buildctx.GOOS+"\n"+
+				"// +build "+buildctx.GOARCH+"\n\n",
+		), data...)
+		if err := ioutil.WriteFile(dst, data, 0644); err != nil {
 			return err
 		}
 	}
