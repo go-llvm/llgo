@@ -119,6 +119,9 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 			llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
 		}
 		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
+		if f.Enclosing != nil {
+			llvmFunction.SetLinkage(llvm.PrivateLinkage)
+		}
 		u.undefinedFuncs[f] = true
 	}
 	v := u.NewValue(llvmFunction, f.Signature)
