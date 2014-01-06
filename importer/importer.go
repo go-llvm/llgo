@@ -40,6 +40,7 @@ func packageExportsFile(ctx *build.Context, path string) string {
 	} else {
 		gopath = filepath.SplitList(gopath)[0]
 	}
+	// FIXME(axw) ctx.Triple is wrong for pnacl
 	return filepath.Join(gopath, "pkg", "llgo", ctx.Triple, path+".lgx")
 }
 

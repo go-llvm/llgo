@@ -81,6 +81,17 @@ func buildRuntime() (reterr error) {
 		"os/user",     // Issue #72
 		"runtime/cgo", // Issue #73
 	}
+	if triple == "pnacl" {
+		badPackages = append(badPackages,
+			"crypto/md5",
+			"crypto/rc4",
+			"hash/crc32",
+			"mime",
+			"os/exec",
+			"os/signal",
+			"path/filepath",
+		)
+	}
 	isBad := func(path string) bool {
 		for _, bad := range badPackages {
 			if path == bad {
@@ -95,6 +106,10 @@ func buildRuntime() (reterr error) {
 		return err
 	}
 	runtimePackages := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	// Always build runtime and syscall first
+	// TODO: Real import dependency discovery to build packages in the order they depend on each other
+	runtimePackages := append([]string{"runtime", "syscall"}, strings.Split(strings.TrimSpace(string(output)), "\n")...)
 	for _, pkg := range runtimePackages {
 		if strings.HasPrefix(pkg, "cmd/") || isBad(pkg) {
 			continue

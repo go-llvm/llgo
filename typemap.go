@@ -345,8 +345,6 @@ func (tm *llvmTypeMap) Sizeof(typ types.Type) int64 {
 			return int64(tm.target.TypeAllocSize(tm.inttype))
 		case types.Uintptr, types.UnsafePointer:
 			return int64(tm.target.PointerSize())
-		case types.String:
-			return 2 * int64(tm.target.PointerSize())
 		}
 		return tm.StdSizes.Sizeof(typ)
 	case *types.Array:

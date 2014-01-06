@@ -247,7 +247,7 @@ func buildPackage(pkg *build.Package, output string) error {
 	// Compile and link .c files in.
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
 	for _, cfile := range pkg.CFiles {
-		bcfile := cfile + ".bc"
+		bcfile := filepath.Join(workdir, filepath.Base(cfile+".bc"))
 		args = []string{"-c", "-o", bcfile}
 		if triple != "pnacl" {
 			args = append(args, "-target", triple, "-emit-llvm")
