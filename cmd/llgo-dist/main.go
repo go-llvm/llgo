@@ -214,6 +214,7 @@ func main() {
 		checkLlvmLibs,
 		buildLlgo,
 		buildLlgoTools,
+		cloneGarbageCollector,
 		buildRuntime,
 	)
 

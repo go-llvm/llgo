@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"fmt"
 )
 
 // linkdeps links dependencies into the specified output file.
@@ -97,6 +98,7 @@ func linkdeps(pkg *build.Package, output string) error {
 
 		clangxx := clang + "++"
 		args := []string{"-pthread", "-g", "-o", output, input}
+		args = appendMemLinkerArgs(args)
 		if triple == "pnacl" {
 			args = append(args, "-l", "ppapi")
 		}
@@ -110,3 +112,19 @@ func linkdeps(pkg *build.Package, output string) error {
 
 	return nil
 }
+
+func appendMemLinkerArgs(args []string) []string {
+	var mallocname, freename string
+	if gc {
+		mallocname = "GC_malloc"
+		freename = "GC_free"
+	} else {
+		mallocname = "malloc"
+		freename = "free"
+	}
+	args = append(args,
+		"-Xlinker", fmt.Sprintf("--defsym=llgo_malloc=%v", mallocname),
+		"-Xlinker", fmt.Sprintf("--defsym=llgo_free=%v", freename))
+	return args
+}
+

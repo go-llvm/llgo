@@ -253,6 +253,10 @@ func buildPackage(pkg *build.Package, output string) error {
 			args = append(args, "-target", triple, "-emit-llvm")
 		}
 		args = append(args, cgoCFLAGS...)
+		args, err = appendIncludeDirectories(args, pkg.Dir)
+		if err != nil {
+			return err
+		}
 		args = append(args, cfile)
 		cmd := exec.Command(clang, args...)
 		cmd.Stdout = os.Stdout
@@ -297,4 +301,23 @@ func buildPackage(pkg *build.Package, output string) error {
 		}
 	}
 	return moveFile(tempfile, output)
+}
+
+func appendIncludeDirectories(args []string, pkgdir string) ([]string, error) {
+	// Find directories called 'include' under the package's source-directory
+	cmd := exec.Command("find", pkgdir, "-name", "include", "-type", "d")
+	includedirsString, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	for _, includeDir := range strings.Fields(string(includedirsString)) {
+		fmt.Println("Including: " + includeDir)
+		includeDir, err = filepath.Abs(includeDir)
+		if err != nil {
+			// Why does Abs() return an error!?
+			return nil, err
+		}
+		args = append(args, "-I" + includeDir)
+	}
+	return args, nil
 }

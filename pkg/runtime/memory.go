@@ -6,18 +6,29 @@ package runtime
 
 import "unsafe"
 
-// #llgo name: malloc
-func c_malloc(uintptr) *int8
+// These functions will be linked to appropriate implementations by redefining
+// the symbols at link-time, depending on a compiler-flag.
+// #llgo name: llgo_malloc
+func llgo_malloc(uintptr) *int8
+// #llgo name: llgo_free
+func llgo_free(*int8)
+
+// #llgo name: GC_malloc
+func gc_malloc(uintptr) *int8
+// #llgo name: GC_free
+func gc_free(*int8)
 
 func malloc(size uintptr) unsafe.Pointer {
-	mem := unsafe.Pointer(c_malloc(size))
+	mem := unsafe.Pointer(llgo_malloc(size))
 	if mem != nil {
 		bzero(mem, size)
 	}
 	return mem
 }
 
-func free(unsafe.Pointer)
+func free(p unsafe.Pointer) {
+	llgo_free((*int8)(p))
+}
 func memcpy(dst, src unsafe.Pointer, size uintptr)
 func memmove(dst, src unsafe.Pointer, size uintptr)
 func memset(dst unsafe.Pointer, fill byte, size uintptr)

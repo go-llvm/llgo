@@ -1,0 +1,4 @@
+
+# The tool llgo-dist will clone the garbage collector repositories in this folder.
+gc/
+
