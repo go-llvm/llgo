@@ -31,7 +31,7 @@ const (
 type Scase struct {
 	sg        SudoG // must be first member (cast to Scase)
 	chan_     *Hchan
-	blockaddr unsafe.Pointer
+	index     uint16
 	kind      CaseKind
 	receivedp *bool // pointer to received bool (recv2)
 }
@@ -39,6 +39,7 @@ type Scase struct {
 type Select struct {
 	tcase      uint16   // total count of scase
 	ncase      uint16   // currently filled scase
+	index      uint16   // next index to allocate
 	pollorder_ *uint16  // case poll order
 	lockorder_ *uintptr // channel lock order
 	scase      [1]Scase // one per case (in order of appearance)
@@ -127,7 +128,7 @@ func reflect_makechan(t *rtype, cap_ int) unsafe.Pointer {
 	return unsafe.Pointer(makechan(unsafe.Pointer(t), cap_))
 }
 
-func makechan(t unsafe.Pointer, cap_ int) *int8 {
+func makechan(t unsafe.Pointer, cap_ int) unsafe.Pointer {
 	typ := (*chanType)(t)
 	size := unsafe.Sizeof(Hchan{})
 	if cap_ > 0 {
@@ -139,7 +140,7 @@ func makechan(t unsafe.Pointer, cap_ int) *int8 {
 	c.elemsize = uint16(typ.elem.size)
 	c.elemalign = uint8(typ.elem.align)
 	c.dataqsiz = uint(cap_)
-	return (*int8)(mem)
+	return mem
 }
 
 // #llgo name: reflect.chancap
@@ -434,8 +435,8 @@ func selectsize(size int32) uintptr {
 		uintptr(size)*unsafe.Sizeof(uint16(0))
 }
 
-// #llgo name: runtime.initselect
-func initselect(size int32, ptr unsafe.Pointer) {
+// #llgo name: runtime.selectinit
+func selectinit(size int32, ptr unsafe.Pointer) {
 	sel := (*Select)(ptr)
 	sel.tcase = uint16(size)
 	ptr = unsafe.Pointer(&sel.scase[0])
@@ -446,7 +447,7 @@ func initselect(size int32, ptr unsafe.Pointer) {
 }
 
 // #llgo name: runtime.selectdefault
-func selectdefault(selectp_, blockaddr, elem unsafe.Pointer) {
+func selectdefault(selectp_ unsafe.Pointer) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
 	if i > selectp.tcase {
@@ -454,35 +455,46 @@ func selectdefault(selectp_, blockaddr, elem unsafe.Pointer) {
 	}
 	selectp.ncase++
 	cas := &selectp.scase[i]
-	cas.blockaddr = blockaddr
+	cas.index = selectp.index
+	selectp.index++
 	cas.kind = CaseDefault
 }
 
 // #llgo name: runtime.selectsend
-func selectsend(selectp_, blockaddr, ch, elem unsafe.Pointer) {
+func selectsend(selectp_, ch, elem unsafe.Pointer) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
 	if i > selectp.tcase {
 		panic("selectsend: too many cases")
 	}
+	if ch == nil {
+		selectp.index++
+		return
+	}
 	selectp.ncase++
 	cas := &selectp.scase[i]
-	cas.blockaddr = blockaddr
+	cas.index = selectp.index
+	selectp.index++
 	cas.kind = CaseSend
 	cas.chan_ = (*Hchan)(ch)
 	cas.sg.elem = elem
 }
 
 // #llgo name: runtime.selectrecv
-func selectrecv(selectp_, blockaddr, ch, elem unsafe.Pointer, received *bool) {
+func selectrecv(selectp_, ch, elem unsafe.Pointer, received *bool) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
 	if i > selectp.tcase {
 		panic("selectrecv: too many cases")
 	}
+	if ch == nil {
+		selectp.index++
+		return
+	}
 	selectp.ncase++
 	cas := &selectp.scase[i]
-	cas.blockaddr = blockaddr
+	cas.index = selectp.index
+	selectp.index++
 	cas.kind = CaseRecv
 	cas.chan_ = (*Hchan)(ch)
 	cas.sg.elem = elem
@@ -541,7 +553,7 @@ func (s *Select) unlock() {
 }
 
 // #llgo name: runtime.selectgo
-func selectgo(selectp_ unsafe.Pointer) unsafe.Pointer {
+func selectgo(selectp_ unsafe.Pointer) int {
 	sel := (*Select)(selectp_)
 	for i := uint16(0); i < sel.ncase; i++ {
 		sel.setpollorder(i, i)
@@ -776,8 +788,7 @@ syncsend:
 	goto retc
 
 retc:
-	//println("gots teh case: ", cas.blockaddr)
-	return cas.blockaddr
+	return int(cas.index) - 1
 
 sclose:
 	// send on closed channel

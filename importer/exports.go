@@ -5,169 +5,88 @@
 package llgo
 
 import (
-	"bufio"
-	"bytes"
-	"code.google.com/p/go.tools/go/exact"
-	"code.google.com/p/go.tools/go/gcimporter"
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"go/ast"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"path/filepath"
-	"regexp"
-	"runtime"
+
+	"github.com/axw/llgo/build"
+
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 )
 
-var (
-	importsRe = regexp.MustCompile(`import \w+ "([\w/]+)"`)
-)
-
-type (
-	importer struct {
-		compiler  *compiler
-		myimports map[string]*types.Package
-	}
-	exporter struct {
-		writeFunc bool
-		pkg       *types.Package
-		compiler  *compiler
-		writer    io.Writer
-	}
-)
-
-func (c *compiler) packageExportsFile(path string) string {
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		gopath = runtime.GOROOT()
-	} else {
-		gopath = filepath.SplitList(gopath)[0]
-	}
-	target := c.TargetTriple
-	if c.pnacl {
-		target = "pnacl"
-	}
-	return filepath.Join(gopath, "pkg", "llgo", target, path+".lgx")
+type exporter struct {
+	context   *build.Context
+	writeFunc bool
+	pkg       *types.Package
+	writer    io.Writer
 }
 
-func (c *importer) Import(imports map[string]*types.Package, path string) (pkg *types.Package, err error) {
-	if c.myimports == nil {
-		// myimports is different from imports. Imports can contain
-		// dummy packages not loaded by us, while myimports will
-		// be "pure".
-		c.myimports = make(map[string]*types.Package)
-	}
-	if pkg, ok := c.myimports[path]; ok {
-		if pkg == nil {
-			return nil, fmt.Errorf("Previous attempt at loading package failed")
-		}
-		return pkg, nil
-	}
-
-	var data []byte
-	pkgfile := c.compiler.packageExportsFile(path)
-	if path == "unsafe" {
-		// Importing these packages have issues
-		//
-		// unsafe:
-		// 		If this is actually imported, go.types will panic due to invalid type conversions.
-		//		This because it is a built in package  (http://tip.golang.org/doc/spec#Package_unsafe)
-		// 		and thus shouldn't be treated as a normal package anyway.
-	} else {
-		data, _ = ioutil.ReadFile(pkgfile)
-	}
-
-	if data != nil {
-		// Need to load dependencies first
-		for _, match := range importsRe.FindAllStringSubmatch(string(data), -1) {
-			if _, ok := c.myimports[match[1]]; !ok {
-				_, err := c.Import(imports, match[1])
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		pkg, err = gcimporter.ImportData(imports, pkgfile, path, bufio.NewReader(bytes.NewBuffer(data)))
-	}
-	if pkg == nil || err != nil {
-		if data != nil {
-			return nil, fmt.Errorf("Failed to load package %s: %v", path, err)
-		}
-		// Package has not been compiled yet, so fall back to
-		// the standard GcImport.
-		pkg, err = gcimporter.Import(imports, path)
-	}
-
-	c.myimports[path] = pkg
-	imports[path] = pkg
-
-	return pkg, err
-}
-
-func (c *exporter) exportName(t interface{}) {
+func (x *exporter) exportName(t interface{}) {
 	switch t := t.(type) {
 	case *types.Var:
 		if t.Anonymous() || t.Name() == "" {
-			c.write("? ")
+			x.write("? ")
 		} else {
-			c.write("%s ", t.Name())
+			x.write("%s ", t.Name())
 		}
-		c.exportName(t.Type())
+		x.exportName(t.Type())
 	case exact.Value:
 		switch t.Kind() {
 		case exact.Float:
-			c.exportName(&ast.BasicLit{Value: t.String()})
+			x.exportName(&ast.BasicLit{Value: t.String()})
 		default:
-			c.write(t.String())
+			x.write(t.String())
 		}
 	case *types.Basic:
 		if t.Kind() == types.UnsafePointer {
-			c.write("@\"unsafe\".Pointer")
+			x.write("@\"unsafe\".Pointer")
 		} else if t.Info()&types.IsUntyped == 0 {
-			c.write(t.String())
+			x.write(t.String())
 		}
 	case *types.TypeName:
 		if t.Pkg() == nil {
 			switch t.Name() {
 			case "error":
-				c.write("error")
+				x.write("error")
 				return
 			case "Pointer":
-				c.write("@\"unsafe\".Pointer")
+				x.write("@\"unsafe\".Pointer")
 				return
 			}
 		}
-		if t.Pkg() == c.pkg || t.Pkg() == nil {
-			c.write("@\"\".")
+		if t.Pkg() == x.pkg || t.Pkg() == nil {
+			x.write("@\"\".")
 		} else {
-			c.write("@\"%s\".", t.Pkg().Path())
+			x.write("@\"%s\".", t.Pkg().Path())
 		}
-		c.write(t.Name())
+		x.write(t.Name())
 	case *types.Named:
-		c.exportName(t.Obj())
+		x.exportName(t.Obj())
 	case *types.Slice:
-		c.write("[]")
-		c.exportName(t.Elem())
+		x.write("[]")
+		x.exportName(t.Elem())
 	case *types.Pointer:
-		c.write("*")
-		c.exportName(t.Elem())
+		x.write("*")
+		x.exportName(t.Elem())
 	case *types.Map:
-		c.write("map[")
-		c.exportName(t.Key())
-		c.write("]")
-		c.exportName(t.Elem())
+		x.write("map[")
+		x.exportName(t.Key())
+		x.write("]")
+		x.exportName(t.Elem())
 	case *types.Chan:
-		if t.Dir() == ast.RECV {
-			c.write("<-")
+		if t.Dir() == types.RecvOnly {
+			x.write("<-")
 		}
-		c.write("chan")
-		if t.Dir() == ast.SEND {
-			c.write("<-")
+		x.write("chan")
+		if t.Dir() == types.SendOnly {
+			x.write("<-")
 		}
-		c.write(" ")
-		c.exportName(t.Elem())
+		x.write(" ")
+		x.exportName(t.Elem())
 	case *ast.BasicLit:
 		var b big.Rat
 
@@ -175,7 +94,7 @@ func (c *exporter) exportName(t interface{}) {
 		num, denom := b.Num(), b.Denom()
 
 		if denom.Int64() == 1 {
-			c.write("%d", num.Int64())
+			x.write("%d", num.Int64())
 			return
 		}
 
@@ -232,15 +151,16 @@ func (c *exporter) exportName(t interface{}) {
 		// and 23 is the number of fractional bits used by the IEEE_754-2008 binary32 format.
 		const fractional_accuracy_bits = 23
 		exp := num.BitLen() + denom.BitLen() + fractional_accuracy_bits
+		exporter := x
 		x := big.NewInt(2)
 		x.Exp(x, big.NewInt(int64(exp)), nil)
 		x.Mul(x, num)
 		x.Div(x, denom)
-		c.write("%dp-%d", x, exp)
+		exporter.write("%dp-%d", x, exp)
 	case *types.Tuple:
 		for i := 0; i < t.Len(); i++ {
 			if i > 0 {
-				c.write(", ")
+				x.write(", ")
 			}
 			ta := t.At(i)
 			n := ta.Name()
@@ -249,22 +169,22 @@ func (c *exporter) exportName(t interface{}) {
 			} else {
 				n = `@"".` + n
 			}
-			c.write(n)
-			c.write(" ")
-			c.exportName(ta.Type())
+			x.write(n)
+			x.write(" ")
+			x.exportName(ta.Type())
 		}
 	case *types.Signature:
-		if c.writeFunc {
-			c.write("func")
+		if x.writeFunc {
+			x.write("func")
 		} else {
-			c.writeFunc = true
+			x.writeFunc = true
 		}
-		c.write("(")
+		x.write("(")
 		if p := t.Params(); p != nil {
 			if t.IsVariadic() {
 				for i := 0; i < p.Len(); i++ {
 					if i > 0 {
-						c.write(", ")
+						x.write(", ")
 					}
 					ta := p.At(i)
 					n := ta.Name()
@@ -273,70 +193,70 @@ func (c *exporter) exportName(t interface{}) {
 					} else {
 						n = `@"".` + n
 					}
-					c.write(n)
-					c.write(" ")
+					x.write(n)
+					x.write(" ")
 					ty := ta.Type()
 					if i+1 == p.Len() {
-						c.write("...")
+						x.write("...")
 						ty = ty.(*types.Slice).Elem()
 					}
-					c.exportName(ty)
+					x.exportName(ty)
 				}
 			} else {
-				c.exportName(p)
+				x.exportName(p)
 			}
 		}
-		c.write(")")
+		x.write(")")
 		if r := t.Results(); r != nil {
-			c.write("(")
-			c.exportName(r)
-			c.write(")")
+			x.write("(")
+			x.exportName(r)
+			x.write(")")
 		}
 	case *types.Struct:
-		c.write("struct { ")
+		x.write("struct { ")
 		for i := 0; i < t.NumFields(); i++ {
 			if i > 0 {
-				c.write("; ")
+				x.write("; ")
 			}
 			f := t.Field(i)
-			c.exportName(f)
+			x.exportName(f)
 		}
-		c.write(" }")
+		x.write(" }")
 	case *types.Array:
-		c.write("[%d]", t.Len())
-		c.exportName(t.Elem())
+		x.write("[%d]", t.Len())
+		x.exportName(t.Elem())
 	case *types.Interface:
-		c.write("interface { ")
+		x.write("interface { ")
 		for i := 0; i < t.NumMethods(); i++ {
 			if i > 0 {
-				c.write("; ")
+				x.write("; ")
 			}
 			m := t.Method(i)
-			c.write(m.Name())
-			c.writeFunc = false
-			c.exportName(m.Type())
+			x.write(m.Name())
+			x.writeFunc = false
+			x.exportName(m.Type())
 		}
-		c.write(" }")
+		x.write(" }")
 	default:
 		panic(fmt.Sprintf("UNHANDLED %T", t))
 	}
 }
 
-func (c *exporter) write(a string, b ...interface{}) {
-	if _, err := io.WriteString(c.writer, fmt.Sprintf(a, b...)); err != nil {
+func (x *exporter) write(a string, b ...interface{}) {
+	if _, err := io.WriteString(x.writer, fmt.Sprintf(a, b...)); err != nil {
 		panic(err)
 	}
 }
 
-func (c *exporter) exportObject(obj types.Object) {
+func (x *exporter) exportObject(obj types.Object) {
 	switch t := obj.(type) {
 	case *types.Var:
 		if !obj.IsExported() {
 			return
 		}
-		c.write("\tvar @\"\".%s ", obj.Name())
-		c.exportName(obj.Type())
-		c.write("\n")
+		x.write("\tvar @\"\".%s ", obj.Name())
+		x.exportName(obj.Type())
+		x.write("\n")
 	case *types.Func:
 		sig := t.Type().(*types.Signature)
 		recv := sig.Recv()
@@ -356,26 +276,26 @@ func (c *exporter) exportObject(obj types.Object) {
 			// To be clear; exporting *all* receiver methods is a superset of the methods
 			// that must be exported.
 		}
-		c.write("\tfunc ")
+		x.write("\tfunc ")
 
 		if recv != nil {
-			c.write("(")
-			c.exportName(recv)
-			c.write(") ")
+			x.write("(")
+			x.exportName(recv)
+			x.write(") ")
 		}
-		c.write(`@"".%s`, t.Name())
-		c.writeFunc = false
-		c.exportName(sig)
-		c.write("\n")
+		x.write(`@"".%s`, t.Name())
+		x.writeFunc = false
+		x.exportName(sig)
+		x.write("\n")
 	case *types.Const:
 		if !t.IsExported() {
 			return
 		}
-		c.write("\tconst @\"\".%s ", t.Name())
-		c.exportName(t.Type())
-		c.write(" = ")
-		c.exportName(t.Val())
-		c.write("\n")
+		x.write("\tconst @\"\".%s ", t.Name())
+		x.exportName(t.Type())
+		x.write(" = ")
+		x.exportName(t.Val())
+		x.write("\n")
 	case *types.TypeName:
 		// Some types that are not exported outside of the package actually
 		// need to be exported for the compiler.
@@ -389,41 +309,50 @@ func (c *exporter) exportObject(obj types.Object) {
 		//
 		// To be clear; exporting *all* types is a superset of the types
 		// that must be exported.
-		c.write("\ttype @\"\".%s ", obj.Name())
-		c.exportName(obj.Type().Underlying())
-		c.write("\n")
+		x.write("\ttype @\"\".%s ", obj.Name())
+		x.exportName(obj.Type().Underlying())
+		x.write("\n")
 		if u, ok := obj.Type().(*types.Named); ok {
 			for i := 0; i < u.NumMethods(); i++ {
 				m := u.Method(i)
-				c.exportObject(m)
+				x.exportObject(m)
 			}
 		}
 	default:
 		panic(fmt.Sprintf("UNHANDLED %T", t))
 	}
-
 }
 
-func (c *exporter) Export(pkg *types.Package) error {
-	c.pkg = pkg
-	c.writeFunc = true
-	f2, err := os.Create(c.compiler.packageExportsFile(pkg.Path()))
+func (x *exporter) export(pkg *types.Package) error {
+	x.pkg = pkg
+	x.writeFunc = true
+	exportsFile := packageExportsFile(x.context, pkg.Path())
+	err := os.MkdirAll(filepath.Dir(exportsFile), 0755)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	f2, err := os.Create(exportsFile)
 	if err != nil {
 		return err
 	}
 	defer f2.Close()
-	c.writer = f2
-	c.write("package %s\n", pkg.Name())
-	for _, imp := range c.pkg.Imports() {
-		c.write("\timport %s \"%s\"\n", imp.Name(), imp.Path())
+	x.writer = f2
+	x.write("package %s\n", pkg.Name())
+	for _, imp := range pkg.Imports() {
+		x.write("\timport %s \"%s\"\n", imp.Name(), imp.Path())
 	}
-
 	for _, n := range pkg.Scope().Names() {
 		if obj := pkg.Scope().Lookup(n); obj != nil {
-			c.exportObject(obj)
+			x.exportObject(obj)
 		}
 	}
-
-	c.write("$$")
+	x.write("$$")
 	return nil
+}
+
+// Export generates a file containing package export data
+// suitable for importing with Importer.Import.
+func Export(ctx *build.Context, pkg *types.Package) error {
+	x := &exporter{context: ctx}
+	return x.export(pkg)
 }

@@ -9,14 +9,8 @@ import (
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 	"go/token"
 )
-
-// Resolver is an interface for resolving AST objects to values.
-type Resolver interface {
-	Resolve(*ast.Ident) Value
-}
 
 // Value is an interface for representing values returned by Go expressions.
 type Value interface {
@@ -42,22 +36,22 @@ type Value interface {
 // expression.
 type LLVMValue struct {
 	compiler *compiler
-	method   types.Object // method object, used in method value conversion
 	value    llvm.Value
 	typ      types.Type
-	pointer  *LLVMValue // Pointer value that dereferenced to this value.
-	stack    *LLVMValue // If a stack value, the Value for the containing function.
+}
+
+func (v LLVMValue) String() string {
+	return fmt.Sprintf("[llgo.LLVMValue typ:%s value:%v]", v.typ, v.value)
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
 func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{c, nil, v, t, nil, nil}
+	return &LLVMValue{c, v, t}
 }
 
 func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	switch {
-	case v.Kind() == exact.Unknown:
-		// TODO nil literals should be represented more appropriately once the exact-package supports it.
+	case v == nil:
 		llvmtyp := c.types.ToLLVM(typ)
 		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
 
@@ -152,7 +146,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		}
 	}
 
-	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", c.types.TypeString(typ), typ, v, v))
+	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", typ, typ, v, v))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -168,44 +162,20 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	c := lhs.compiler
 	b := lhs.compiler.builder
 
-	// We can avoid various runtime calls by treating
-	// nil specially. For all nil-able types, nil is
-	// equivalent to the zero value.
 	rhs := rhs_.(*LLVMValue)
-	rhsisnil := rhs.pointer == nil && rhs.LLVMValue().IsNull()
-
 	switch typ := lhs.typ.Underlying().(type) {
 	case *types.Struct:
-		element_types_count := lhs.LLVMValue().Type().StructElementTypesCount()
-		if element_types_count > 0 {
-			t := typ.Field(0).Type()
-			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
-			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
-			first := first_lhs.BinaryOp(op, first_rhs)
-
-			result := first
-			for i := 1; i < element_types_count; i++ {
-				result = c.compileLogicalOp(token.LAND, result, func() Value {
-					t := typ.Field(i).Type()
-					lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
-					rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-					return lhs.BinaryOp(op, rhs)
-				})
-			}
-			return result
+		// TODO(axw) use runtime equality algorithm (will be suitably inlined).
+		// For now, we use compare all fields unconditionally and bitwise AND
+		// to avoid branching (i.e. so we don't create additional blocks).
+		var value Value = c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+		for i := 0; i < typ.NumFields(); i++ {
+			t := typ.Field(i).Type()
+			lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+			rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
+			value = value.BinaryOp(token.AND, lhs.BinaryOp(token.EQL, rhs))
 		}
-
-	case *types.Interface:
-		if rhsisnil {
-			typeNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-			valueNull := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 1, ""), "")
-			result := b.CreateAnd(typeNull, valueNull, "")
-			return c.NewValue(result, types.Typ[types.Bool])
-		}
-		if _, ok := rhs.typ.Underlying().(*types.Interface); ok {
-			return lhs.compareI2I(rhs)
-		}
-		return lhs.compareI2V(rhs)
+		return value
 
 	case *types.Slice:
 		// []T == nil
@@ -216,6 +186,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// func == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
 		return c.NewValue(isnil, types.Typ[types.Bool])
+
+	case *types.Interface:
+		return c.compareInterfaces(lhs, rhs)
 	}
 
 	// Strings.
@@ -407,41 +380,21 @@ func (lhs *LLVMValue) shift(rhs *LLVMValue, op token.Token) *LLVMValue {
 	lhsval := lhs.LLVMValue()
 	bits := rhs.LLVMValue()
 	unsigned := isUnsigned(lhs.Type())
-	if !bits.IsAConstant().IsNil() {
-		if bits.ZExtValue() >= uint64(lhsval.Type().IntTypeWidth()) {
-			var fix llvm.Value
-			if unsigned || op == token.SHL {
-				fix = llvm.ConstNull(lhsval.Type())
-			} else {
-				fix = llvm.ConstAllOnes(lhsval.Type())
-			}
-			return lhs.compiler.NewValue(fix, lhs.typ)
-		}
-	}
 	b := lhs.compiler.builder
+	// Shifting >= width of lhs yields undefined behaviour, so we must select.
+	max := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()-1), false)
 	var result llvm.Value
-	if op == token.SHL {
-		result = b.CreateShl(lhsval, bits, "")
+	if !unsigned && op == token.SHR {
+		bits := b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), bits, max, "")
+		result = b.CreateAShr(lhsval, bits, "")
 	} else {
-		if unsigned {
+		if op == token.SHL {
+			result = b.CreateShl(lhsval, bits, "")
+		} else {
 			result = b.CreateLShr(lhsval, bits, "")
-		} else {
-			result = b.CreateAShr(lhsval, bits, "")
 		}
-	}
-	if bits.IsAConstant().IsNil() {
-		// Shifting >= the width of the lhs
-		// yields undefined behaviour, so we
-		// must generate runtime branching logic.
-		width := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()), false)
-		less := b.CreateICmp(llvm.IntULT, bits, width, "")
-		var fix llvm.Value
-		if unsigned || op == token.SHL {
-			fix = llvm.ConstNull(lhsval.Type())
-		} else {
-			fix = llvm.ConstAllOnes(lhsval.Type())
-		}
-		result = b.CreateSelect(less, result, fix, "")
+		zero := llvm.ConstNull(lhsval.Type())
+		result = b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), result, zero, "")
 	}
 	return lhs.compiler.NewValue(result, lhs.typ)
 }
@@ -460,18 +413,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		return v.compiler.NewValue(value, v.typ)
 	case token.ADD:
 		return v // No-op
-	case token.AND:
-		if typ, ok := v.typ.Underlying().(*types.Pointer); ok {
-			if typ.Elem().Underlying() == typ {
-				// Taking the address of a recursive pointer
-				// yields a value with the same type.
-				value := v.pointer.value
-				basetyp := value.Type().ElementType()
-				value = b.CreateBitCast(value, basetyp, "")
-				return v.compiler.NewValue(value, v.typ)
-			}
-		}
-		return v.pointer
 	case token.NOT:
 		value := b.CreateNot(v.LLVMValue(), "")
 		return v.compiler.NewValue(value, v.typ)
@@ -480,9 +421,6 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 		rhs := llvm.ConstAllOnes(lhs.Type())
 		value := b.CreateXor(lhs, rhs, "")
 		return v.compiler.NewValue(value, v.typ)
-	case token.ARROW:
-		value, _ := v.chanRecv(false)
-		return value
 	default:
 		panic(fmt.Sprintf("Unhandled operator: %s", op))
 	}
@@ -503,16 +441,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.IsIdentical(srctyp, dsttyp) {
-		// A method converted to a function type without the
-		// receiver is where we convert a "method value" into a
-		// function.
-		if srctyp, ok := srctyp.(*types.Signature); ok && srctyp.Recv() != nil {
-			if dsttyp, ok := dsttyp.(*types.Signature); ok && dsttyp.Recv() == nil {
-				return v.convertMethodValue(origdsttyp)
-			}
-		}
-
-		// TODO avoid load here by reusing pointer value, if exists.
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
 
@@ -525,20 +453,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 				return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 			}
 		}
-	}
-
-	// Convert from an interface type.
-	if _, isinterface := srctyp.(*types.Interface); isinterface {
-		if interface_, isinterface := dsttyp.(*types.Interface); isinterface {
-			return v.mustConvertI2I(interface_)
-		} else {
-			return v.mustConvertI2V(origdsttyp)
-		}
-	}
-
-	// Converting to an interface type.
-	if interface_, isinterface := dsttyp.(*types.Interface); isinterface {
-		return v.convertV2I(interface_)
 	}
 
 	byteslice := types.NewSlice(types.Typ[types.Byte])
@@ -561,14 +475,14 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 			// Data must be copied, to prevent changes in
 			// the byte slice from mutating the string.
-			newdata := c.builder.CreateArrayMalloc(strdata.Type().ElementType(), strlen, "")
-			memcpy := c.NamedFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
+			newdata := c.createMalloc(strlen)
+			memcpy := c.runtime.memcpy.LLVMValue()
 			c.builder.CreateCall(memcpy, []llvm.Value{
-				c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+				newdata,
 				c.builder.CreatePtrToInt(strdata, c.target.IntPtrType(), ""),
 				strlen,
 			}, "")
-			strdata = newdata
+			strdata = c.builder.CreateIntToPtr(newdata, strdata.Type(), "")
 
 			struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
 			struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
@@ -592,14 +506,14 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 		// Data must be copied, to prevent changes in
 		// the byte slice from mutating the string.
-		newdata := c.builder.CreateArrayMalloc(data.Type().ElementType(), len, "")
-		memcpy := c.NamedFunction("runtime.memcpy", "func(uintptr, uintptr, uintptr)")
+		newdata := c.createMalloc(len)
+		memcpy := c.runtime.memcpy.LLVMValue()
 		c.builder.CreateCall(memcpy, []llvm.Value{
-			c.builder.CreatePtrToInt(newdata, c.target.IntPtrType(), ""),
+			newdata,
 			c.builder.CreatePtrToInt(data, c.target.IntPtrType(), ""),
 			len,
 		}, "")
-		data = newdata
+		data = c.builder.CreateIntToPtr(newdata, data.Type(), "")
 
 		struct_ := llvm.Undef(c.types.ToLLVM(types.Typ[types.String]))
 		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")
@@ -648,8 +562,11 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			delta := srcBits - dstBits
 			switch {
 			case delta < 0:
-				// TODO check if (un)signed, use S/ZExt accordingly.
-				lv = b.CreateZExt(lv, llvm_type, "")
+				if !isUnsigned(srctyp) {
+					lv = b.CreateSExt(lv, llvm_type, "")
+				} else {
+					lv = b.CreateZExt(lv, llvm_type, "")
+				}
 			case delta > 0:
 				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
@@ -696,13 +613,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	// (checked above), we can assume the destination type is the alternate
 	// complex type.
 	if isComplex(srctyp) {
-		var fpcast func(*Builder, llvm.Value, llvm.Type, string) llvm.Value
+		var fpcast func(llvm.Builder, llvm.Value, llvm.Type, string) llvm.Value
 		var fptype llvm.Type
 		if srctyp == types.Typ[types.Complex64] {
-			fpcast = (*Builder).CreateFPExt
+			fpcast = (llvm.Builder).CreateFPExt
 			fptype = llvm.DoubleType()
 		} else {
-			fpcast = (*Builder).CreateFPTrunc
+			fpcast = (llvm.Builder).CreateFPTrunc
 			fptype = llvm.FloatType()
 		}
 		if fpcast != nil {
@@ -716,75 +633,15 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			return v.compiler.NewValue(lv, origdsttyp)
 		}
 	}
-
-	srcstr := v.compiler.types.TypeString(v.typ)
-	dststr := v.compiler.types.TypeString(origdsttyp)
-	panic(fmt.Sprintf("unimplemented conversion: %s -> %s", srcstr, dststr))
-}
-
-func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
-	b := v.compiler.builder
-	dstlt := v.compiler.types.ToLLVM(dsttyp)
-	dstltelems := dstlt.StructElementTypes()
-
-	srclv := v.LLVMValue()
-	fnptr := b.CreateExtractValue(srclv, 0, "")
-	fnctx := b.CreateExtractValue(srclv, 1, "")
-
-	// TODO(axw) There's a lot of overlap between this
-	// and the code that converts concrete methods to
-	// interface methods. Refactor.
-	if fnctx.Type().TypeKind() == llvm.PointerTypeKind {
-		fnctx = b.CreateBitCast(fnctx, dstltelems[1], "")
-	} else {
-		c := v.compiler
-		ptrsize := c.target.PointerSize()
-		if c.target.TypeStoreSize(fnctx.Type()) <= uint64(ptrsize) {
-			bits := c.target.TypeSizeInBits(fnctx.Type())
-			if bits > 0 {
-				fnctx = c.coerce(fnctx, llvm.IntType(int(bits)))
-				fnctx = b.CreateIntToPtr(fnctx, dstltelems[1], "")
-			} else {
-				fnctx = llvm.ConstNull(dstltelems[1])
-			}
-		} else {
-			ptr := c.createTypeMalloc(fnctx.Type())
-			b.CreateStore(fnctx, ptr)
-			fnctx = b.CreateBitCast(ptr, dstltelems[1], "")
-
-			// Switch to the pointer-receiver method.
-			methodset := c.methods(v.Type().(*types.Signature).Recv().Type())
-			ptrmethod := methodset.lookup(v.method.Name(), true)
-			if f, ok := ptrmethod.(*types.Func); ok {
-				ptrmethod = c.methodfunc(f)
-			}
-			lv := c.Resolve(c.objectdata[ptrmethod].Ident).LLVMValue()
-			fnptr = c.builder.CreateExtractValue(lv, 0, "")
-		}
-	}
-
-	dstlv := llvm.Undef(dstlt)
-	fnptr = b.CreateBitCast(fnptr, dstltelems[0], "")
-	dstlv = b.CreateInsertValue(dstlv, fnptr, 0, "")
-	dstlv = b.CreateInsertValue(dstlv, fnctx, 1, "")
-	return v.compiler.NewValue(dstlv, dsttyp)
+	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", v.typ, lv.Type(), origdsttyp))
 }
 
 func (v *LLVMValue) LLVMValue() llvm.Value {
-	if v.pointer != nil {
-		return v.compiler.builder.CreateLoad(v.pointer.LLVMValue(), "")
-	}
 	return v.value
 }
 
 func (v *LLVMValue) Type() types.Type {
 	return v.typ
-}
-
-func (v *LLVMValue) makePointee() *LLVMValue {
-	t := v.compiler.NewValue(llvm.Value{}, v.typ.Underlying().(*types.Pointer).Elem())
-	t.pointer = v
-	return t
 }
 
 func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {

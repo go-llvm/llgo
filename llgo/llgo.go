@@ -15,15 +15,11 @@ import (
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"github.com/axw/llgo"
-	"go/ast"
-	"go/parser"
 	"go/scanner"
-	"go/token"
 	"log"
 	"os"
 	"runtime"
 	"sort"
-	"strings"
 )
 
 var dump = flag.Bool(
@@ -57,64 +53,8 @@ func report(err error) {
 	exitCode = 2
 }
 
-func parseFile(fset *token.FileSet, filename string) *ast.File {
-	// parse entire file
-	mode := parser.DeclarationErrors | parser.ParseComments
-	//if *allErrors {
-	//    mode |= parser.SpuriousErrors
-	//}
-	//if *printTrace {
-	//    mode |= parser.Trace
-	//}
-	file, err := parser.ParseFile(fset, filename, nil, mode)
-	if err != nil {
-		report(err)
-		return nil
-	}
-	return file
-}
-
-func parseFiles(fset *token.FileSet, filenames []string) (files []*ast.File) {
-	sort.Strings(filenames)
-	for i, filename := range filenames {
-		if i > 0 && filenames[i-1] == filename {
-			report(errors.New(fmt.Sprintf("%q: duplicate file", filename)))
-		} else {
-			file := parseFile(fset, filename)
-			if file != nil {
-				files = append(files, file)
-			}
-		}
-	}
-	return
-}
-
-func isGoFilename(filename string) bool {
-	// ignore non-Go files
-	return !strings.HasPrefix(filename, ".") &&
-		strings.HasSuffix(filename, ".go")
-}
-
 func compileFiles(compiler llgo.Compiler, filenames []string, importpath string) (*llgo.Module, error) {
-	i := 0
-	for _, filename := range filenames {
-		switch _, err := os.Stat(filename); {
-		case err != nil:
-			report(err)
-		default:
-			filenames[i] = filename
-			i++
-		}
-	}
-	if i == 0 {
-		return nil, errors.New("No Go source files were specified")
-	}
-	fset := token.NewFileSet()
-	files := parseFiles(fset, filenames[0:i])
-	if files == nil {
-		return nil, errors.New("No files parsed")
-	}
-	return compiler.Compile(fset, files, importpath)
+	return compiler.Compile(filenames, importpath)
 }
 
 func writeObjectFile(m *llgo.Module) error {
@@ -236,8 +176,11 @@ func computeTriple() string {
 
 func initCompiler() (llgo.Compiler, error) {
 	opts := llgo.CompilerOptions{TargetTriple: computeTriple()}
-	if *trace {
+	if *trace || os.Getenv("LLGO_TRACE") == "1" {
 		opts.Logger = log.New(os.Stderr, "", 0)
+	}
+	if os.Getenv("LLGO_ORDERED_COMPILATION") == "1" {
+		opts.OrderedCompilation = true
 	}
 	opts.GenerateDebug = *generateDebug
 	return llgo.NewCompiler(opts)
@@ -258,12 +201,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	opts := llgo.CompilerOptions{}
-	opts.TargetTriple = computeTriple()
-	if *trace {
-		opts.Logger = log.New(os.Stderr, "", 0)
-	}
-
 	compiler, err := initCompiler()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "initCompiler failed: %s\n", err)
@@ -281,6 +218,7 @@ func main() {
 				err := writeObjectFile(module)
 				if err != nil {
 					fmt.Println(err)
+					exitCode = 1
 				}
 			}
 		}

@@ -26,7 +26,7 @@ SOFTWARE.
 #include <pthread.h>
 #include <stdlib.h>
 
-void go(struct Func) LLGO_ASM_EXPORT("runtime.go");
+void Go(struct Func) LLGO_ASM_EXPORT("runtime.Go");
 
 static void* call_gofunction(void *arg)
 {
@@ -36,7 +36,7 @@ static void* call_gofunction(void *arg)
     return NULL;
 }
 
-void go(struct Func f) {
+void Go(struct Func f) {
     pthread_t thread;
     pthread_attr_t attr;
     struct Func *f_ = malloc(sizeof(struct Func));

@@ -5,22 +5,33 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
+
+	"code.google.com/p/go.tools/go/exact"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
-	"go/ast"
 )
 
-func getprintf(module llvm.Module) llvm.Value {
+func getPrintf(module llvm.Module) llvm.Value {
 	printf := module.NamedFunction("printf")
 	if printf.IsNil() {
-		CharPtr := llvm.PointerType(llvm.Int8Type(), 0)
-		fn_type := llvm.FunctionType(
-			llvm.Int32Type(), []llvm.Type{CharPtr}, true)
-		printf = llvm.AddFunction(module, "printf", fn_type)
+		charPtr := llvm.PointerType(llvm.Int8Type(), 0)
+		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{charPtr}, true)
+		printf = llvm.AddFunction(module, "printf", ftyp)
 		printf.SetFunctionCallConv(llvm.CCallConv)
 	}
 	return printf
+}
+
+func getFflush(module llvm.Module) llvm.Value {
+	fflush := module.NamedFunction("fflush")
+	if fflush.IsNil() {
+		voidPtr := llvm.PointerType(llvm.Int8Type(), 0)
+		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{voidPtr}, false)
+		fflush = llvm.AddFunction(module, "fflush", ftyp)
+		fflush.SetFunctionCallConv(llvm.CCallConv)
+	}
+	return fflush
 }
 
 func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
@@ -45,7 +56,7 @@ func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
 	return result
 }
 
-func (c *compiler) printValues(println_ bool, values ...Value) Value {
+func (c *compiler) printValues(println_ bool, values ...Value) {
 	var args []llvm.Value = nil
 	if len(values) > 0 {
 		format := ""
@@ -88,7 +99,7 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
 					fallthrough
 				case types.Float64:
-					printfloat := c.NamedFunction("runtime.printfloat", "func(float64) string")
+					printfloat := c.runtime.printfloat.LLVMValue()
 					args := []llvm.Value{llvm_value}
 					llvm_value = c.builder.CreateCall(printfloat, args, "")
 					fallthrough
@@ -119,13 +130,9 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 				//     Create an internal constant if it's a constant array, or
 				//     Create space on the stack and store it there.
 				init_ := value.(*LLVMValue)
-				if init_.pointer != nil {
-					llvm_value = init_.pointer.LLVMValue()
-				} else {
-					init_value := init_.LLVMValue()
-					llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
-					c.builder.CreateStore(init_value, llvm_value)
-				}
+				init_value := init_.LLVMValue()
+				llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
+				c.builder.CreateStore(init_value, llvm_value)
 				// FIXME don't assume string...
 				format += "%s"
 
@@ -150,27 +157,14 @@ func (c *compiler) printValues(println_ bool, values ...Value) Value {
 		}
 		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
 	}
-	printf := getprintf(c.module.Module)
-	result := c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
-	fflush := c.NamedFunction("fflush", "func(*int32) int32")
-	c.builder.CreateCall(fflush, []llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int32Type(), 0))}, "")
-	return result
+	printf := getPrintf(c.module.Module)
+	c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
+	fflush := getFflush(c.module.Module)
+	fileptr := llvm.ConstNull(fflush.Type().ElementType().ParamTypes()[0])
+	c.builder.CreateCall(fflush, []llvm.Value{fileptr}, "")
 }
 
-func (c *compiler) visitPrint(expr *ast.CallExpr) Value {
-	var values []Value
-	for _, arg := range expr.Args {
-		values = append(values, c.VisitExpr(arg))
-	}
-	return c.printValues(false, values...)
+func (c *compiler) printf(format string, args ...interface{}) {
+	s := exact.MakeString(fmt.Sprintf(format, args...))
+	c.printValues(true, c.NewConstValue(s, types.Typ[types.String]))
 }
-
-func (c *compiler) visitPrintln(expr *ast.CallExpr) Value {
-	var values []Value
-	for _, arg := range expr.Args {
-		values = append(values, c.VisitExpr(arg))
-	}
-	return c.printValues(true, values...)
-}
-
-// vim: set ft=go :

@@ -6,14 +6,10 @@ package runtime
 
 import "unsafe"
 
-type map_ struct {
-	length int32
-	head   *mapentry
-}
+type map_ []*mapentry
 
 type mapentry struct {
-	next *mapentry
-	// after this comes the key, then the value.
+	// first comes the key, then the value.
 }
 
 // #llgo name: reflect.ismapkey
@@ -24,39 +20,28 @@ func reflect_ismapkey(t *rtype) bool {
 
 // #llgo name: reflect.makemap
 func reflect_makemap(t *map_) unsafe.Pointer {
-	return makemap(unsafe.Pointer(t), 0, 0, 0)
+	return makemap(unsafe.Pointer(t), 0)
 }
 
-func makemap(t unsafe.Pointer, n int, keys, values uintptr) unsafe.Pointer {
+func makemap(t unsafe.Pointer, cap int) unsafe.Pointer {
 	m := (*map_)(malloc(uintptr(unsafe.Sizeof(map_{}))))
-	if m != nil {
-		m.length = 0
-		m.head = nil
-		maptyp := (*mapType)(t)
-		for i := 0; i < n; i++ {
-			reflect_mapassign(maptyp, unsafe.Pointer(m), unsafe.Pointer(keys), unsafe.Pointer(values), true)
-			keys = align(keys+maptyp.key.size, uintptr(maptyp.key.align))
-			values = align(values+maptyp.elem.size, uintptr(maptyp.elem.align))
-		}
-	}
 	return unsafe.Pointer(m)
 }
 
 // #llgo name: reflect.maplen
 func reflect_maplen(m unsafe.Pointer) int32 {
-	return int32(maplen((*map_)(m)))
+	return int32(maplen(m))
 }
 
-func maplen(m *map_) int {
+func maplen(m unsafe.Pointer) int {
 	if m != nil {
-		return int(m.length)
+		return len(*(*map_)(m))
 	}
 	return 0
 }
 
 // #llgo name: reflect.mapassign
-func reflect_mapassign(t *mapType, m_, key, val unsafe.Pointer, ok bool) {
-	m := (*map_)(m_)
+func reflect_mapassign(t *mapType, m, key, val unsafe.Pointer, ok bool) {
 	if ok {
 		ptr := maplookup(unsafe.Pointer(t), m, key, true)
 		// TODO use copy alg
@@ -67,19 +52,34 @@ func reflect_mapassign(t *mapType, m_, key, val unsafe.Pointer, ok bool) {
 }
 
 // #llgo name: reflect.mapaccess
-func reflect_mapaccess(t *rtype, m_, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
-	m := (*map_)(m_)
+func reflect_mapaccess(t *rtype, m, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	ptr := maplookup(unsafe.Pointer(t), m, key, false)
 	return ptr, ptr != nil
 }
 
-func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsafe.Pointer {
-	if m == nil {
+// mapaccess copies the value for the given key out if that key exists,
+// else nil. The return value is true iff the key exists.
+func mapaccess(t unsafe.Pointer, m_, key, outval unsafe.Pointer) bool {
+	maptyp := (*mapType)(t)
+	elemsize := uintptr(maptyp.elem.size)
+	ptr := maplookup(t, m_, key, false)
+	if ptr != nil {
+		memcpy(outval, ptr, elemsize)
+		return true
+	}
+	bzero(outval, elemsize)
+	return false
+}
+
+// maplookup returns a pointer to the value for the given key
+func maplookup(t unsafe.Pointer, m_, key unsafe.Pointer, insert bool) unsafe.Pointer {
+	if m_ == nil {
 		return nil
 	}
+	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
-	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+	ptrsize := uintptr(unsafe.Sizeof(m_))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 	elemsize := uintptr(maptyp.elem.size)
@@ -90,42 +90,36 @@ func maplookup(t unsafe.Pointer, m *map_, key unsafe.Pointer, insert bool) unsaf
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
 	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
-	var last *mapentry
-	for ptr := m.head; ptr != nil; ptr = ptr.next {
+	for i := 0; i < len(*m); i++ {
+		ptr := (*m)[i]
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		if eqalg(keyeqfun, keysize, key, keyptr) {
 			elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
 			return elemptr
 		}
-		last = ptr
 	}
 
 	// Not found: insert the key if requested.
 	if insert {
 		newentry := (*mapentry)(malloc(entrysize))
-		newentry.next = nil
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + keyoffset)
 		elemptr := unsafe.Pointer(uintptr(unsafe.Pointer(newentry)) + elemoffset)
 		memcpy(keyptr, key, keysize)
-		if last != nil {
-			last.next = newentry
-		} else {
-			m.head = newentry
-		}
-		m.length++
+		*m = append(*m, newentry)
 		return elemptr
 	}
 
 	return nil
 }
 
-func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
-	if m == nil {
+func mapdelete(t unsafe.Pointer, m_, key unsafe.Pointer) {
+	if m_ == nil {
 		return
 	}
+	m := (*map_)(m_)
 
 	maptyp := (*mapType)(t)
-	ptrsize := uintptr(unsafe.Sizeof(m.head.next))
+	ptrsize := uintptr(unsafe.Sizeof(m_))
 	keysize := uintptr(maptyp.key.size)
 	keyoffset := align(ptrsize, uintptr(maptyp.key.align))
 
@@ -133,20 +127,18 @@ func mapdelete(t unsafe.Pointer, m *map_, key unsafe.Pointer) {
 	keyalgs := unsafe.Pointer(maptyp.key.alg)
 	keyeqptr := unsafe.Pointer(uintptr(keyalgs) + unsafe.Sizeof(maptyp.key.alg))
 	keyeqfun := *(*unsafe.Pointer)(keyeqptr)
-	var last *mapentry
-	for ptr := m.head; ptr != nil; ptr = ptr.next {
+	for i := 0; i < len(*m); i++ {
+		ptr := (*m)[i]
 		keyptr := unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
 		if eqalg(keyeqfun, keysize, key, keyptr) {
-			if last == nil {
-				m.head = ptr.next
-			} else {
-				last.next = ptr.next
+			var tail []*mapentry
+			if len(*m) > i+1 {
+				tail = (*m)[i+1:]
 			}
+			(*m) = append((*m)[:i], tail...)
 			free(unsafe.Pointer(ptr))
-			m.length--
 			return
 		}
-		last = ptr
 	}
 }
 
@@ -167,25 +159,41 @@ func reflect_mapiternext(it *byte) {
 	// TODO
 }
 
-func mapnext(t unsafe.Pointer, m *map_, nextin unsafe.Pointer) (nextout, pk, pv unsafe.Pointer) {
+type mapiter struct {
+	typ *mapType
+	m   *map_
+	i   int
+}
+
+// TODO pass pointer to stack allocated block in
+func mapiterinit(t, m unsafe.Pointer) unsafe.Pointer {
 	if m == nil {
-		return
+		return nil
 	}
-	ptr := (*mapentry)(nextin)
-	if ptr == nil {
-		ptr = m.head
-	} else {
-		ptr = ptr.next
+	iter := (*mapiter)(malloc(unsafe.Sizeof(mapiter{})))
+	iter.typ = (*mapType)(t)
+	iter.m = (*map_)(m)
+	return unsafe.Pointer(iter)
+}
+
+func mapiternext(iter_, pk, pv unsafe.Pointer) bool {
+	if iter_ == nil {
+		return false
 	}
-	if ptr != nil {
-		maptyp := (*mapType)(t)
-		ptrsize := uintptr(unsafe.Sizeof(m.head.next))
-		keysize := uintptr(maptyp.key.size)
-		keyoffset := align(ptrsize, uintptr(maptyp.key.align))
-		elemoffset := align(keyoffset+keysize, uintptr(maptyp.elem.align))
-		nextout = unsafe.Pointer(ptr)
-		pk = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + keyoffset)
-		pv = unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + elemoffset)
+	iter := (*mapiter)(iter_)
+	keysize := uintptr(iter.typ.key.size)
+	elemsize := uintptr(iter.typ.elem.size)
+	if iter.i >= len(*iter.m) {
+		bzero(pk, keysize)
+		bzero(pv, elemsize)
+		return false
 	}
-	return
+	entry := (*iter.m)[iter.i]
+	iter.i++
+	ptrsize := uintptr(unsafe.Sizeof(entry))
+	keyoffset := align(ptrsize, uintptr(iter.typ.key.align))
+	elemoffset := align(keyoffset+keysize, uintptr(iter.typ.elem.align))
+	memcpy(pk, unsafe.Pointer(uintptr(unsafe.Pointer(entry))+keyoffset), keysize)
+	memcpy(pv, unsafe.Pointer(uintptr(unsafe.Pointer(entry))+elemoffset), elemsize)
+	return true
 }

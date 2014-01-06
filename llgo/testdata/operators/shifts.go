@@ -1,20 +1,22 @@
 package main
 
-func testShrUint32() {
-	var u uint32 = 0xFFFFFFFF
-	println(u >> 1) // should be zero-filled
-	println(u >> 32)
-	println(u << 32)
+func testShrUint32(v uint32) {
+	for i := uint(0); i <= 32; i++ {
+		println(v >> i)
+		println(v << i)
+	}
 }
 
-func testShrInt32() {
-	var i int32 = -1
-	println(i >> 1) // should be sign-extended
-	println(i >> 32)
-	println(i << 32)
+func testShrInt32(v int32) {
+	for i := uint(0); i <= 32; i++ {
+		println(v >> i)
+		println(v << i)
+	}
 }
 
 func main() {
-	testShrUint32()
-	testShrInt32()
+	testShrUint32(0xFFFFFFFF)
+	testShrUint32(0xEFFFFFFF)
+	testShrInt32(-1)
+	testShrInt32(1)
 }

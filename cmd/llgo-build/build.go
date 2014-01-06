@@ -291,6 +291,12 @@ func buildPackage(pkg *build.Package, output string) error {
 		if err != nil {
 			return err
 		}
+		if run {
+			cmd := exec.Command(tempfile)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return runCmd(cmd)
+		}
 	} else if test {
 		if err = linktest(pkg, tempfile); err != nil {
 			return err

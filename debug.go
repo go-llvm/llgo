@@ -40,7 +40,7 @@ func (c *compiler) tollvmDebugDescriptor(t types.Type) llvm.DebugDescriptor {
 		return void_debug_type
 	}
 	bt := &llvm.BasicTypeDescriptor{
-		Name:      c.types.TypeString(t),
+		Name:      t.String(),
 		Size:      uint64(c.types.Sizeof(t) * 8),
 		Alignment: uint64(c.types.Alignof(t) * 8),
 	}

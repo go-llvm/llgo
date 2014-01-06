@@ -67,7 +67,20 @@ func goFilesPackage(gofiles []string) (*build.Package, error) {
 
 func moveFile(src, dst string) error {
 	if printcommands {
-		log.Printf("mv %s %s\n", src, dst)
+		if dst == "-" {
+			log.Printf("cat %s\n", src)
+		} else {
+			log.Printf("mv %s %s\n", src, dst)
+		}
+	}
+	if dst == "-" {
+		fin, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer fin.Close()
+		_, err = io.Copy(os.Stdout, fin)
+		return err
 	}
 	if os.Rename(src, dst) != nil {
 		// rename may fail if the paths are on

@@ -1,5 +1,10 @@
 package main
 
+// FIXME(axw) this is a workaround for lack of support
+// for interfaces. Remove this when we have it.
+func panic(interface{}) {
+}
+
 type T struct {
 	value int
 }
@@ -86,7 +91,12 @@ func f1() {
 	f2()
 }
 
+func builtins() {
+	defer println("ahoy")
+}
+
 func main() {
 	f1()
 	f6()
+	builtins()
 }

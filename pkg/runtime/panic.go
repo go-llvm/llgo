@@ -4,10 +4,16 @@
 
 package runtime
 
-type deferred struct {
-	f      func()
+type defers struct {
+	j      jmp_buf
 	caller uintptr
-	next   *deferred
+	d      *deferred
+	next   *defers
+}
+
+type deferred struct {
+	f    func()
+	next *deferred
 }
 
 type panicstack struct {
@@ -18,8 +24,13 @@ type panicstack struct {
 func panic_(e interface{})
 func caller_region(skip int32) uintptr
 func pushdefer(f func())
+func initdefers(*defers)
 func rundefers()
 func current_panic() *panicstack
+func recover_(int32) interface{}
+
+// #llgo name: llvm.setjmp
+func llvm_setjmp(*int8) int32
 
 // #llgo attr: noinline
 func callniladic(f func()) {

@@ -75,8 +75,7 @@ func parseAttribute(line string) Attribute {
 type linkageAttribute llvm.Linkage
 
 func (a linkageAttribute) Apply(v Value) {
-	global := v.(*LLVMValue).pointer.value
-	global.SetLinkage(llvm.Linkage(a))
+	v.LLVMValue().SetLinkage(llvm.Linkage(a))
 }
 
 func parseLinkageAttribute(value string) linkageAttribute {
@@ -124,7 +123,6 @@ type nameAttribute string
 func (a nameAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
-		fn = llvm.ConstExtractValue(fn, []uint32{0})
 		name := string(a)
 		curr := fn.GlobalParent().NamedFunction(name)
 		if !curr.IsNil() && curr != fn {
@@ -136,8 +134,7 @@ func (a nameAttribute) Apply(v Value) {
 		}
 		fn.SetName(name)
 	} else {
-		global := v.(*LLVMValue).pointer.value
-		global.SetName(string(a))
+		v.LLVMValue().SetName(string(a))
 	}
 }
 
@@ -164,7 +161,6 @@ type llvmAttribute llvm.Attribute
 func (a llvmAttribute) Apply(v Value) {
 	if _, isfunc := v.Type().(*types.Signature); isfunc {
 		fn := v.LLVMValue()
-		fn = llvm.ConstExtractValue(fn, []uint32{0})
 		fn.AddFunctionAttr(llvm.Attribute(a))
 	} else {
 		v.LLVMValue().AddAttribute(llvm.Attribute(a))
@@ -174,6 +170,5 @@ func (a llvmAttribute) Apply(v Value) {
 type tlsAttribute struct{}
 
 func (tlsAttribute) Apply(v Value) {
-	global := v.(*LLVMValue).pointer.value
-	global.SetThreadLocal(true)
+	v.LLVMValue().SetThreadLocal(true)
 }

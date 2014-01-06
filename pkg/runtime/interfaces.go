@@ -6,68 +6,99 @@ package runtime
 
 import "unsafe"
 
-func compareI2I(atyp_, btyp_, aval, bval uintptr) bool {
-	atyp := (*rtype)(unsafe.Pointer(atyp_))
-	btyp := (*rtype)(unsafe.Pointer(btyp_))
-	if eqtyp(atyp, btyp) {
-		algs := unsafe.Pointer(atyp.alg)
+func compareE2E(a, b eface) bool {
+	typesSame := a.rtyp == b.rtyp
+	if !typesSame {
+		if a.rtyp == nil || b.rtyp == nil {
+			// one, but not both nil
+			return false
+		}
+	} else if a.rtyp == nil {
+		// both nil
+		return true
+	}
+	if eqtyp(a.rtyp, b.rtyp) {
+		algs := unsafe.Pointer(a.rtyp.alg)
 		eqPtr := unsafe.Pointer(uintptr(algs) + unsafe.Sizeof(algs))
 		eqFn := *(*unsafe.Pointer)(eqPtr)
 		var avalptr, bvalptr unsafe.Pointer
-		if atyp.size <= unsafe.Sizeof(aval) {
+		if a.rtyp.size <= unsafe.Sizeof(a.data) {
 			// value fits in pointer
-			avalptr = unsafe.Pointer(&aval)
-			bvalptr = unsafe.Pointer(&bval)
+			avalptr = unsafe.Pointer(&a.data)
+			bvalptr = unsafe.Pointer(&b.data)
 		} else {
-			avalptr = unsafe.Pointer(aval)
-			bvalptr = unsafe.Pointer(bval)
+			avalptr = unsafe.Pointer(a.data)
+			bvalptr = unsafe.Pointer(b.data)
 		}
-		return eqalg(eqFn, atyp.size, avalptr, bvalptr)
+		return eqalg(eqFn, a.rtyp.size, avalptr, bvalptr)
 	}
 	return false
 }
 
-// convertI2I takes a target interface type, a source interface value, and
-// attempts to convert the source to the target type, storing the result
-// in the provided structure.
-//
-// FIXME cache type-to-interface conversions.
-func convertI2I(typ_, from_, to_ uintptr) bool {
-	dyntypptr := (**rtype)(unsafe.Pointer(from_))
-	if dyntypptr == nil {
-		return false
+// convertI2E takes a non-empty interface
+// value and converts it to an empty one.
+func convertI2E(i iface) eface {
+	if i.tab == nil {
+		return eface{nil, nil}
 	}
-	dyntyp := *dyntypptr
-	if dyntyp.uncommonType != nil {
-		targettyp := (*interfaceType)(unsafe.Pointer(typ_))
-		if len(targettyp.methods) > len(dyntyp.methods) {
-			return false
-		}
-		for i, tm := range targettyp.methods {
-			// TODO speed this up by iterating through in lockstep.
-			found := false
-			for _, sm := range dyntyp.methods {
-				if *sm.name == *tm.name {
-					if eqtyp(sm.typ, tm.typ) {
-						fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
-						fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
-						*fnptrslot = uintptr(sm.ifn)
-						found = true
-					}
-					break
+	return eface{i.tab.typ, i.data}
+}
+
+const ptrsize = unsafe.Sizeof(uintptr(0))
+
+func convertE2I(e eface, typ unsafe.Pointer) (ok bool, result iface) {
+	if e.rtyp == nil {
+		// nil conversion
+		return true, iface{}
+	}
+	if e.rtyp.uncommonType == nil {
+		// unnamed type, cannot succeed
+		return false, iface{}
+	}
+	targetType := (*interfaceType)(unsafe.Pointer(typ))
+	if len(targetType.methods) > len(e.rtyp.methods) {
+		// too few methods
+		return false, iface{}
+	}
+	size := unsafe.Sizeof(*result.tab)
+	size += (uintptr(len(targetType.methods)) - 1) * ptrsize
+	tab := (*itab)(malloc(size))
+	for i, tm := range targetType.methods {
+		found := false
+		for _, sm := range e.rtyp.methods {
+			if *sm.name == *tm.name {
+				if eqtyp(sm.typ, tm.typ) {
+					tabptr := unsafe.Pointer(tab)
+					fnptraddr := uintptr(tabptr) + unsafe.Sizeof(*tab) - ptrsize + uintptr(i)*ptrsize
+					*(*unsafe.Pointer)(unsafe.Pointer(fnptraddr)) = sm.ifn
+					found = true
 				}
-			}
-			if !found {
-				return false
+				break
 			}
 		}
-		targetvalue := (*uintptr)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
-		targetdyntyp := (**rtype)(unsafe.Pointer(to_))
-		*targetvalue = *(*uintptr)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
-		*targetdyntyp = dyntyp
-		return true
+		if !found {
+			free(unsafe.Pointer(tab))
+			return false, iface{}
+		}
 	}
-	return false
+	result.tab = tab
+	result.data = e.data
+	result.tab.inter = targetType
+	result.tab.typ = e.rtyp
+	return true, result
+}
+
+func mustConvertE2I(e eface, typ unsafe.Pointer) (result iface) {
+	ok, result := convertE2I(e, typ)
+	if !ok {
+		estring := "nil"
+		if e.rtyp != nil {
+			estring = *e.rtyp.string
+		}
+		ifaceType := (*interfaceType)(typ)
+		panic("interface conversion: interface is " + estring + ", not " + *ifaceType.string)
+	}
+	return result
 }
 
 // #llgo name: reflect.ifaceE2I
@@ -75,4 +106,34 @@ func reflect_ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	// TODO
 	println("TODO: reflect.ifaceE2I")
 	llvm_trap()
+}
+
+func convertE2V(e eface, typ_, ptr unsafe.Pointer) bool {
+	typ := (*rtype)(typ_)
+	if !eqtyp(e.rtyp, typ) {
+		return false
+	}
+	if typ.size == 0 {
+		return true
+	}
+	var data unsafe.Pointer
+	if typ.size <= unsafe.Sizeof(data) {
+		data = unsafe.Pointer(&e.data)
+	} else {
+		data = unsafe.Pointer(e.data)
+	}
+	// TODO(axw) use copy alg
+	memcpy(ptr, data, typ.size)
+	return true
+}
+
+func mustConvertE2V(e eface, typ_, ptr unsafe.Pointer) {
+	if !convertE2V(e, typ_, ptr) {
+		estring := "nil"
+		if e.rtyp != nil {
+			estring = *e.rtyp.string
+		}
+		typ := (*rtype)(typ_)
+		panic("interface conversion: interface is " + estring + ", not " + *typ.string)
+	}
 }
