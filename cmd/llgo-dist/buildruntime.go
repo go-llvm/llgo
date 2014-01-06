@@ -105,7 +105,6 @@ func buildRuntime() (reterr error) {
 	if err != nil {
 		return err
 	}
-	runtimePackages := strings.Split(strings.TrimSpace(string(output)), "\n")
 
 	// Always build runtime and syscall first
 	// TODO: Real import dependency discovery to build packages in the order they depend on each other
