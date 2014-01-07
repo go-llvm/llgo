@@ -531,11 +531,13 @@ func (tm *TypeMap) basicRuntimeType(b *types.Basic, underlying bool) (global, pt
 	rtype := tm.makeRtype(b, basicReflectKinds[b.Kind()])
 	global, ptr = tm.makeRuntimeTypeGlobal(rtype, name)
 	global.SetLinkage(llvm.ExternalLinkage)
-	switch b.Kind() {
-	case types.Int32:
-		llvm.AddAlias(tm.module, global.Type(), global, typeSymbol("rune"))
-	case types.Uint8:
-		llvm.AddAlias(tm.module, global.Type(), global, typeSymbol("byte"))
+	if !underlying {
+		switch b.Kind() {
+		case types.Int32:
+			llvm.AddAlias(tm.module, global.Type(), global, typeSymbol("rune"))
+		case types.Uint8:
+			llvm.AddAlias(tm.module, global.Type(), global, typeSymbol("byte"))
+		}
 	}
 	return global, ptr
 }
