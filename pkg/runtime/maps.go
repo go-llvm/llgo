@@ -54,7 +54,17 @@ func reflect_mapassign(t *mapType, m, key, val unsafe.Pointer, ok bool) {
 // #llgo name: reflect.mapaccess
 func reflect_mapaccess(t *rtype, m, key unsafe.Pointer) (val unsafe.Pointer, ok bool) {
 	ptr := maplookup(unsafe.Pointer(t), m, key, false)
-	return ptr, ptr != nil
+	if ptr == nil {
+		return nil, false
+	}
+	maptyp := (*mapType)(unsafe.Pointer(t))
+	elemsize := uintptr(maptyp.elem.size)
+	if elemsize <= unsafe.Sizeof(key) {
+		memcpy(unsafe.Pointer(&val), ptr, elemsize)
+	} else {
+		val = ptr
+	}
+	return val, true
 }
 
 // mapaccess copies the value for the given key out if that key exists,
@@ -143,20 +153,36 @@ func mapdelete(t unsafe.Pointer, m_, key unsafe.Pointer) {
 }
 
 // #llgo name: reflect.mapiterinit
-func reflect_mapiterinit(t *rtype, m_ unsafe.Pointer) *byte {
-	// TODO
-	return nil
+func reflect_mapiterinit(t *rtype, m unsafe.Pointer) *byte {
+	return (*byte)(mapiterinit(unsafe.Pointer(t), m))
 }
 
 // #llgo name: reflect.mapiterkey
-func reflect_mapiterkey(it *byte) (key unsafe.Pointer, ok bool) {
-	// TODO
-	return
+func reflect_mapiterkey(iter_ *byte) (key unsafe.Pointer, ok bool) {
+	if iter_ == nil {
+		return nil, false
+	}
+	iter := (*mapiter)(unsafe.Pointer(iter_))
+	if iter.i >= len(*iter.m) {
+		return nil, false
+	}
+	entry := (*iter.m)[iter.i]
+	keysize := uintptr(iter.typ.key.size)
+	ptrsize := uintptr(unsafe.Sizeof(entry))
+	keyoffset := align(ptrsize, uintptr(iter.typ.key.align))
+	ptrk := unsafe.Pointer(uintptr(unsafe.Pointer(entry)) + keyoffset)
+	if keysize <= unsafe.Sizeof(key) {
+		memcpy(unsafe.Pointer(&key), ptrk, keysize)
+	} else {
+		key = ptrk
+	}
+	return key, true
 }
 
 // #llgo name: reflect.mapiternext
-func reflect_mapiternext(it *byte) {
-	// TODO
+func reflect_mapiternext(iter_ *byte) {
+	iter := (*mapiter)(unsafe.Pointer(iter_))
+	iter.i++
 }
 
 type mapiter struct {
