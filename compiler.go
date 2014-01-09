@@ -198,8 +198,6 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 			Import: llgoimporter.NewImporter(buildctx).Import,
 			Sizes:  compiler.llvmtypes,
 		},
-		// TODO(axw) remove the below line to enable binary imports when
-		// https://code.google.com/p/go/issues/detail?id=7028 is fixed.
 		Build: &buildctx.Context,
 	}
 	compiler.typechecker = &impcfg.TypeChecker
