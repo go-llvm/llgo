@@ -23,6 +23,7 @@ type MethodResolver interface {
 // to llgo's corresponding LLVM type representation.
 type llvmTypeMap struct {
 	*types.StdSizes
+	ctx     llvm.Context
 	target     llvm.TargetData
 	inttype    llvm.Type
 	stringType llvm.Type
@@ -44,7 +45,6 @@ type TypeMap struct {
 	*llvmTypeMap
 	mc *manglerContext
 
-	ctx     llvm.Context
 	module         llvm.Module
 	pkgpath        string
 	types          typemap.M
@@ -74,6 +74,7 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 	stringType := llvm.StructType(elements, false)
 
 	return &llvmTypeMap{
+		ctx:        ctx,
 		StdSizes: &types.StdSizes{
 			WordSize: int64(target.PointerSize()),
 			MaxAlign: 8,
@@ -88,7 +89,6 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	tm := &TypeMap{
 		llvmTypeMap: llvmtm,
 		mc:          mc,
-		ctx:         module.Context(),
 		module:      module,
 		pkgpath:     pkgpath,
 		runtime:     r,
