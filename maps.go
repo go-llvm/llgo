@@ -95,36 +95,18 @@ func (c *compiler) mapIterNext(iter *LLVMValue) *LLVMValue {
 	maptyp := iter.Type().Underlying().(*types.Map)
 	ktyp := maptyp.Key()
 	vtyp := maptyp.Elem()
-
 	lliter := iter.LLVMValue()
 	mapiternext := c.runtime.mapiternext.LLVMValue()
-	ok := c.builder.CreateCall(mapiternext, []llvm.Value{lliter}, "")
-
 	typ := tupleType(types.Typ[types.Bool], ktyp, vtyp)
-	tuple := llvm.Undef(c.types.ToLLVM(typ))
-	tuple = c.builder.CreateInsertValue(tuple, ok, 0, "")
-
-	currBlock := c.builder.GetInsertBlock()
-	endBlock := llvm.InsertBasicBlock(currBlock, "")
-	endBlock.MoveAfter(currBlock)
-	okBlock := llvm.InsertBasicBlock(endBlock, "")
-	c.builder.CreateCondBr(ok, okBlock, endBlock)
-
-	// TODO when mapIterInit/mapIterNext operate on a
-	// stack-allocated struct, use CreateExtractValue
-	// to load pk/pv.
-	c.builder.SetInsertPointAtEnd(okBlock)
-	lliter = c.builder.CreateIntToPtr(lliter, llvm.PointerType(c.runtime.mapiter.llvm, 0), "")
-	pk := c.builder.CreateLoad(c.builder.CreateStructGEP(lliter, 0, ""), "")
-	pv := c.builder.CreateLoad(c.builder.CreateStructGEP(lliter, 1, ""), "")
-	k := c.builder.CreateLoad(c.builder.CreateIntToPtr(pk, llvm.PointerType(c.types.ToLLVM(ktyp), 0), ""), "")
-	v := c.builder.CreateLoad(c.builder.CreateIntToPtr(pv, llvm.PointerType(c.types.ToLLVM(vtyp), 0), ""), "")
-	tuplekv := c.builder.CreateInsertValue(tuple, k, 1, "")
-	tuplekv = c.builder.CreateInsertValue(tuplekv, v, 2, "")
-	c.builder.CreateBr(endBlock)
-
-	c.builder.SetInsertPointAtEnd(endBlock)
-	phi := c.builder.CreatePHI(tuple.Type(), "")
-	phi.AddIncoming([]llvm.Value{tuple, tuplekv}, []llvm.BasicBlock{currBlock, okBlock})
-	return c.NewValue(phi, typ)
+	// allocate space for the key and value on the stack, and pass
+	// pointers into maliternext.
+	stackptr := c.stacksave()
+	tuple := c.builder.CreateAlloca(c.types.ToLLVM(typ), "")
+	pk := c.builder.CreatePtrToInt(c.builder.CreateStructGEP(tuple, 1, ""), c.target.IntPtrType(), "")
+	pv := c.builder.CreatePtrToInt(c.builder.CreateStructGEP(tuple, 2, ""), c.target.IntPtrType(), "")
+	ok := c.builder.CreateCall(mapiternext, []llvm.Value{lliter, pk, pv}, "")
+	c.builder.CreateStore(ok, c.builder.CreateStructGEP(tuple, 0, ""))
+	tuple = c.builder.CreateLoad(tuple, "")
+	c.stackrestore(stackptr)
+	return c.NewValue(tuple, typ)
 }

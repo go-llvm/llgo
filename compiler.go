@@ -6,16 +6,19 @@ package llgo
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"log"
 	"runtime"
 	"strings"
 
+	"github.com/axw/gollvm/llvm"
+	llgobuild "github.com/axw/llgo/build"
+	llgoimporter "github.com/axw/llgo/importer"
+
 	"code.google.com/p/go.tools/go/types"
 	goimporter "code.google.com/p/go.tools/importer"
 	"code.google.com/p/go.tools/ssa"
-	"github.com/axw/gollvm/llvm"
-	llgobuild "github.com/axw/llgo/build"
 )
 
 func assert(cond bool) {
@@ -55,9 +58,8 @@ type compiler struct {
 	target  llvm.TargetData
 	fileset *token.FileSet
 
-	typechecker   *types.Config
-	importer      *goimporter.Importer
-	exportedtypes []types.Type
+	typechecker *types.Config
+	importer    *goimporter.Importer
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -185,19 +187,20 @@ func (c *compiler) logf(format string, v ...interface{}) {
 
 func (compiler *compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
 	// FIXME create a compilation state, rather than storing in 'compiler'.
-	compiler.exportedtypes = nil
 	compiler.llvmtypes = NewLLVMTypeMap(llvm.GlobalContext(), compiler.target)
 
-	buildctx, err := llgobuild.Context(compiler.TargetTriple)
+	buildctx, err := llgobuild.ContextFromTriple(compiler.TargetTriple)
 	if err != nil {
 		return nil, err
 	}
 	impcfg := &goimporter.Config{
 		TypeChecker: types.Config{
-			Import: (&importer{compiler: compiler}).Import,
+			Import: llgoimporter.NewImporter(buildctx).Import,
 			Sizes:  compiler.llvmtypes,
 		},
-		Build: buildctx,
+		// TODO(axw) remove the below line to enable binary imports when
+		// https://code.google.com/p/go/issues/detail?id=7028 is fixed.
+		Build: &buildctx.Context,
 	}
 	compiler.typechecker = &impcfg.TypeChecker
 	compiler.importer = goimporter.New(impcfg)
@@ -212,9 +215,9 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	if pkgname := astFiles[0].Name.String(); importpath == "" || pkgname == "main" {
 		importpath = pkgname
 	}
-	pkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
-	if pkginfo.Err != nil {
-		return nil, err
+	mainPkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
+	if mainPkginfo.Err != nil {
+		return nil, mainPkginfo.Err
 	}
 	// First call CreatePackages to resolve imports, and then CreatePackage
 	// to obtain the main package. The latter simply returns the package
@@ -222,7 +225,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	if err := program.CreatePackages(compiler.importer); err != nil {
 		return nil, err
 	}
-	mainpkg := program.CreatePackage(pkginfo)
+	mainpkg := program.CreatePackage(mainPkginfo)
 
 	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
 	// otherwise we'll set a finalizer at the end. The caller may invoke
@@ -233,14 +236,30 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	compiler.module.SetDataLayout(compiler.target.String())
 
 	// Map runtime types and functions.
-	runtimePkg := mainpkg.Object
+	runtimePkginfo := mainPkginfo
+	runtimePkg := mainpkg
 	if importpath != "runtime" {
-		runtimePkg, err = parseRuntime(buildctx, compiler.typechecker)
+		astFiles, err := parseRuntime(&buildctx.Context, compiler.importer.Fset)
 		if err != nil {
 			return nil, err
 		}
+		runtimePkginfo = compiler.importer.CreatePackage("runtime", astFiles...)
+		if runtimePkginfo.Err != nil {
+			return nil, err
+		}
+		runtimePkg = program.CreatePackage(runtimePkginfo)
 	}
-	compiler.runtime, err = newRuntimeInterface(runtimePkg, compiler.module.Module, compiler.llvmtypes)
+
+	// Create a new translation unit.
+	unit := newUnit(compiler, mainpkg)
+
+	// Create the runtime interface.
+	compiler.runtime, err = newRuntimeInterface(
+		runtimePkg.Object,
+		compiler.module.Module,
+		compiler.llvmtypes,
+		FuncResolver(unit),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +274,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		compiler.llvmtypes,
 		compiler.module.Module,
 		compiler.runtime,
+		MethodResolver(unit),
 		&mc,
 	)
 
@@ -263,8 +283,11 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	defer compiler.builder.Dispose()
 
 	mainpkg.Build()
-	unit := compiler.translatePackage(mainpkg)
-	compiler.processAnnotations(unit, pkginfo)
+	unit.translatePackage(mainpkg)
+	compiler.processAnnotations(unit, mainPkginfo)
+	if runtimePkginfo != mainPkginfo {
+		compiler.processAnnotations(unit, runtimePkginfo)
+	}
 
 	compiler.types.finalize()
 
@@ -300,23 +323,23 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	*/
 
 	// Export runtime type information.
-	compiler.exportRuntimeTypes(importpath == "runtime")
+	var exportedTypes []types.Type
+	for _, m := range mainpkg.Members {
+		if t, ok := m.(*ssa.Type); ok && ast.IsExported(t.Name()) {
+			exportedTypes = append(exportedTypes, t.Type())
+		}
+	}
+	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
 	if importpath == "main" {
-		// Create "main.proginit", which will perform program initialization.
-		if err = compiler.createProginit(mainpkg.Object, buildctx); err != nil {
-			return nil, err
-		}
 		// Wrap "main.main" in a call to runtime.main.
 		if err = compiler.createMainFunction(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create main.main: %v", err)
 		}
 	} else {
-		// TODO reenable when everything's working
-		//var e = exporter{compiler: compiler}
-		//if err := e.Export(mainpkg.Object); err != nil {
-		//	return nil, err
-		//}
+		if err := llgoimporter.Export(buildctx, mainpkg.Object); err != nil {
+			return nil, fmt.Errorf("failed to export package data: %v", err)
+		}
 	}
 
 	return compiler.module, nil
@@ -366,8 +389,13 @@ func (c *compiler) createMainFunction() error {
 	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(nil))
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
-	mainMain = c.builder.CreateBitCast(mainMain, runtimeMain.Type().ElementType().ParamTypes()[3], "")
-	args := []llvm.Value{main.Param(0), main.Param(1), main.Param(2), mainMain}
+	runtimeMainParamTypes := runtimeMain.Type().ElementType().ParamTypes()
+	args := []llvm.Value{
+		main.Param(0), // argc
+		main.Param(1), // argv
+		main.Param(2), // argp
+		c.builder.CreateBitCast(mainMain, runtimeMainParamTypes[3], ""),
+	}
 	result := c.builder.CreateCall(runtimeMain, args, "")
 	c.builder.CreateRet(result)
 	return nil

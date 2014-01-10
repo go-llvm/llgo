@@ -13,7 +13,7 @@ func deref(t types.Type) types.Type {
 	return t.Underlying().(*types.Pointer).Elem()
 }
 
-func (c *compiler) exportRuntimeTypes(builtin bool) {
+func (c *compiler) exportRuntimeTypes(exportedTypes []types.Type, builtin bool) {
 	if builtin {
 		kinds := [...]types.BasicKind{
 			types.Uint,
@@ -36,13 +36,12 @@ func (c *compiler) exportRuntimeTypes(builtin bool) {
 			types.String,
 		}
 		for _, kind := range kinds {
-			c.exportedtypes = append(c.exportedtypes, types.Typ[kind])
+			exportedTypes = append(exportedTypes, types.Typ[kind])
 		}
 		error_ := types.Universe.Lookup("error").Type()
-		c.exportedtypes = append(c.exportedtypes, error_)
+		exportedTypes = append(exportedTypes, error_)
 	}
-	for _, typ := range c.exportedtypes {
-		c.types.ToRuntime(typ)
+	for _, typ := range exportedTypes {
 		c.types.ToRuntime(types.NewPointer(typ))
 	}
 }

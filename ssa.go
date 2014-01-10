@@ -19,40 +19,48 @@ type unit struct {
 	*compiler
 	pkg     *ssa.Package
 	globals map[ssa.Value]*LLVMValue
+
+	// undefinedFuncs contains functions that have been resolved
+	// (declared) but not defined.
+	undefinedFuncs map[*ssa.Function]bool
+
+	// funcvals is a map of *ssa.Function to LLVM functions that
+	// may be stored. Non-receiver functions in this map will have
+	// an additional context parameter, to enable non-branching
+	// calls with a pair-of-pointer function representation,
+	// without forcing the additional parameter on all functions.
+	funcvals map[*ssa.Function]*LLVMValue
+}
+
+func newUnit(c *compiler, pkg *ssa.Package) *unit {
+	u := &unit{
+		compiler:       c,
+		pkg:            pkg,
+		globals:        make(map[ssa.Value]*LLVMValue),
+		undefinedFuncs: make(map[*ssa.Function]bool),
+		funcvals:       make(map[*ssa.Function]*LLVMValue),
+	}
+	return u
 }
 
 // translatePackage translates an *ssa.Package into an LLVM module, and returns
 // the translation unit information.
-func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
-	u := &unit{
-		compiler: c,
-		pkg:      pkg,
-		globals:  make(map[ssa.Value]*LLVMValue),
-	}
-
+func (u *unit) translatePackage(pkg *ssa.Package) {
 	// Initialize global storage.
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
-			llelemtyp := c.types.ToLLVM(deref(v.Type()))
-			global := llvm.AddGlobal(c.module.Module, llelemtyp, v.String())
+			llelemtyp := u.llvmtypes.ToLLVM(deref(v.Type()))
+			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
-			u.globals[v] = c.NewValue(global, v.Type())
+			u.globals[v] = u.NewValue(global, v.Type())
 		}
 	}
 
-	// TODO prune off unreferenced functions from imported packages,
-	// so the IR isn't littered unnecessarily.
-
-	// Translate functions.
-	functions := ssautil.AllFunctions(pkg.Prog)
-	for f, _ := range functions {
-		u.declareFunction(f)
-	}
-
 	// Define functions.
-	// Sort if flag is set for more deterministic behavior (for debugging)
-	if !c.OrderedCompilation {
+	// Sort if flag is set for deterministic behaviour (for debugging)
+	functions := ssautil.AllFunctions(pkg.Prog)
+	if !u.compiler.OrderedCompilation {
 		for f, _ := range functions {
 			u.defineFunction(f)
 		}
@@ -66,56 +74,73 @@ func (c *compiler) translatePackage(pkg *ssa.Package) *unit {
 			u.defineFunction(f)
 		}
 	}
-	return u
+
+	// Define remaining functions that were resolved during
+	// runtime type mapping, but not defined.
+	for f, _ := range u.undefinedFuncs {
+		u.defineFunction(f)
+	}
 }
 
-// declareFunction adds a function declaration with the given name
-// and type to the module.
-func (u *unit) declareFunction(f *ssa.Function) {
-	name := f.Name()
-	// TODO use f.String() for the name, which includes path,
-	// receiver and function name. Runtime type generation
-	// must be changed at the same time.
-	if recv := f.Signature.Recv(); recv != nil {
-		// receiver name includes package
-		name = fmt.Sprintf("%s.%s", recv.Type(), name)
-	} else if f.Pkg != nil {
-		name = fmt.Sprintf("%s.%s", f.Pkg.Object.Path(), name)
+// ResolveMethod implements MethodResolver.ResolveMethod.
+func (u *unit) ResolveMethod(s *types.Selection) *LLVMValue {
+	return u.resolveFunction(u.pkg.Prog.Method(s))
+}
+
+// ResolveFunc implements FuncResolver.ResolveFunc.
+func (u *unit) ResolveFunc(f *types.Func) *LLVMValue {
+	return u.resolveFunction(u.pkg.Prog.FuncValue(f))
+}
+
+func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
+	if v, ok := u.globals[f]; ok {
+		return v
 	}
-	llvmType := u.types.ToLLVM(f.Signature)
-	llvmType = llvmType.StructElementTypes()[0].ElementType()
-	if len(f.FreeVars) > 0 {
-		// Add an implicit first argument.
-		returnType := llvmType.ReturnType()
-		paramTypes := llvmType.ParamTypes()
-		vararg := llvmType.IsFunctionVarArg()
-		blockElementTypes := make([]llvm.Type, len(f.FreeVars))
-		for i, fv := range f.FreeVars {
-			blockElementTypes[i] = u.types.ToLLVM(fv.Type())
-		}
-		blockType := llvm.StructType(blockElementTypes, false)
-		blockPtrType := llvm.PointerType(blockType, 0)
-		paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
-		llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
-	}
+	name := f.String()
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
 	llvmFunction := u.module.Module.NamedFunction(name)
 	if llvmFunction.IsNil() {
+		llvmType := u.llvmtypes.ToLLVM(f.Signature)
+		llvmType = llvmType.StructElementTypes()[0].ElementType()
+		if len(f.FreeVars) > 0 {
+			// Add an implicit first argument.
+			returnType := llvmType.ReturnType()
+			paramTypes := llvmType.ParamTypes()
+			vararg := llvmType.IsFunctionVarArg()
+			blockElementTypes := make([]llvm.Type, len(f.FreeVars))
+			for i, fv := range f.FreeVars {
+				blockElementTypes[i] = u.llvmtypes.ToLLVM(fv.Type())
+			}
+			blockType := llvm.StructType(blockElementTypes, false)
+			blockPtrType := llvm.PointerType(blockType, 0)
+			paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
+			llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
+		}
 		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
+		if f.Enclosing != nil {
+			llvmFunction.SetLinkage(llvm.PrivateLinkage)
+		}
+		u.undefinedFuncs[f] = true
 	}
-	u.globals[f] = u.NewValue(llvmFunction, f.Signature)
-	// Functions that call recover must not be inlined, or we
-	// can't tell whether the recover call is valid at runtime.
-	if f.Recover != nil {
-		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
-	}
+	v := u.NewValue(llvmFunction, f.Signature)
+	u.globals[f] = v
+	return v
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
 	// Nothing to do for functions without bodies.
 	if len(f.Blocks) == 0 {
+		return
+	}
+
+	// Only define functions from this package.
+	if f.Pkg == nil {
+		if r := f.Signature.Recv(); r != nil && r.Pkg() != nil && r.Pkg() != u.pkg.Object {
+			return
+		}
+	} else if f.Pkg != u.pkg {
 		return
 	}
 
@@ -126,9 +151,17 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := fr.globals[f].LLVMValue()
+	llvmFunction := fr.resolveFunction(f).LLVMValue()
+	delete(u.undefinedFuncs, f)
+
+	// Functions that call recover must not be inlined, or we
+	// can't tell whether the recover call is valid at runtime.
+	if f.Recover != nil {
+		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
+	}
+
 	for i, block := range f.Blocks {
-		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, block.Comment)
+		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, fmt.Sprintf(".%d.%s", i, block.Comment))
 	}
 	fr.builder.SetInsertPointAtEnd(fr.blocks[0])
 
@@ -151,7 +184,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
-		typ := fr.types.ToLLVM(deref(local.Type()))
+		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
@@ -195,7 +228,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
 		jb := fr.builder.CreateStructGEP(defers, 0, "")
 		jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-		result := fr.builder.CreateCall(fr.runtime.setjmp, []llvm.Value{jb}, "")
+		result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
 		result = fr.builder.CreateIsNotNull(result, "")
 		fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
 		// We'll only get here via a panic, which must either be
@@ -218,11 +251,11 @@ func (u *unit) defineFunction(f *ssa.Function) {
 			case 0:
 				fr.builder.CreateRetVoid()
 			case 1:
-				fr.builder.CreateRet(llvm.ConstNull(fr.types.ToLLVM(results.At(0).Type())))
+				fr.builder.CreateRet(llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(0).Type())))
 			default:
 				values := make([]llvm.Value, nresults)
 				for i := range values {
-					values[i] = llvm.ConstNull(fr.types.ToLLVM(results.At(i).Type()))
+					values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
 				}
 				fr.builder.CreateAggregateRet(values)
 			}
@@ -257,17 +290,29 @@ func (fr *frame) block(b *ssa.BasicBlock) llvm.BasicBlock {
 	return fr.blocks[b.Index]
 }
 
-func (fr *frame) value(v ssa.Value) *LLVMValue {
+func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 	switch v := v.(type) {
 	case nil:
 		return nil
 	case *ssa.Function:
+		result, ok := fr.funcvals[v]
+		if ok {
+			return result
+		}
 		// fr.globals[v] has the function in raw pointer form;
-		// we must convert it to <f,ctx> form.
-		f := fr.globals[v]
-		pair := llvm.ConstNull(fr.types.ToLLVM(f.Type()))
-		pair = llvm.ConstInsertValue(pair, f.LLVMValue(), []uint32{0})
-		return fr.NewValue(pair, f.Type())
+		// we must convert it to <f,ctx> form. If the function
+		// does not have a receiver, then create a wrapper
+		// function that has an additional "context" parameter.
+		f := fr.resolveFunction(v)
+		if v.Signature.Recv() == nil && len(v.FreeVars) == 0 {
+			f = contextFunction(fr.compiler, f)
+		}
+		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(f.Type()))
+		fnptr := llvm.ConstBitCast(f.LLVMValue(), pair.Type().StructElementTypes()[0])
+		pair = llvm.ConstInsertValue(pair, fnptr, []uint32{0})
+		result = fr.NewValue(pair, f.Type())
+		fr.funcvals[v] = result
+		return result
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
@@ -276,7 +321,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 		}
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
-		llelemtyp := fr.types.ToLLVM(deref(v.Type()))
+		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
 		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
 		global := fr.NewValue(llglobal, v.Type())
 		fr.globals[v] = global
@@ -301,7 +346,7 @@ func (fr *frame) value(v ssa.Value) *LLVMValue {
 	// dispose of it after replacing.
 	currBlock := fr.builder.GetInsertBlock()
 	fr.builder.SetInsertPointAtEnd(llvm.AddBasicBlock(currBlock.Parent(), ""))
-	placeholder := fr.compiler.builder.CreatePHI(fr.types.ToLLVM(v.Type()), "")
+	placeholder := fr.compiler.builder.CreatePHI(fr.llvmtypes.ToLLVM(v.Type()), "")
 	fr.builder.SetInsertPointAtEnd(currBlock)
 	value := fr.NewValue(placeholder, v.Type())
 	fr.backpatch[v] = value
@@ -339,7 +384,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
-		typ := fr.types.ToLLVM(deref(instr.Type()))
+		typ := fr.llvmtypes.ToLLVM(deref(instr.Type()))
 		var value llvm.Value
 		if instr.Heap {
 			value = fr.createTypeMalloc(typ)
@@ -377,7 +422,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			// TODO(axw) optimisation for I2I case where we
 			// know statically the methods to carry over.
 			x = x.convertI2E()
-			x = x.convertE2I(instr.Type())
+			x, _ = x.convertE2I(instr.Type())
 		} else {
 			x = x.convertI2E()
 			x = fr.NewValue(x.LLVMValue(), instr.Type())
@@ -387,12 +432,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.ChangeType:
 		value := fr.value(instr.X).LLVMValue()
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
-			value = fr.builder.CreateBitCast(value, fr.types.ToLLVM(instr.Type()), "")
+			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
-		fr.env[instr] = fr.NewValue(value, instr.Type())
+		v := fr.NewValue(value, instr.Type())
+		if _, ok := instr.X.(*ssa.Phi); ok {
+			v = phiValue(fr.compiler, v)
+		}
+		fr.env[instr] = v
 
 	case *ssa.Convert:
-		fr.env[instr] = fr.value(instr.X).Convert(instr.Type()).(*LLVMValue)
+		v := fr.value(instr.X)
+		if _, ok := instr.X.(*ssa.Phi); ok {
+			v = phiValue(fr.compiler, v)
+		}
+		fr.env[instr] = v.Convert(instr.Type()).(*LLVMValue)
 
 	//case *ssa.DebugRef:
 
@@ -486,7 +539,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeChan(instr.Type(), fr.value(instr.Size))
 
 	case *ssa.MakeClosure:
-		fn := fr.value(instr.Fn)
+		fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
 		bindings := make([]*LLVMValue, len(instr.Bindings))
 		for i, binding := range instr.Bindings {
 			bindings[i] = fr.value(binding)
@@ -553,7 +606,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Phi:
 		typ := instr.Type()
-		phi := fr.builder.CreatePHI(fr.types.ToLLVM(typ), instr.Comment)
+		phi := fr.builder.CreatePHI(fr.llvmtypes.ToLLVM(typ), instr.Comment)
 		fr.env[instr] = fr.NewValue(phi, typ)
 		values := make([]llvm.Value, len(instr.Edges))
 		blocks := make([]llvm.BasicBlock, len(instr.Edges))
@@ -578,7 +631,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		switch n := len(instr.Results); n {
 		case 0:
-			fr.builder.CreateRetVoid()
+			// https://code.google.com/p/go/issues/detail?id=7022
+			if r := instr.Parent().Signature.Results(); r != nil && r.Len() > 0 {
+				fr.builder.CreateUnreachable()
+			} else {
+				fr.builder.CreateRetVoid()
+			}
 		case 1:
 			fr.builder.CreateRet(fr.value(instr.Results[0]).LLVMValue())
 		default:
@@ -613,18 +671,32 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.slice(x, low, high)
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr)
-		value := fr.value(instr.Val)
-		fr.builder.CreateStore(value.LLVMValue(), addr.LLVMValue())
+		addr := fr.value(instr.Addr).LLVMValue()
+		value := fr.value(instr.Val).LLVMValue()
+		// The bitcast is necessary to handle recursive pointer stores.
+		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
+		fr.builder.CreateStore(value, addr)
 
 	case *ssa.TypeAssert:
 		x := fr.value(instr.X)
+		if iface, ok := x.Type().Underlying().(*types.Interface); ok && iface.NumMethods() > 0 {
+			x = x.convertI2E()
+		}
 		if !instr.CommaOk {
-			fr.env[instr] = x.mustConvertI2V(instr.AssertedType)
+			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
+				fr.env[instr] = x.mustConvertE2I(instr.AssertedType)
+			} else {
+				fr.env[instr] = x.mustConvertE2V(instr.AssertedType)
+			}
 		} else {
-			result, ok := x.convertI2V(instr.AssertedType)
+			var result, success *LLVMValue
+			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
+				result, success = x.convertE2I(instr.AssertedType)
+			} else {
+				result, success = x.convertE2V(instr.AssertedType)
+			}
 			resultval := result.LLVMValue()
-			okval := ok.LLVMValue()
+			okval := success.LLVMValue()
 			pairtyp := llvm.StructType([]llvm.Type{resultval.Type(), okval.Type()}, false)
 			pair := llvm.Undef(pairtyp)
 			pair = fr.builder.CreateInsertValue(pair, resultval, 0, "")
@@ -638,7 +710,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		case token.ARROW:
 			fr.env[instr] = fr.chanRecv(operand, instr.CommaOk)
 		case token.MUL:
-			llptr := operand.LLVMValue()
+			// The bitcast is necessary to handle recursive pointer loads.
+			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
 			fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
 		default:
 			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
@@ -666,9 +739,17 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		return fn, args, nil
 	}
 
-	switch call.Value.(type) {
+	switch v := call.Value.(type) {
 	case *ssa.Builtin:
 		// handled below
+	case *ssa.Function:
+		// Function handled specially; value() will convert
+		// a function to one with a context argument.
+		fn = fr.resolveFunction(v)
+		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(fn.Type()))
+		pair = llvm.ConstInsertValue(pair, fn.LLVMValue(), []uint32{0})
+		fn = fr.NewValue(pair, fn.Type())
+		return fn, args, nil
 	default:
 		fn = fr.value(call.Value)
 		return fn, args, nil
@@ -689,20 +770,19 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 			params[i] = types.NewParam(arg.Pos(), nil, arg.Name(), args[i].Type())
 		}
 		sig := types.NewSignature(nil, nil, types.NewTuple(params...), nil, false)
-		fntyp := fr.types.ToLLVM(sig).StructElementTypes()[0].ElementType()
-		llvmfn := llvm.AddFunction(fr.module.Module, "", fntyp)
+		llfntyp := fr.llvmtypes.ToLLVM(sig)
+		llfnptr := llvm.AddFunction(fr.module.Module, "", llfntyp.StructElementTypes()[0].ElementType())
 		currBlock := fr.builder.GetInsertBlock()
-		entry := llvm.AddBasicBlock(llvmfn, "entry")
+		entry := llvm.AddBasicBlock(llfnptr, "entry")
 		fr.builder.SetInsertPointAtEnd(entry)
 		internalArgs := make([]Value, len(args))
 		for i, arg := range args {
-			internalArgs[i] = fr.NewValue(llvmfn.Param(i), arg.Type())
+			internalArgs[i] = fr.NewValue(llfnptr.Param(i), arg.Type())
 		}
 		fr.printValues(builtin.Name() == "println", internalArgs...)
 		fr.builder.CreateRetVoid()
 		fr.builder.SetInsertPointAtEnd(currBlock)
-		fn = fr.NewValue(llvmfn, sig)
-		return fn, args, nil
+		return fr.NewValue(llfnptr, sig), args, nil
 
 	case "panic":
 		panic("TODO: panic")
@@ -741,7 +821,7 @@ func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*
 		r := args[0].LLVMValue()
 		i := args[1].LLVMValue()
 		typ := instr.Value().Type()
-		cmplx := llvm.Undef(fr.types.ToLLVM(typ))
+		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
 		return nil, nil, fr.NewValue(cmplx, typ)
@@ -760,4 +840,55 @@ func hasDefer(f *ssa.Function) bool {
 		}
 	}
 	return false
+}
+
+// contextFunction creates a wrapper function that
+// has the same signature as the specified function,
+// but has an additional first parameter that accepts
+// and ignores the function context value.
+//
+// contextFunction must be called with a global function
+// pointer.
+func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
+	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
+	resultType := c.llvmtypes.ToLLVM(f.Type())
+	fnptr := f.LLVMValue()
+	contextType := resultType.StructElementTypes()[1]
+	llfntyp := fnptr.Type().ElementType()
+	llfntyp = llvm.FunctionType(
+		llfntyp.ReturnType(),
+		append([]llvm.Type{contextType}, llfntyp.ParamTypes()...),
+		llfntyp.IsFunctionVarArg(),
+	)
+	wrapper := llvm.AddFunction(c.module.Module, fnptr.Name()+".ctx", llfntyp)
+	wrapper.SetLinkage(llvm.PrivateLinkage)
+	entry := llvm.AddBasicBlock(wrapper, "entry")
+	c.builder.SetInsertPointAtEnd(entry)
+	args := make([]llvm.Value, len(llfntyp.ParamTypes())-1)
+	for i := range args {
+		args[i] = wrapper.Param(i + 1)
+	}
+	result := c.builder.CreateCall(fnptr, args, "")
+	switch nresults := f.Type().(*types.Signature).Results().Len(); nresults {
+	case 0:
+		c.builder.CreateRetVoid()
+	case 1:
+		c.builder.CreateRet(result)
+	default:
+		results := make([]llvm.Value, nresults)
+		for i := range results {
+			results[i] = c.builder.CreateExtractValue(result, i, "")
+		}
+		c.builder.CreateAggregateRet(results)
+	}
+	return c.NewValue(wrapper, f.Type())
+}
+
+// phiValue returns a new value with the same value and type as the given Phi.
+// This is used for go.tools/ssa instructions that introduce new ssa.Values,
+// but would otherwise not generate a new LLVM value.
+func phiValue(c *compiler, v *LLVMValue) *LLVMValue {
+	llv := v.LLVMValue()
+	llv = c.builder.CreateSelect(llvm.ConstAllOnes(llvm.Int1Type()), llv, llv, "")
+	return c.NewValue(llv, v.Type())
 }

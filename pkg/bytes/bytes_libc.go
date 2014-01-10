@@ -33,6 +33,15 @@ func equal(a, b []byte) bool {
 	return false
 }
 
+func signum(n int) int {
+	if n < 0 {
+		return -1
+	} else if n == 0 {
+		return 0
+	}
+	return 1
+}
+
 // #llgo name: bytes.Compare
 func compare(a, b []byte) int {
 	la, lb := len(a), len(b)
@@ -43,13 +52,8 @@ func compare(a, b []byte) int {
 	if lb < min {
 		min = lb
 	}
-	if r := memcmp(&a[0], &b[0], min); r == 0 {
-		if la < lb {
-			return -1
-		} else {
-			return 1
-		}
-	} else {
-		return int(r)
+	if r := memcmp(&a[0], &b[0], min); r != 0 {
+		return signum(int(r))
 	}
+	return signum(la - lb)
 }

@@ -13,13 +13,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo"
 	"go/scanner"
 	"log"
 	"os"
 	"runtime"
 	"sort"
-	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo"
 )
 
 var dump = flag.Bool(
@@ -218,6 +218,7 @@ func main() {
 				err := writeObjectFile(module)
 				if err != nil {
 					fmt.Println(err)
+					exitCode = 1
 				}
 			}
 		}

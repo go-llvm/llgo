@@ -165,42 +165,17 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	rhs := rhs_.(*LLVMValue)
 	switch typ := lhs.typ.Underlying().(type) {
 	case *types.Struct:
-		if typ.NumFields() == 0 {
-			return c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
-		}
-
-		t := typ.Field(0).Type()
-		if typ.NumFields() == 1 {
-			first_lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), t)
-			first_rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), 0, ""), t)
-			return first_lhs.BinaryOp(token.EQL, first_rhs)
-		}
-
-		blocks := []llvm.BasicBlock{b.GetInsertBlock()}
-		endblock := llvm.InsertBasicBlock(blocks[0], "")
-		endblock.MoveAfter(blocks[0])
-		for i := 1; i < typ.NumFields(); i++ {
-			blocks = append(blocks, llvm.InsertBasicBlock(endblock, ""))
-		}
-		values := make([]llvm.Value, len(blocks))
-		falseValue := boolLLVMValue(false)
+		// TODO(axw) use runtime equality algorithm (will be suitably inlined).
+		// For now, we use compare all fields unconditionally and bitwise AND
+		// to avoid branching (i.e. so we don't create additional blocks).
+		var value Value = c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
 		for i := 0; i < typ.NumFields(); i++ {
-			b.SetInsertPointAtEnd(blocks[i])
+			t := typ.Field(i).Type()
 			lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
 			rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-			cond := lhs.BinaryOp(token.EQL, rhs).LLVMValue()
-			if i == typ.NumFields()-1 {
-				values[i] = cond
-				b.CreateBr(endblock)
-			} else {
-				values[i] = falseValue
-				b.CreateCondBr(cond, blocks[i+1], endblock)
-			}
+			value = value.BinaryOp(token.AND, lhs.BinaryOp(token.EQL, rhs))
 		}
-		b.SetInsertPointAtEnd(endblock)
-		phi := b.CreatePHI(values[0].Type(), "")
-		phi.AddIncoming(values, blocks)
-		return c.NewValue(phi, types.Typ[types.Bool])
+		return value
 
 	case *types.Slice:
 		// []T == nil
@@ -405,41 +380,21 @@ func (lhs *LLVMValue) shift(rhs *LLVMValue, op token.Token) *LLVMValue {
 	lhsval := lhs.LLVMValue()
 	bits := rhs.LLVMValue()
 	unsigned := isUnsigned(lhs.Type())
-	if !bits.IsAConstant().IsNil() {
-		if bits.ZExtValue() >= uint64(lhsval.Type().IntTypeWidth()) {
-			var fix llvm.Value
-			if unsigned || op == token.SHL {
-				fix = llvm.ConstNull(lhsval.Type())
-			} else {
-				fix = llvm.ConstAllOnes(lhsval.Type())
-			}
-			return lhs.compiler.NewValue(fix, lhs.typ)
-		}
-	}
 	b := lhs.compiler.builder
+	// Shifting >= width of lhs yields undefined behaviour, so we must select.
+	max := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()-1), false)
 	var result llvm.Value
-	if op == token.SHL {
-		result = b.CreateShl(lhsval, bits, "")
+	if !unsigned && op == token.SHR {
+		bits := b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), bits, max, "")
+		result = b.CreateAShr(lhsval, bits, "")
 	} else {
-		if unsigned {
+		if op == token.SHL {
+			result = b.CreateShl(lhsval, bits, "")
+		} else {
 			result = b.CreateLShr(lhsval, bits, "")
-		} else {
-			result = b.CreateAShr(lhsval, bits, "")
 		}
-	}
-	if bits.IsAConstant().IsNil() {
-		// Shifting >= the width of the lhs
-		// yields undefined behaviour, so we
-		// must generate runtime branching logic.
-		width := llvm.ConstInt(bits.Type(), uint64(lhsval.Type().IntTypeWidth()), false)
-		less := b.CreateICmp(llvm.IntULT, bits, width, "")
-		var fix llvm.Value
-		if unsigned || op == token.SHL {
-			fix = llvm.ConstNull(lhsval.Type())
-		} else {
-			fix = llvm.ConstAllOnes(lhsval.Type())
-		}
-		result = b.CreateSelect(less, result, fix, "")
+		zero := llvm.ConstNull(lhsval.Type())
+		result = b.CreateSelect(b.CreateICmp(llvm.IntULE, bits, max, ""), result, zero, "")
 	}
 	return lhs.compiler.NewValue(result, lhs.typ)
 }
@@ -486,14 +441,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// Identical (underlying) types? Just swap in the destination type.
 	if types.IsIdentical(srctyp, dsttyp) {
-		// A method converted to a function type without the
-		// receiver is where we convert a "method value" into a
-		// function.
-		if srctyp, ok := srctyp.(*types.Signature); ok && srctyp.Recv() != nil {
-			if dsttyp, ok := dsttyp.(*types.Signature); ok && dsttyp.Recv() == nil {
-				return v.convertMethodValue(origdsttyp)
-			}
-		}
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
 
@@ -615,8 +562,11 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 			delta := srcBits - dstBits
 			switch {
 			case delta < 0:
-				// TODO check if (un)signed, use S/ZExt accordingly.
-				lv = b.CreateZExt(lv, llvm_type, "")
+				if !isUnsigned(srctyp) {
+					lv = b.CreateSExt(lv, llvm_type, "")
+				} else {
+					lv = b.CreateZExt(lv, llvm_type, "")
+				}
 			case delta > 0:
 				lv = b.CreateTrunc(lv, llvm_type, "")
 			}
@@ -686,57 +636,6 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	panic(fmt.Sprintf("unimplemented conversion: %s (%s) -> %s", v.typ, lv.Type(), origdsttyp))
 }
 
-func (v *LLVMValue) convertMethodValue(dsttyp types.Type) *LLVMValue {
-	b := v.compiler.builder
-	dstlt := v.compiler.types.ToLLVM(dsttyp)
-	dstltelems := dstlt.StructElementTypes()
-
-	srclv := v.LLVMValue()
-	fnptr := b.CreateExtractValue(srclv, 0, "")
-	fnctx := b.CreateExtractValue(srclv, 1, "")
-
-	// TODO(axw) There's a lot of overlap between this
-	// and the code that converts concrete methods to
-	// interface methods. Refactor.
-	if fnctx.Type().TypeKind() == llvm.PointerTypeKind {
-		fnctx = b.CreateBitCast(fnctx, dstltelems[1], "")
-	} else {
-		c := v.compiler
-		ptrsize := c.target.PointerSize()
-		if c.target.TypeStoreSize(fnctx.Type()) <= uint64(ptrsize) {
-			bits := c.target.TypeSizeInBits(fnctx.Type())
-			if bits > 0 {
-				fnctx = c.coerce(fnctx, llvm.IntType(int(bits)))
-				fnctx = b.CreateIntToPtr(fnctx, dstltelems[1], "")
-			} else {
-				fnctx = llvm.ConstNull(dstltelems[1])
-			}
-		} else {
-			ptr := c.createTypeMalloc(fnctx.Type())
-			b.CreateStore(fnctx, ptr)
-			fnctx = b.CreateBitCast(ptr, dstltelems[1], "")
-
-			// Switch to the pointer-receiver method.
-			/*
-				methodset := c.methods(v.Type().(*types.Signature).Recv().Type())
-				ptrmethod := methodset.lookup(v.method.Name(), true)
-				if f, ok := ptrmethod.(*types.Func); ok {
-					ptrmethod = c.methodfunc(f)
-				}
-				lv := c.Resolve(c.objectdata[ptrmethod].Ident).LLVMValue()
-				fnptr = c.builder.CreateExtractValue(lv, 0, "")
-			*/
-			panic("TODO")
-		}
-	}
-
-	dstlv := llvm.Undef(dstlt)
-	fnptr = b.CreateBitCast(fnptr, dstltelems[0], "")
-	dstlv = b.CreateInsertValue(dstlv, fnptr, 0, "")
-	dstlv = b.CreateInsertValue(dstlv, fnctx, 1, "")
-	return v.compiler.NewValue(dstlv, dsttyp)
-}
-
 func (v *LLVMValue) LLVMValue() llvm.Value {
 	return v.value
 }
@@ -752,34 +651,6 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 		return v.compiler.NewValue(component, types.Typ[types.Float32])
 	}
 	return v.compiler.NewValue(component, types.Typ[types.Float64])
-}
-
-func (v *LLVMValue) interfaceValue() llvm.Value {
-	c := v.compiler
-	value := v.LLVMValue()
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-
-	typ := value.Type()
-	if typ.TypeKind() == llvm.PointerTypeKind {
-		return c.builder.CreateBitCast(value, i8ptr, "")
-	}
-
-	// If the value fits exactly in a pointer, then we can just
-	// bitcast it. Otherwise we need to malloc.
-	ptrsize := c.target.PointerSize()
-	if c.target.TypeStoreSize(typ) <= uint64(ptrsize) {
-		bits := c.target.TypeSizeInBits(typ)
-		if bits > 0 {
-			value = c.coerce(value, llvm.IntType(int(bits)))
-			return c.builder.CreateIntToPtr(value, i8ptr, "")
-		} else {
-			return llvm.ConstNull(i8ptr)
-		}
-	} else {
-		ptr := c.createTypeMalloc(value.Type())
-		c.builder.CreateStore(value, ptr)
-		return c.builder.CreateBitCast(ptr, i8ptr, "")
-	}
 }
 
 func boolLLVMValue(v bool) (lv llvm.Value) {

@@ -22,6 +22,12 @@ func memcpy(dst, src unsafe.Pointer, size uintptr)
 func memmove(dst, src unsafe.Pointer, size uintptr)
 func memset(dst unsafe.Pointer, fill byte, size uintptr)
 
+// #llgo name: llvm.stackrestore
+func llvm_stackrestore(*int8)
+
+// #llgo name: llvm.stacksave
+func llvm_stacksave() *int8
+
 func bzero(dst unsafe.Pointer, size uintptr) {
 	memset(dst, 0, size)
 }

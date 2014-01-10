@@ -87,10 +87,11 @@ func buildLlgo() error {
 		}
 		triple = strings.TrimSpace(string(output))
 	}
-	buildctx, err = build.Context(triple)
+	llgobuildctx, err := build.ContextFromTriple(triple)
 	if err != nil {
 		return err
 	}
+	buildctx = &llgobuildctx.Context
 	log.Printf("GOARCH = %s, GOOS = %s", buildctx.GOARCH, buildctx.GOOS)
 	log.Printf("Built %s", llgobin)
 	if install_name_tool && sharedllvm {

@@ -22,6 +22,9 @@ func linkdeps(pkg *build.Package, output string) error {
 	var mkdeps func(pkg *build.Package, imports []string) error
 	mkdeps = func(pkg *build.Package, imports []string) error {
 		for _, path := range imports {
+			if path == "C" {
+				continue
+			}
 			if !deps[path] {
 				deps[path] = true
 				pkg, err := build.Import(path, "", 0)

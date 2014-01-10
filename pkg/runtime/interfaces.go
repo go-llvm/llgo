@@ -35,49 +35,6 @@ func compareE2E(a, b eface) bool {
 	return false
 }
 
-// convertI2I takes a target interface type, a source interface value, and
-// attempts to convert the source to the target type, storing the result
-// in the provided structure.
-//
-// FIXME cache type-to-interface conversions.
-func convertI2I(typ_, from_, to_ uintptr) bool {
-	dyntypptr := (**rtype)(unsafe.Pointer(from_))
-	if dyntypptr == nil {
-		return false
-	}
-	dyntyp := *dyntypptr
-	if dyntyp.uncommonType != nil {
-		targettyp := (*interfaceType)(unsafe.Pointer(typ_))
-		if len(targettyp.methods) > len(dyntyp.methods) {
-			return false
-		}
-		for i, tm := range targettyp.methods {
-			// TODO speed this up by iterating through in lockstep.
-			found := false
-			for _, sm := range dyntyp.methods {
-				if *sm.name == *tm.name {
-					if eqtyp(sm.typ, tm.typ) {
-						fnptraddr := to_ + unsafe.Sizeof(to_)*uintptr(2+i)
-						fnptrslot := (*uintptr)(unsafe.Pointer(fnptraddr))
-						*fnptrslot = uintptr(sm.ifn)
-						found = true
-					}
-					break
-				}
-			}
-			if !found {
-				return false
-			}
-		}
-		targetvalue := (*uintptr)(unsafe.Pointer(to_ + unsafe.Sizeof(to_)))
-		targetdyntyp := (**rtype)(unsafe.Pointer(to_))
-		*targetvalue = *(*uintptr)(unsafe.Pointer(from_ + unsafe.Sizeof(from_)))
-		*targetdyntyp = dyntyp
-		return true
-	}
-	return false
-}
-
 // convertI2E takes a non-empty interface
 // value and converts it to an empty one.
 func convertI2E(i iface) eface {
@@ -87,11 +44,60 @@ func convertI2E(i iface) eface {
 	return eface{i.tab.typ, i.data}
 }
 
-func convertE2I(e eface, typ unsafe.Pointer) (result iface) {
-	result.tab = new(itab)
+const ptrsize = unsafe.Sizeof(uintptr(0))
+
+func convertE2I(e eface, typ unsafe.Pointer) (ok bool, result iface) {
+	if e.rtyp == nil {
+		// nil conversion
+		return true, iface{}
+	}
+	if e.rtyp.uncommonType == nil {
+		// unnamed type, cannot succeed
+		return false, iface{}
+	}
+	targetType := (*interfaceType)(unsafe.Pointer(typ))
+	if len(targetType.methods) > len(e.rtyp.methods) {
+		// too few methods
+		return false, iface{}
+	}
+	size := unsafe.Sizeof(*result.tab)
+	size += (uintptr(len(targetType.methods)) - 1) * ptrsize
+	tab := (*itab)(malloc(size))
+	for i, tm := range targetType.methods {
+		found := false
+		for _, sm := range e.rtyp.methods {
+			if *sm.name == *tm.name {
+				if eqtyp(sm.typ, tm.typ) {
+					tabptr := unsafe.Pointer(tab)
+					fnptraddr := uintptr(tabptr) + unsafe.Sizeof(*tab) - ptrsize + uintptr(i)*ptrsize
+					*(*unsafe.Pointer)(unsafe.Pointer(fnptraddr)) = sm.ifn
+					found = true
+				}
+				break
+			}
+		}
+		if !found {
+			free(unsafe.Pointer(tab))
+			return false, iface{}
+		}
+	}
+	result.tab = tab
 	result.data = e.data
-	result.tab.inter = (*interfaceType)(typ)
-	result.tab.typ = (*rtype)(typ)
+	result.tab.inter = targetType
+	result.tab.typ = e.rtyp
+	return true, result
+}
+
+func mustConvertE2I(e eface, typ unsafe.Pointer) (result iface) {
+	ok, result := convertE2I(e, typ)
+	if !ok {
+		estring := "nil"
+		if e.rtyp != nil {
+			estring = *e.rtyp.string
+		}
+		ifaceType := (*interfaceType)(typ)
+		panic("interface conversion: interface is " + estring + ", not " + *ifaceType.string)
+	}
 	return result
 }
 
@@ -100,4 +106,34 @@ func reflect_ifaceE2I(t *rtype, src interface{}, dst unsafe.Pointer) {
 	// TODO
 	println("TODO: reflect.ifaceE2I")
 	llvm_trap()
+}
+
+func convertE2V(e eface, typ_, ptr unsafe.Pointer) bool {
+	typ := (*rtype)(typ_)
+	if !eqtyp(e.rtyp, typ) {
+		return false
+	}
+	if typ.size == 0 {
+		return true
+	}
+	var data unsafe.Pointer
+	if typ.size <= unsafe.Sizeof(data) {
+		data = unsafe.Pointer(&e.data)
+	} else {
+		data = unsafe.Pointer(e.data)
+	}
+	// TODO(axw) use copy alg
+	memcpy(ptr, data, typ.size)
+	return true
+}
+
+func mustConvertE2V(e eface, typ_, ptr unsafe.Pointer) {
+	if !convertE2V(e, typ_, ptr) {
+		estring := "nil"
+		if e.rtyp != nil {
+			estring = *e.rtyp.string
+		}
+		typ := (*rtype)(typ_)
+		panic("interface conversion: interface is " + estring + ", not " + *typ.string)
+	}
 }

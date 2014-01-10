@@ -37,14 +37,14 @@ type method struct {
 }
 
 type sliceType struct {
-	rtype
-	elem *rtype
+	rtype `runtime:"slice"`
+	elem  *rtype
 }
 
 type mapType struct {
-	rtype
-	key  *rtype
-	elem *rtype
+	rtype `runtime:"map"`
+	key   *rtype
+	elem  *rtype
 }
 
 type imethod struct {
@@ -54,30 +54,30 @@ type imethod struct {
 }
 
 type interfaceType struct {
-	rtype
+	rtype   `runtime:"interface"`
 	methods []imethod
 }
 
 type ptrType struct {
-	rtype
-	elem *rtype
+	rtype `runtime:"ptr"`
+	elem  *rtype
 }
 
 type arrayType struct {
-	rtype
+	rtype `runtime:"array"`
 	elem  *rtype
 	slice *rtype
 	len   uintptr
 }
 
 type chanType struct {
-	rtype
-	elem *rtype
-	dir  uintptr
+	rtype `runtime:"chan"`
+	elem  *rtype
+	dir   uintptr
 }
 
 type funcType struct {
-	rtype
+	rtype     `runtime:"func"`
 	dotdotdot bool
 	in        []*rtype
 	out       []*rtype
@@ -92,7 +92,7 @@ type structField struct {
 }
 
 type structType struct {
-	rtype
+	rtype  `runtime:"struct"`
 	fields []structField
 }
 
@@ -146,37 +146,96 @@ func eqtyp(t1, t2 *rtype) bool {
 		// types.
 		switch t1.kind {
 		case arrayKind:
+			t1 := (*arrayType)(unsafe.Pointer(t1))
+			t2 := (*arrayType)(unsafe.Pointer(t2))
+			return t1.len == t2.len && eqtyp(t1.elem, t2.elem)
 		case chanKind:
+			t1 := (*chanType)(unsafe.Pointer(t1))
+			t2 := (*chanType)(unsafe.Pointer(t2))
+			return t1.dir == t2.dir && eqtyp(t1.elem, t2.elem)
 		case funcKind:
 			t1 := (*funcType)(unsafe.Pointer(t1))
 			t2 := (*funcType)(unsafe.Pointer(t2))
-			if t1.dotdotdot == t2.dotdotdot {
-				nin, nout := len(t1.in), len(t1.out)
-				if nin == len(t2.in) && nout == len(t2.out) {
-					for i := 0; i < nin; i++ {
-						if !eqtyp(t1.in[i], t2.in[i]) {
-							return false
-						}
-					}
-					for i := 0; i < nout; i++ {
-						if !eqtyp(t1.out[i], t2.out[i]) {
-							return false
-						}
-					}
-					return true
+			if t1.dotdotdot != t2.dotdotdot {
+				return false
+			}
+			nin, nout := len(t1.in), len(t1.out)
+			if nin != len(t2.in) || nout != len(t2.out) {
+				return false
+			}
+			for i := 0; i < nin; i++ {
+				if !eqtyp(t1.in[i], t2.in[i]) {
+					return false
 				}
 			}
+			for i := 0; i < nout; i++ {
+				if !eqtyp(t1.out[i], t2.out[i]) {
+					return false
+				}
+			}
+			return true
 		case interfaceKind:
+			t1 := (*arrayType)(unsafe.Pointer(t1))
+			t2 := (*arrayType)(unsafe.Pointer(t2))
+			if len(t1.methods) != len(t2.methods) {
+				return false
+			}
+			for i, m1 := range t1.methods {
+				m2 := t2.methods[i]
+				if !sameString(m1.pkgPath, m2.pkgPath) {
+					return false
+				}
+				if !eqtyp(m1.typ, m2.typ) {
+					return false
+				}
+			}
+			return true
 		case mapKind:
+			t1 := (*mapType)(unsafe.Pointer(t1))
+			t2 := (*mapType)(unsafe.Pointer(t2))
+			return eqtyp(t1.key, t2.key) && eqtyp(t1.elem, t2.elem)
 		case ptrKind:
 			t1 := (*ptrType)(unsafe.Pointer(t1))
 			t2 := (*ptrType)(unsafe.Pointer(t2))
 			return eqtyp(t1.elem, t2.elem)
 		case sliceKind:
+			t1 := (*sliceType)(unsafe.Pointer(t1))
+			t2 := (*sliceType)(unsafe.Pointer(t2))
+			return eqtyp(t1.elem, t2.elem)
 		case structKind:
+			t1 := (*structType)(unsafe.Pointer(t1))
+			t2 := (*structType)(unsafe.Pointer(t2))
+			if len(t1.fields) != len(t2.fields) {
+				return false
+			}
+			for i, f1 := range t1.fields {
+				f2 := t2.fields[i]
+				if !sameString(f1.pkgPath, f2.pkgPath) {
+					return false
+				}
+				if !sameString(f1.name, f2.name) {
+					return false
+				}
+				if !sameString(f1.tag, f2.tag) {
+					return false
+				}
+				if !eqtyp(f1.typ, f2.typ) {
+					return false
+				}
+			}
+			return true
 		}
 	}
 	return false
+}
+
+func sameString(a, b *string) bool {
+	if a == nil {
+		return b == nil
+	} else if b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -211,5 +270,5 @@ type itab struct {
 	link   *itab
 	bad    int32
 	unused int32
-	fun    *func()
+	fun    unsafe.Pointer
 }

@@ -431,3 +431,7 @@ func Chtimes(name string, atime time.Time, mtime time.Time) error {
 	}
 	return nil
 }
+
+func Pipe() (r *File, w *File, err error) {
+	return nil, nil, syscall.EPERM
+}
