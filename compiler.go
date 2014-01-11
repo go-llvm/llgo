@@ -34,49 +34,15 @@ func assert(cond bool) {
 type Module struct {
 	llvm.Module
 	Name     string
-	Disposed bool
+	disposed bool
 }
 
-func (m Module) Dispose() {
-	if !m.Disposed {
-		m.Disposed = true
-		m.Module.Dispose()
+func (m *Module) Dispose() {
+	if m.disposed {
+		return
 	}
-}
-
-type Compiler interface {
-	Compile(filenames []string, importpath string) (*Module, error)
-	Dispose()
-}
-
-type compiler struct {
-	CompilerOptions
-
-	builder llvm.Builder
-	module  *Module
-	machine llvm.TargetMachine
-	target  llvm.TargetData
-	fileset *token.FileSet
-
-	typechecker *types.Config
-	importer    *goimporter.Importer
-
-	runtime   *runtimeInterface
-	llvmtypes *llvmTypeMap
-	types     *TypeMap
-
-	// runtimetypespkg is the type-checked runtime/types.go file,
-	// which is used for evaluating the types of runtime functions.
-	runtimetypespkg *types.Package
-
-	// pnacl is set to true if the target triple was originally
-	// specified as "pnacl". This is necessary, as the TargetTriple
-	// field will have been updated to the true triple used to
-	// compile PNaCl modules.
-	pnacl bool
-
-	debug_context []llvm.DebugDescriptor
-	debug_info    *llvm.DebugInfo
+	m.Module.Dispose()
+	m.disposed = true
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -139,44 +105,83 @@ func parseArch(arch string) string {
 	return "unknown"
 }
 
-func NewCompiler(opts CompilerOptions) (Compiler, error) {
-	compiler := &compiler{CompilerOptions: opts}
-	if strings.ToLower(compiler.TargetTriple) == "pnacl" {
-		compiler.TargetTriple = PNaClTriple
+type Compiler struct {
+	opts    CompilerOptions
+	machine *llvm.TargetMachine
+	target  llvm.TargetData
+	pnacl   bool
+}
+
+func NewCompiler(opts CompilerOptions) (*Compiler, error) {
+	compiler := &Compiler{opts: opts}
+	if strings.ToLower(compiler.opts.TargetTriple) == "pnacl" {
+		compiler.opts.TargetTriple = PNaClTriple
 		compiler.pnacl = true
 	}
-
 	// Triples are several fields separated by '-' characters.
 	// The first field is the architecture. The architecture's
 	// canonical form may include a '-' character, which would
 	// have been translated to '_' for inclusion in a triple.
-	triple := compiler.TargetTriple
+	triple := compiler.opts.TargetTriple
 	arch := triple[:strings.IndexRune(triple, '-')]
 	arch = parseArch(arch)
-	var machine llvm.TargetMachine
-	for target := llvm.FirstTarget(); target.C != nil; target = target.NextTarget() {
+	for target := llvm.FirstTarget(); target.C != nil && compiler.machine == nil; target = target.NextTarget() {
 		if arch == target.Name() {
-			machine = target.CreateTargetMachine(triple, "", "",
+			compiler.machine = new(llvm.TargetMachine)
+			*compiler.machine = target.CreateTargetMachine(
+				triple, "", "",
 				llvm.CodeGenLevelDefault,
 				llvm.RelocDefault,
-				llvm.CodeModelDefault)
-			compiler.machine = machine
-			break
+				llvm.CodeModelDefault,
+			)
+			runtime.SetFinalizer(compiler.machine, func(m *llvm.TargetMachine) { m.Dispose() })
 		}
 	}
-
-	if machine.C == nil {
+	if compiler.machine == nil {
 		return nil, fmt.Errorf("Invalid target triple: %s", triple)
 	}
-	compiler.target = machine.TargetData()
+	compiler.target = compiler.machine.TargetData()
 	return compiler, nil
 }
 
-func (compiler *compiler) Dispose() {
-	if compiler.machine.C != nil {
-		compiler.machine.Dispose()
-		compiler.machine.C = nil
+func (c *Compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
+	compiler := &compiler{
+		CompilerOptions: c.opts,
+		machine:         c.machine,
+		target:          c.target,
+		pnacl:           c.pnacl,
+		llvmtypes:       NewLLVMTypeMap(c.target),
 	}
+	return compiler.compile(filenames, importpath)
+}
+
+type compiler struct {
+	CompilerOptions
+
+	builder llvm.Builder
+	module  *Module
+	machine *llvm.TargetMachine
+	target  llvm.TargetData
+	fileset *token.FileSet
+
+	importer *goimporter.Importer
+
+	runtime   *runtimeInterface
+	llvmtypes *llvmTypeMap
+	types     *TypeMap
+
+	// runtimetypespkg is the type-checked runtime/types.go file,
+	// which is used for evaluating the types of runtime functions.
+	runtimetypespkg *types.Package
+
+	// pnacl is set to true if the target triple was originally
+	// specified as "pnacl". This is necessary, as the TargetTriple
+	// field will have been updated to the true triple used to
+	// compile PNaCl modules.
+	pnacl bool
+
+	debug_context []llvm.DebugDescriptor
+	debug_info    *llvm.DebugInfo
 }
 
 func (c *compiler) logf(format string, v ...interface{}) {
@@ -185,10 +190,7 @@ func (c *compiler) logf(format string, v ...interface{}) {
 	}
 }
 
-func (compiler *compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
-	// FIXME create a compilation state, rather than storing in 'compiler'.
-	compiler.llvmtypes = NewLLVMTypeMap(compiler.target)
-
+func (compiler *compiler) compile(filenames []string, importpath string) (m *Module, err error) {
 	buildctx, err := llgobuild.ContextFromTriple(compiler.TargetTriple)
 	if err != nil {
 		return nil, err
@@ -200,7 +202,6 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 		},
 		Build: &buildctx.Context,
 	}
-	compiler.typechecker = &impcfg.TypeChecker
 	compiler.importer = goimporter.New(impcfg)
 	program := ssa.NewProgram(compiler.importer.Fset, 0)
 	astFiles, err := parseFiles(compiler.importer.Fset, filenames)
@@ -229,7 +230,7 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	// otherwise we'll set a finalizer at the end. The caller may invoke
 	// Dispose manually, which will render the finalizer a no-op.
 	modulename := importpath
-	compiler.module = &Module{llvm.NewModule(modulename), modulename, false}
+	compiler.module = &Module{Module: llvm.NewModule(modulename), Name: modulename}
 	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.target.String())
 
