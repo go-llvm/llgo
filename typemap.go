@@ -67,7 +67,7 @@ type TypeMap struct {
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 	// spec says int is either 32-bit or 64-bit.
 	// ABI currently requires sizeof(int) == sizeof(uint) == sizeof(uintptr).
-	inttype := ctx.IntType(target.PointerSize())
+	inttype := ctx.IntType(8 * target.PointerSize())
 
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	elements := []llvm.Type{i8ptr, inttype}
