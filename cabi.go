@@ -280,34 +280,46 @@ func (ai *directArgInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 	directEncode(ctx, allocaBuilder, builder, ai.argTypes, args[ai.argOffset:ai.argOffset+len(ai.argTypes)], val)
 }
 
-func (ai *directArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder) llvm.Value {
-	fn := builder.GetInsertBlock().Parent()
+func directDecode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, valType llvm.Type, args []llvm.Value) llvm.Value {
 	var alloca llvm.Value
 
-	switch len(ai.argTypes) {
+	switch len(args) {
 	case 0:
-		return llvm.ConstNull(llvm.StructType(nil, false))
+		return llvm.ConstNull(ctx.StructType(nil, false))
 
 	case 1:
-		if ai.argTypes[0].C == ai.valType.C {
-			return fn.Param(ai.argOffset)
+		if args[0].Type().C == valType.C {
+			return args[0]
 		}
-		alloca = allocaBuilder.CreateAlloca(ai.valType, "")
-		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(ai.argTypes[0], 0), "")
-		builder.CreateStore(fn.Param(ai.argOffset), bitcast)
+		alloca = allocaBuilder.CreateAlloca(valType, "")
+		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(args[0].Type(), 0), "")
+		builder.CreateStore(args[0], bitcast)
 
 	case 2:
-		alloca = allocaBuilder.CreateAlloca(ai.valType, "")
-		encodeType := llvm.StructType(ai.argTypes, false)
+		alloca = allocaBuilder.CreateAlloca(valType, "")
+		var argTypes []llvm.Type
+		for _, a := range args {
+			argTypes = append(argTypes, a.Type())
+		}
+		encodeType := ctx.StructType(argTypes, false)
 		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(encodeType, 0), "")
-		builder.CreateStore(fn.Param(ai.argOffset), builder.CreateStructGEP(bitcast, 0, ""))
-		builder.CreateStore(fn.Param(ai.argOffset+1), builder.CreateStructGEP(bitcast, 1, ""))
+		builder.CreateStore(args[0], builder.CreateStructGEP(bitcast, 0, ""))
+		builder.CreateStore(args[1], builder.CreateStructGEP(bitcast, 1, ""))
 
 	default:
 		panic("unexpected argTypes size")
 	}
 
 	return builder.CreateLoad(alloca, "")
+}
+
+func (ai *directArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder) llvm.Value {
+	var args []llvm.Value
+	fn := builder.GetInsertBlock().Parent()
+	for i, _ := range ai.argTypes {
+		args = append(args, fn.Param(ai.argOffset+i))
+	}
+	return directDecode(ctx, allocaBuilder, builder, ai.valType, args)
 }
 
 type indirectArgInfo struct {
@@ -354,7 +366,7 @@ func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) 
 			for i := range elements {
 				elements[i] = tm.ToLLVM(results[i])
 			}
-			resultsType = llvm.StructType(elements, false)
+			resultsType = tm.ctx.StructType(elements, false)
 		}
 
 		switch aik {
