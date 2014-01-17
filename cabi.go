@@ -58,12 +58,12 @@ func (t structBType) ToLLVM(c llvm.Context) llvm.Type {
 }
 
 type arrayBType struct {
-	length int
+	length uint64
 	elem backendType
 }
 
 func (t arrayBType) ToLLVM(c llvm.Context) llvm.Type {
-	return llvm.ArrayType(t.elem.ToLLVM(c), t.length)
+	return llvm.ArrayType(t.elem.ToLLVM(c), int(t.length))
 }
 
 // align returns the smallest y >= x such that y % a == 0.
@@ -138,18 +138,78 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 	panic("unhandled type")
 }
 
-func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribute, bt backendType) ([]llvm.Type, []llvm.Attribute) {
+type offsetedType struct {
+	typ backendType
+	offset uint64
+}
+
+func (tm *llvmTypeMap) getBackendOffsets(bt backendType) (offsets []offsetedType) {
 	switch bt := bt.(type) {
 	case *structBType:
-		// This isn't exactly right, but it will do for now.
-		for _, f := range bt.fields {
-			argTypes, argAttrs = tm.expandType(argTypes, argAttrs, f)
+		for i, f := range bt.fields {
+			t := f.ToLLVM(tm.ctx)
+			offset := tm.target.ElementOffset(t, i)
+			fieldOffsets := tm.getBackendOffsets(f)
+			for _, fo := range fieldOffsets {
+				offsets = append(offsets, offsetedType{fo.typ, offset + fo.offset})
+			}
 		}
 
 	case *arrayBType:
-		// Ditto.
-		for i := 0; i != bt.length; i++ {
-			argTypes, argAttrs = tm.expandType(argTypes, argAttrs, bt.elem)
+		size := tm.target.TypeAllocSize(bt.elem.ToLLVM(tm.ctx))
+		fieldOffsets := tm.getBackendOffsets(bt.elem)
+		for i := uint64(0); i != bt.length; i++ {
+			for _, fo := range fieldOffsets {
+				offsets = append(offsets, offsetedType{fo.typ, i*size + fo.offset})
+			}
+		}
+
+	default:
+		offsets = []offsetedType { offsetedType{bt, 0} }
+	}
+
+	return
+}
+
+func (tm *llvmTypeMap) classifyEightbyte(offsets []offsetedType) llvm.Type {
+	if len(offsets) == 1 {
+		return offsets[0].typ.ToLLVM(tm.ctx)
+	}
+	// This implements classification for the basic types and step 4 of the
+	// classification algorithm. At this point, the only two possible
+	// classifications are SSE (floats) and INTEGER (everything else).
+	sse := true
+	for _, ot := range offsets {
+		if _, ok := ot.typ.(*floatBType); !ok {
+			sse = false
+			break
+		}
+	}
+	if sse {
+		// This can only be (float, float), which uses an SSE vector.
+		return llvm.VectorType(tm.ctx.FloatType(), 2)
+	} else {
+		width := offsets[len(offsets)-1].offset + tm.target.TypeAllocSize(offsets[len(offsets)-1].typ.ToLLVM(tm.ctx)) - offsets[0].offset
+		return tm.ctx.IntType(int(width) * 8)
+	}
+}
+
+func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribute, bt backendType) ([]llvm.Type, []llvm.Attribute) {
+	switch bt := bt.(type) {
+	case *structBType, *arrayBType:
+		bo := tm.getBackendOffsets(bt)
+		sp := 0
+		for sp != len(bo) && bo[sp].offset < 8 {
+			sp++
+		}
+		eb1 := bo[0:sp]
+		eb2 := bo[sp:]
+		if len(eb2) > 0 {
+			argTypes = append(argTypes, tm.classifyEightbyte(eb1), tm.classifyEightbyte(eb2))
+			argAttrs = append(argAttrs, 0, 0)
+		} else {
+			argTypes = append(argTypes, tm.classifyEightbyte(eb1))
+			argAttrs = append(argAttrs, 0)
 		}
 
 	default:
@@ -160,7 +220,125 @@ func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribut
 	return argTypes, argAttrs
 }
 
-func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) (t llvm.Type, argAttrs []llvm.Attribute) {
+type argInfo interface {
+	// Emit instructions to builder to ABI encode val and store result to args.
+	encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, args []llvm.Value, val llvm.Value)
+
+	// Emit instructions to builder to ABI decode and return the resulting Value.
+	decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder) llvm.Value
+}
+
+type retInfo interface {
+	// Prepare args to receive a value. allocaBuilder refers to a builder in the entry block.
+	prepare(ctx llvm.Context, allocaBuilder llvm.Builder, args []llvm.Value)
+
+	// Emit instructions to builder to ABI decode the return value(s), if any. call is the
+	// call instruction. Must be called after prepare().
+	decode(ctx llvm.Context, builder llvm.Builder, call llvm.Value) []llvm.Value
+
+	// Emit instructions to builder to ABI encode the return value(s), if any, and return.
+	encode(ctx llvm.Context, builder llvm.Builder, vals []llvm.Value)
+}
+
+type directArgInfo struct {
+	argOffset int
+	argTypes []llvm.Type
+	valType llvm.Type
+}
+
+func directEncode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, argTypes []llvm.Type, args []llvm.Value, val llvm.Value) {
+	valType := val.Type()
+
+	switch len(argTypes) {
+	case 0:
+		// do nothing
+
+	case 1:
+		if argTypes[0].C == valType.C {
+			args[0] = val
+			return
+		}
+		alloca := allocaBuilder.CreateAlloca(valType, "")
+		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(argTypes[0], 0), "")
+		builder.CreateStore(val, alloca)
+		args[0] = builder.CreateLoad(bitcast, "")
+
+	case 2:
+		encodeType := llvm.StructType(argTypes, false)
+		alloca := allocaBuilder.CreateAlloca(valType, "")
+		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(encodeType, 0), "")
+		builder.CreateStore(val, alloca)
+		args[0] = builder.CreateLoad(builder.CreateStructGEP(bitcast, 0, ""), "")
+		args[1] = builder.CreateLoad(builder.CreateStructGEP(bitcast, 1, ""), "")
+
+	default:
+		panic("unexpected argTypes size")
+	}
+}
+
+func (ai *directArgInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, args []llvm.Value, val llvm.Value) {
+	directEncode(ctx, allocaBuilder, builder, ai.argTypes, args[ai.argOffset:ai.argOffset+len(ai.argTypes)], val)
+}
+
+func (ai *directArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder) llvm.Value {
+	fn := builder.GetInsertBlock().Parent()
+	var alloca llvm.Value
+
+	switch len(ai.argTypes) {
+	case 0:
+		return llvm.ConstNull(llvm.StructType(nil, false))
+
+	case 1:
+		if ai.argTypes[0].C == ai.valType.C {
+			return fn.Param(ai.argOffset)
+		}
+		alloca = allocaBuilder.CreateAlloca(ai.valType, "")
+		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(ai.argTypes[0], 0), "")
+		builder.CreateStore(fn.Param(ai.argOffset), bitcast)
+
+	case 2:
+		alloca = allocaBuilder.CreateAlloca(ai.valType, "")
+		encodeType := llvm.StructType(ai.argTypes, false)
+		bitcast := builder.CreateBitCast(alloca, llvm.PointerType(encodeType, 0), "")
+		builder.CreateStore(fn.Param(ai.argOffset), builder.CreateStructGEP(bitcast, 0, ""))
+		builder.CreateStore(fn.Param(ai.argOffset+1), builder.CreateStructGEP(bitcast, 1, ""))
+
+	default:
+		panic("unexpected argTypes size")
+	}
+
+	return builder.CreateLoad(alloca, "")
+}
+
+type indirectArgInfo struct {
+	argOffset int
+}
+
+func (ai *indirectArgInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, args []llvm.Value, val llvm.Value) {
+	alloca := allocaBuilder.CreateAlloca(val.Type(), "")
+	builder.CreateStore(val, alloca)
+	args[ai.argOffset] = alloca
+}
+
+func (ai *indirectArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder) llvm.Value {
+	fn := builder.GetInsertBlock().Parent()
+	return builder.CreateLoad(fn.Param(ai.argOffset), "")
+}
+
+type directRetInfo struct {
+}
+
+func (ri *directRetInfo) prepare(ctx llvm.Context, allocaBuilder llvm.Builder, args []llvm.Value) {
+}
+
+func (ri *directRetInfo) decode(ctx llvm.Context, builder llvm.Builder, call llvm.Value) []llvm.Value {
+	return nil
+}
+
+func (ri *directRetInfo) encode(ctx llvm.Context, builder llvm.Builder, vals []llvm.Value) {
+}
+
+func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) (t llvm.Type, argAttrs []llvm.Attribute, retAttr llvm.Attribute, argInfos []argInfo, retInf retInfo) {
 	var returnType llvm.Type
 	var argTypes []llvm.Type
 	if len(results) == 0 {
@@ -181,7 +359,24 @@ func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) 
 
 		switch aik {
 		case AIK_Direct:
-			returnType = resultsType
+			var retFields []backendType
+			for _, t := range results {
+				retFields = append(retFields, tm.getBackendType(t))
+			}
+			bt := &structBType{retFields}
+
+			retTypes, retAttrs := tm.expandType(nil, nil, bt)
+			switch len(retTypes) {
+			case 0: // e.g., empty struct
+				returnType = llvm.VoidType()
+			case 1:
+				returnType = retTypes[0]
+				retAttr = retAttrs[0]
+			case 2:
+				returnType = llvm.StructType(retTypes, false)
+			default:
+				panic("unexpected expandType result")
+			}
 
 		case AIK_Indirect:
 			returnType = llvm.VoidType()
@@ -196,9 +391,13 @@ func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) 
 		switch aik {
 		case AIK_Direct:
 			bt := tm.getBackendType(arg)
+			argInfo := &directArgInfo{argOffset: len(argTypes), valType: bt.ToLLVM(tm.ctx)}
+			argInfos = append(argInfos, argInfo)
 			argTypes, argAttrs = tm.expandType(argTypes, argAttrs, bt)
+			argInfo.argTypes = argTypes[argInfo.argOffset:len(argTypes)]
 
 		case AIK_Indirect:
+			argInfos = append(argInfos, &indirectArgInfo{len(argTypes)})
 			argTypes = append(argTypes, llvm.PointerType(tm.ToLLVM(arg), 0))
 			argAttrs = append(argAttrs, llvm.ByValAttribute)
 		}
