@@ -544,3 +544,18 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 	fi.functionType = llvm.FunctionType(returnType, argTypes, false)
 	return
 }
+
+func (tm *llvmTypeMap) getSignatureInfo(sig *types.Signature) functionTypeInfo {
+	var args, results []types.Type
+	if sig.Recv() != nil {
+		args = []types.Type { sig.Recv().Type() }
+	}
+
+	for i := 0; i != sig.Params().Len(); i++ {
+		args = append(args, sig.Params().At(i).Type())
+	}
+	for i := 0; i != sig.Results().Len(); i++ {
+		results = append(results, sig.Results().At(i).Type())
+	}
+	return tm.getFunctionTypeInfo(args, results)
+}

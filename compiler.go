@@ -52,7 +52,7 @@ type Compiler interface {
 type compiler struct {
 	CompilerOptions
 
-	builder llvm.Builder
+	builder, allocaBuilder llvm.Builder
 	module  *Module
 	machine llvm.TargetMachine
 	target  llvm.TargetData

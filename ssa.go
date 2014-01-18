@@ -183,6 +183,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// Allocate stack space for locals in the prologue block.
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
+	fr.allocaBuilder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
