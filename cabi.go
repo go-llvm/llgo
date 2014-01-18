@@ -234,10 +234,10 @@ type retInfo interface {
 
 	// Emit instructions to builder to ABI decode the return value(s), if any. call is the
 	// call instruction. Must be called after prepare().
-	decode(ctx llvm.Context, builder llvm.Builder, call llvm.Value) []llvm.Value
+	decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, call llvm.Value) []llvm.Value
 
 	// Emit instructions to builder to ABI encode the return value(s), if any, and return.
-	encode(ctx llvm.Context, builder llvm.Builder, vals []llvm.Value)
+	encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, vals []llvm.Value)
 }
 
 type directArgInfo struct {
@@ -338,19 +338,143 @@ func (ai *indirectArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, 
 }
 
 type directRetInfo struct {
+	numResults int
+	retTypes []llvm.Type
+	resultsType llvm.Type
 }
 
 func (ri *directRetInfo) prepare(ctx llvm.Context, allocaBuilder llvm.Builder, args []llvm.Value) {
 }
 
-func (ri *directRetInfo) decode(ctx llvm.Context, builder llvm.Builder, call llvm.Value) []llvm.Value {
-	return nil
+func (ri *directRetInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, call llvm.Value) []llvm.Value {
+	var args []llvm.Value
+	switch len(ri.retTypes) {
+	case 0:
+		return nil
+	case 1:
+		args = []llvm.Value { call }
+	default:
+		args = make([]llvm.Value, len(ri.retTypes))
+		for i := 0; i != len(ri.retTypes); i++ {
+			args[i] = builder.CreateExtractValue(call, i, "")
+		}
+	}
+
+	d := directDecode(ctx, allocaBuilder, builder, ri.resultsType, args)
+
+	if ri.numResults == 1 {
+		return []llvm.Value { d }
+	} else {
+		results := make([]llvm.Value, ri.numResults)
+		for i := 0; i != ri.numResults; i++ {
+			results[i] = builder.CreateExtractValue(d, i, "")
+		}
+		return results
+	}
 }
 
-func (ri *directRetInfo) encode(ctx llvm.Context, builder llvm.Builder, vals []llvm.Value) {
+func (ri *directRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, vals []llvm.Value) {
+	if len(ri.retTypes) == 0 {
+		builder.CreateRetVoid()
+		return
+	}
+
+	var val llvm.Value
+	switch ri.numResults {
+	case 1:
+		val = vals[0]
+	default:
+		val = llvm.Undef(ri.resultsType)
+		for i, v := range vals {
+			val = builder.CreateInsertValue(val, v, i, "")
+		}
+	}
+
+	args := make([]llvm.Value, len(ri.retTypes))
+	directEncode(ctx, allocaBuilder, builder, ri.retTypes, args, val)
+
+	var retval llvm.Value
+	switch len(ri.retTypes) {
+	case 1:
+		retval = args[0]
+	default:
+		retval = llvm.Undef(ctx.StructType(ri.retTypes, false))
+		for i, v := range vals {
+			retval = builder.CreateInsertValue(retval, v, i, "")
+		}
+	}
+	builder.CreateRet(val)
 }
 
-func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) (t llvm.Type, argAttrs []llvm.Attribute, retAttr llvm.Attribute, argInfos []argInfo, retInf retInfo) {
+type indirectRetInfo struct {
+	numResults int
+	sretSlot llvm.Value
+	resultsType llvm.Type
+}
+
+func (ri *indirectRetInfo) prepare(ctx llvm.Context, allocaBuilder llvm.Builder, args []llvm.Value) {
+	ri.sretSlot = allocaBuilder.CreateAlloca(ri.resultsType, "")
+	args[0] = ri.sretSlot
+}
+
+func (ri *indirectRetInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, call llvm.Value) []llvm.Value {
+	if ri.numResults == 1 {
+		return []llvm.Value { builder.CreateLoad(ri.sretSlot, "") }
+	} else {
+		vals := make([]llvm.Value, ri.numResults)
+		for i, _ := range vals {
+			vals[i] = builder.CreateLoad(builder.CreateStructGEP(ri.sretSlot, i, ""), "")
+		}
+		return vals
+	}
+}
+
+func (ri *indirectRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, vals []llvm.Value) {
+	fn := builder.GetInsertBlock().Parent()
+	sretSlot := fn.Param(0)
+
+	if ri.numResults == 1 {
+		builder.CreateStore(vals[0], sretSlot)
+	} else {
+		for i, v := range vals {
+			builder.CreateStore(v, builder.CreateStructGEP(sretSlot, i, ""))
+		}
+	}
+}
+
+type functionTypeInfo struct {
+	functionType llvm.Type
+	argAttrs []llvm.Attribute
+	retAttr llvm.Attribute
+	argInfos []argInfo
+	retInf retInfo
+}
+
+func (fi *functionTypeInfo) declare(m llvm.Module, name string) llvm.Value {
+	fn := llvm.AddFunction(m, name, fi.functionType)
+	fn.AddFunctionAttr(fi.retAttr)
+	for i, a := range fi.argAttrs {
+		fn.Param(i).AddAttribute(a)
+	}
+	return fn
+}
+
+func (fi *functionTypeInfo) call(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, callee llvm.Value, args []llvm.Value) []llvm.Value {
+	callArgs := make([]llvm.Value, len(fi.argAttrs))
+	for i, a := range args {
+		fi.argInfos[i].encode(ctx, allocaBuilder, builder, callArgs, a)
+	}
+	fi.retInf.prepare(ctx, allocaBuilder, callArgs)
+	typedCallee := builder.CreateBitCast(callee, llvm.PointerType(fi.functionType, 0), "")
+	call := builder.CreateCall(typedCallee, callArgs, "")
+	call.AddInstrAttribute(0, fi.retAttr)
+	for i, a := range fi.argAttrs {
+		call.AddInstrAttribute(i+1, a)
+	}
+	return fi.retInf.decode(ctx, allocaBuilder, builder, call)
+}
+
+func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Type) (fi functionTypeInfo) {
 	var returnType llvm.Type
 	var argTypes []llvm.Type
 	if len(results) == 0 {
@@ -383,17 +507,19 @@ func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) 
 				returnType = llvm.VoidType()
 			case 1:
 				returnType = retTypes[0]
-				retAttr = retAttrs[0]
+				fi.retAttr = retAttrs[0]
 			case 2:
 				returnType = llvm.StructType(retTypes, false)
 			default:
 				panic("unexpected expandType result")
 			}
+			fi.retInf = &directRetInfo{numResults: len(results), retTypes: retTypes, resultsType: resultsType}
 
 		case AIK_Indirect:
 			returnType = llvm.VoidType()
 			argTypes = []llvm.Type { llvm.PointerType(resultsType, 0) }
-			argAttrs = []llvm.Attribute { llvm.StructRetAttribute }
+			fi.argAttrs = []llvm.Attribute { llvm.StructRetAttribute }
+			fi.retInf = &indirectRetInfo{numResults: len(results), resultsType: resultsType}
 		}
 	}
 
@@ -404,17 +530,17 @@ func (tm *llvmTypeMap) getFunctionType(args []types.Type, results []types.Type) 
 		case AIK_Direct:
 			bt := tm.getBackendType(arg)
 			argInfo := &directArgInfo{argOffset: len(argTypes), valType: bt.ToLLVM(tm.ctx)}
-			argInfos = append(argInfos, argInfo)
-			argTypes, argAttrs = tm.expandType(argTypes, argAttrs, bt)
+			fi.argInfos = append(fi.argInfos, argInfo)
+			argTypes, fi.argAttrs = tm.expandType(argTypes, fi.argAttrs, bt)
 			argInfo.argTypes = argTypes[argInfo.argOffset:len(argTypes)]
 
 		case AIK_Indirect:
-			argInfos = append(argInfos, &indirectArgInfo{len(argTypes)})
+			fi.argInfos = append(fi.argInfos, &indirectArgInfo{len(argTypes)})
 			argTypes = append(argTypes, llvm.PointerType(tm.ToLLVM(arg), 0))
-			argAttrs = append(argAttrs, llvm.ByValAttribute)
+			fi.argAttrs = append(fi.argAttrs, llvm.ByValAttribute)
 		}
 	}
 
-	t = llvm.FunctionType(returnType, argTypes, false)
+	fi.functionType = llvm.FunctionType(returnType, argTypes, false)
 	return
 }
