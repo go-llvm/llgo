@@ -9,9 +9,9 @@ import (
 	"go/token"
 	"sort"
 
+	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/ssa"
-	"code.google.com/p/go.tools/ssa/ssautil"
 	"github.com/axw/gollvm/llvm"
 )
 

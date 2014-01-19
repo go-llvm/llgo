@@ -5,9 +5,9 @@
 package llgo
 
 import (
+	"code.google.com/p/go.tools/go/loader"
+	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
-	goimporter "code.google.com/p/go.tools/importer"
-	"code.google.com/p/go.tools/ssa"
 	"go/ast"
 	"go/token"
 )
@@ -16,7 +16,7 @@ import (
 // *importer.PackageInfo, and processes all of the
 // llgo source annotations attached to each top-level
 // function and global variable.
-func (c *compiler) processAnnotations(u *unit, pkginfo *goimporter.PackageInfo) {
+func (c *compiler) processAnnotations(u *unit, pkginfo *loader.PackageInfo) {
 	members := make(map[types.Object]*LLVMValue, len(u.globals))
 	for k, v := range u.globals {
 		members[k.(ssa.Member).Object()] = v

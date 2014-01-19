@@ -16,9 +16,9 @@ import (
 	llgobuild "github.com/axw/llgo/build"
 	llgoimporter "github.com/axw/llgo/importer"
 
+	"code.google.com/p/go.tools/go/loader"
+	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
-	goimporter "code.google.com/p/go.tools/importer"
-	"code.google.com/p/go.tools/ssa"
 )
 
 func assert(cond bool) {
@@ -164,8 +164,6 @@ type compiler struct {
 	target  llvm.TargetData
 	fileset *token.FileSet
 
-	importer *goimporter.Importer
-
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
 	types     *TypeMap
@@ -195,66 +193,68 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	impcfg := &goimporter.Config{
+	impcfg := &loader.Config{
+		Fset: token.NewFileSet(),
 		TypeChecker: types.Config{
 			Import: llgoimporter.NewImporter(buildctx).Import,
 			Sizes:  compiler.llvmtypes,
 		},
 		Build: &buildctx.Context,
 	}
-	compiler.importer = goimporter.New(impcfg)
-	program := ssa.NewProgram(compiler.importer.Fset, 0)
-	astFiles, err := parseFiles(compiler.importer.Fset, filenames)
+	// Must use parseFiles, so we retain comments;
+	// this is important for annotation processing.
+	astFiles, err := parseFiles(impcfg.Fset, filenames)
 	if err != nil {
+		return nil, err
+	}
+	if err := impcfg.CreateFromFiles(importpath, astFiles...); err != nil {
 		return nil, err
 	}
 	// If no import path is specified, or the package's
 	// name (not path) is "main", then set the import
 	// path to be the same as the package's name.
-	if pkgname := astFiles[0].Name.String(); importpath == "" || pkgname == "main" {
-		importpath = pkgname
+	for pkgname, _ := range impcfg.CreatePkgs {
+		if importpath == "" || pkgname == "main" {
+			importpath = pkgname
+		}
 	}
-	mainPkginfo := compiler.importer.CreatePackage(importpath, astFiles...)
-	if mainPkginfo.Err != nil {
-		return nil, mainPkginfo.Err
+	// Create a "runtime" package too, so we can reference
+	// its types and functions in the compiler and generated
+	// code.
+	if importpath != "runtime" {
+		astFiles, err := parseRuntime(&buildctx.Context, impcfg.Fset)
+		if err != nil {
+			return nil, err
+		}
+		if err := impcfg.CreateFromFiles("runtime", astFiles...); err != nil {
+			return nil, err
+		}
 	}
-	// First call CreatePackages to resolve imports, and then CreatePackage
-	// to obtain the main package. The latter simply returns the package
-	// created by the former.
-	if err := program.CreatePackages(compiler.importer); err != nil {
+	iprog, err := impcfg.Load()
+	if err != nil {
 		return nil, err
 	}
-	mainpkg := program.CreatePackage(mainPkginfo)
+	program := ssa.Create(iprog, 0)
+	var mainPkginfo, runtimePkginfo *loader.PackageInfo
+	if pkgs := iprog.InitialPackages(); len(pkgs) == 1 {
+		mainPkginfo, runtimePkginfo = pkgs[0], pkgs[0]
+	} else {
+		mainPkginfo, runtimePkginfo = pkgs[0], pkgs[1]
+	}
+	mainPkg := program.CreatePackage(mainPkginfo)
 
-	// Create a Module, which contains the LLVM bitcode. Dispose it on panic,
-	// otherwise we'll set a finalizer at the end. The caller may invoke
-	// Dispose manually, which will render the finalizer a no-op.
+	// Create a Module, which contains the LLVM bitcode.
 	modulename := importpath
 	compiler.module = &Module{Module: llvm.NewModule(modulename), Name: modulename}
 	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.target.String())
 
-	// Map runtime types and functions.
-	runtimePkginfo := mainPkginfo
-	runtimePkg := mainpkg
-	if importpath != "runtime" {
-		astFiles, err := parseRuntime(&buildctx.Context, compiler.importer.Fset)
-		if err != nil {
-			return nil, err
-		}
-		runtimePkginfo = compiler.importer.CreatePackage("runtime", astFiles...)
-		if runtimePkginfo.Err != nil {
-			return nil, err
-		}
-		runtimePkg = program.CreatePackage(runtimePkginfo)
-	}
-
 	// Create a new translation unit.
-	unit := newUnit(compiler, mainpkg)
+	unit := newUnit(compiler, mainPkg)
 
 	// Create the runtime interface.
 	compiler.runtime, err = newRuntimeInterface(
-		runtimePkg.Object,
+		runtimePkginfo.Pkg,
 		compiler.module.Module,
 		compiler.llvmtypes,
 		FuncResolver(unit),
@@ -277,8 +277,8 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
-	mainpkg.Build()
-	unit.translatePackage(mainpkg)
+	mainPkg.Build()
+	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
 	if runtimePkginfo != mainPkginfo {
 		compiler.processAnnotations(unit, runtimePkginfo)
@@ -317,7 +317,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 
 	// Export runtime type information.
 	var exportedTypes []types.Type
-	for _, m := range mainpkg.Members {
+	for _, m := range mainPkg.Members {
 		if t, ok := m.(*ssa.Type); ok && ast.IsExported(t.Name()) {
 			exportedTypes = append(exportedTypes, t.Type())
 		}
@@ -330,7 +330,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 			return nil, fmt.Errorf("failed to create main.main: %v", err)
 		}
 	} else {
-		if err := llgoimporter.Export(buildctx, mainpkg.Object); err != nil {
+		if err := llgoimporter.Export(buildctx, mainPkg.Object); err != nil {
 			return nil, fmt.Errorf("failed to export package data: %v", err)
 		}
 	}
