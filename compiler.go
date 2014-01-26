@@ -207,17 +207,13 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	if err := impcfg.CreateFromFiles(importpath, astFiles...); err != nil {
-		return nil, err
-	}
 	// If no import path is specified, or the package's
 	// name (not path) is "main", then set the import
 	// path to be the same as the package's name.
-	for pkgname, _ := range impcfg.CreatePkgs {
-		if importpath == "" || pkgname == "main" {
-			importpath = pkgname
-		}
+	if pkgname := astFiles[0].Name.String(); importpath == "" || pkgname == "main" {
+		importpath = pkgname
 	}
+	impcfg.CreateFromFiles(importpath, astFiles...)
 	// Create a "runtime" package too, so we can reference
 	// its types and functions in the compiler and generated
 	// code.
@@ -226,9 +222,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		if err != nil {
 			return nil, err
 		}
-		if err := impcfg.CreateFromFiles("runtime", astFiles...); err != nil {
-			return nil, err
-		}
+		impcfg.CreateFromFiles("runtime", astFiles...)
 	}
 	iprog, err := impcfg.Load()
 	if err != nil {
