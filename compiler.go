@@ -280,6 +280,9 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
+	compiler.allocaBuilder = llvm.GlobalContext().NewBuilder()
+	defer compiler.allocaBuilder.Dispose()
+
 	mainpkg.Build()
 	unit.translatePackage(mainpkg)
 	compiler.processAnnotations(unit, mainPkginfo)
@@ -329,16 +332,20 @@ func (compiler *compiler) Compile(filenames []string, importpath string) (m *Mod
 	}
 	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
+	/*
 	if importpath == "main" {
 		// Wrap "main.main" in a call to runtime.main.
 		if err = compiler.createMainFunction(); err != nil {
 			return nil, fmt.Errorf("failed to create main.main: %v", err)
 		}
 	} else {
+	*/
 		if err := llgoimporter.Export(buildctx, mainpkg.Object); err != nil {
 			return nil, fmt.Errorf("failed to export package data: %v", err)
 		}
+	/*
 	}
+	*/
 
 	return compiler.module, nil
 }

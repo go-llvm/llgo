@@ -30,7 +30,7 @@ type intBType struct {
 }
 
 func (t intBType) ToLLVM(c llvm.Context) llvm.Type {
-	return c.IntType(t.width)
+	return c.IntType(t.width * 8)
 }
 
 type floatBType struct {
@@ -96,24 +96,27 @@ func (tm *llvmTypeMap) classify(t ...types.Type) abiArgInfo {
 
 func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 	switch t := t.(type) {
+	case *types.Named:
+		return tm.getBackendType(t.Underlying())
+
 	case *types.Basic:
 		switch t.Kind() {
 		case types.Bool, types.Uint8:
-			return &intBType{8, false}
+			return &intBType{1, false}
 		case types.Int8:
-			return &intBType{8, true}
+			return &intBType{1, true}
 		case types.Uint16:
-			return &intBType{16, false}
+			return &intBType{2, false}
 		case types.Int16:
-			return &intBType{16, true}
+			return &intBType{2, true}
 		case types.Uint32:
-			return &intBType{32, false}
+			return &intBType{4, false}
 		case types.Int32:
-			return &intBType{32, true}
+			return &intBType{4, true}
 		case types.Uint64:
-			return &intBType{64, false}
+			return &intBType{8, false}
 		case types.Int64:
-			return &intBType{64, true}
+			return &intBType{8, true}
 		case types.Uint, types.Uintptr:
 			return &intBType{tm.target.PointerSize(), false}
 		case types.Int:
@@ -131,11 +134,26 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 			f64 := &floatBType{true}
 			return &structBType{[]backendType{f64, f64}}
 		case types.String:
-			return &structBType{[]backendType{&intBType{tm.target.PointerSize(), false}, &ptrBType{llvm.Int8Type()}}}
+			return &structBType{[]backendType{&ptrBType{llvm.Int8Type()}, &intBType{tm.target.PointerSize(), false}}}
 		}
+
+	case *types.Struct:
+		var fields []backendType
+		for i := 0; i != t.NumFields(); i++ {
+			f := t.Field(i)
+			fields = append(fields, tm.getBackendType(f.Type()))
+		}
+		return &structBType{fields}
+
+	case *types.Pointer, *types.Signature:
+		return &ptrBType{llvm.Int8Type()}
+
+	case *types.Interface:
+		i8ptr := &ptrBType{llvm.Int8Type()}
+		return &structBType{[]backendType{i8ptr, i8ptr}}
 	}
 
-	panic("unhandled type")
+	panic("unhandled type: " + t.String())
 }
 
 type offsetedType struct {
@@ -146,8 +164,8 @@ type offsetedType struct {
 func (tm *llvmTypeMap) getBackendOffsets(bt backendType) (offsets []offsetedType) {
 	switch bt := bt.(type) {
 	case *structBType:
+		t := bt.ToLLVM(tm.ctx)
 		for i, f := range bt.fields {
-			t := f.ToLLVM(tm.ctx)
 			offset := tm.target.ElementOffset(t, i)
 			fieldOffsets := tm.getBackendOffsets(f)
 			for _, fo := range fieldOffsets {
@@ -454,7 +472,9 @@ func (fi *functionTypeInfo) declare(m llvm.Module, name string) llvm.Value {
 	fn := llvm.AddFunction(m, name, fi.functionType)
 	fn.AddFunctionAttr(fi.retAttr)
 	for i, a := range fi.argAttrs {
-		fn.Param(i).AddAttribute(a)
+		if a != 0 {
+			fn.Param(i).AddAttribute(a)
+		}
 	}
 	return fn
 }
@@ -479,6 +499,7 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 	var argTypes []llvm.Type
 	if len(results) == 0 {
 		returnType = llvm.VoidType()
+		fi.retInf = &directRetInfo{}
 	} else {
 		aik := tm.classify(results...)
 

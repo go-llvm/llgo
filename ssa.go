@@ -102,6 +102,9 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	// has already referenced.
 	llvmFunction := u.module.Module.NamedFunction(name)
 	if llvmFunction.IsNil() {
+		fti := u.llvmtypes.getSignatureInfo(f.Signature)
+		llvmFunction = fti.declare(u.module.Module, name)
+		/*
 		llvmType := u.llvmtypes.ToLLVM(f.Signature)
 		llvmType = llvmType.StructElementTypes()[0].ElementType()
 		if len(f.FreeVars) > 0 {
@@ -122,6 +125,7 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 		if f.Enclosing != nil {
 			llvmFunction.SetLinkage(llvm.PrivateLinkage)
 		}
+		*/
 		u.undefinedFuncs[f] = true
 	}
 	v := u.NewValue(llvmFunction, f.Signature)
@@ -148,6 +152,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		unit:   u,
 		blocks: make([]llvm.BasicBlock, len(f.Blocks)),
 		env:    make(map[ssa.Value]*LLVMValue),
+		tuples: make(map[ssa.Value][]*LLVMValue),
 	}
 
 	fr.logf("Define function: %s", f.String())
@@ -183,7 +188,6 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// Allocate stack space for locals in the prologue block.
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
-	fr.allocaBuilder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
@@ -219,6 +223,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 	}
 
+	var term llvm.Value
 	// If the function contains any defers, we must first call
 	// setjmp so we can call rundefers in response to a panic.
 	// We can short-circuit the check for defers with
@@ -263,10 +268,11 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 		fr.builder.SetInsertPointAtEnd(rdblock)
 		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
-		fr.builder.CreateBr(recoverBlock)
+		term = fr.builder.CreateBr(recoverBlock)
 	} else {
-		fr.builder.CreateBr(fr.blocks[0])
+		term = fr.builder.CreateBr(fr.blocks[0])
 	}
+	fr.allocaBuilder.SetInsertPointBefore(term)
 
 	for i, block := range f.Blocks {
 		fr.translateBlock(block, fr.blocks[i])
@@ -278,6 +284,7 @@ type frame struct {
 	blocks    []llvm.BasicBlock
 	backpatch map[ssa.Value]*LLVMValue
 	env       map[ssa.Value]*LLVMValue
+	tuples    map[ssa.Value][]*LLVMValue
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
@@ -411,8 +418,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 				fr.env[instr] = result
 			}
 		} else {
-			result = fr.createCall(fn, args)
-			fr.env[instr] = result
+			tuple := fr.createCall(fn, args)
+			if len(tuple) == 1 {
+				fr.env[instr] = tuple[0]
+			} else {
+				fr.tuples[instr] = tuple
+			}
 		}
 
 	case *ssa.ChangeInterface:
@@ -459,8 +470,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.createCall(fr.runtime.pushdefer, []*LLVMValue{fn})
 
 	case *ssa.Extract:
-		tuple := fr.value(instr.Tuple).LLVMValue()
-		elem := fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
+		var elem llvm.Value
+		if t, ok := fr.tuples[instr.Tuple]; ok {
+			elem = t[instr.Index].LLVMValue()
+		} else {
+			tuple := fr.value(instr.Tuple).LLVMValue()
+			elem = fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
+		}
 		elemtyp := instr.Type()
 		fr.env[instr] = fr.NewValue(elem, elemtyp)
 
