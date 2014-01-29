@@ -5,10 +5,15 @@
 package main
 
 import (
+	"go/build"
+	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"strings"
 )
+
+var gobin = os.Getenv("GOBIN")
 
 // userpath takes a path and resolves a leading "~" pattern to
 // the current or specified user's home directory. Note that the
@@ -42,4 +47,18 @@ func userpath(path string) (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// findCommand returns the path to the binary from
+// the specified package path.
+func findCommand(pkgpath string) (string, error) {
+	_, cmdname := path.Split(pkgpath)
+	if gobin != "" {
+		return filepath.Join(gobin, cmdname), nil
+	}
+	pkg, err := build.Import(pkgpath, "", build.FindOnly)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(pkg.BinDir, cmdname), nil
 }

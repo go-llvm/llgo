@@ -6,10 +6,8 @@ package main
 
 import (
 	"fmt"
-	"go/build"
 	"log"
 	"os"
-	"path"
 	"strings"
 )
 
@@ -20,11 +18,10 @@ var llgobuildbin string
 func buildLlgoTools() error {
 	log.Println("Building llgo-build")
 
-	pkg, err := build.Import(llgoBuildPath, "", build.FindOnly)
-	if err != nil {
+	var err error
+	if llgobuildbin, err = findCommand(llgoBuildPath); err != nil {
 		return err
 	}
-	llgobuildbin = path.Join(pkg.BinDir, "llgo-build")
 	if _, err = os.Stat(llgobuildbin); err == nil {
 		err = os.Remove(llgobuildbin)
 		if err != nil {

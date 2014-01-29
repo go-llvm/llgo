@@ -231,7 +231,7 @@ func buildPackage(pkg *build.Package, output string) error {
 	if test {
 		args = append(args, pkg.TestGoFiles...)
 	}
-	cmd := exec.Command("llgo", args...)
+	cmd := exec.Command(llgobin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := runCmd(cmd)
