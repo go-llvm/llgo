@@ -236,7 +236,7 @@ func (tm *llvmTypeMap) funcLLVMType(f *types.Signature, name string) llvm.Type {
 			paramvars[i+1] = params.At(i)
 		}
 		params = types.NewTuple(paramvars...)
-		f := types.NewSignature(nil, nil, params, f.Results(), f.IsVariadic())
+		f := types.NewSignature(nil, nil, params, f.Results(), f.Variadic())
 		return tm.toLLVM(f, name)
 	}
 
@@ -696,7 +696,7 @@ func (tm *TypeMap) funcRuntimeType(f *types.Signature) (global, ptr llvm.Value) 
 	tm.types.Set(f, runtimeTypeInfo{global, ptr})
 	funcType = llvm.ConstInsertValue(funcType, rtype, []uint32{0})
 	// dotdotdot
-	if f.IsVariadic() {
+	if f.Variadic() {
 		variadic := llvm.ConstInt(llvm.Int1Type(), 1, false)
 		funcType = llvm.ConstInsertValue(funcType, variadic, []uint32{1})
 	}
@@ -814,7 +814,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
 		// mtyp (method type, no receiver)
 		{
-			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
+			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
 			mtyp := tm.ToRuntime(ftyp)
 			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
 		}

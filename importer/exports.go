@@ -181,7 +181,7 @@ func (x *exporter) exportName(t interface{}) {
 		}
 		x.write("(")
 		if p := t.Params(); p != nil {
-			if t.IsVariadic() {
+			if t.Variadic() {
 				for i := 0; i < p.Len(); i++ {
 					if i > 0 {
 						x.write(", ")
@@ -251,7 +251,7 @@ func (x *exporter) write(a string, b ...interface{}) {
 func (x *exporter) exportObject(obj types.Object) {
 	switch t := obj.(type) {
 	case *types.Var:
-		if !obj.IsExported() {
+		if !obj.Exported() {
 			return
 		}
 		x.write("\tvar @\"\".%s ", obj.Name())
@@ -260,7 +260,7 @@ func (x *exporter) exportObject(obj types.Object) {
 	case *types.Func:
 		sig := t.Type().(*types.Signature)
 		recv := sig.Recv()
-		if recv == nil && !t.IsExported() {
+		if recv == nil && !t.Exported() {
 			return
 			// The package "go/ast" has an interface "Decl" (http://golang.org/pkg/go/ast/#Decl)
 			// containing "filtered or unexported methods", specifically a method named "declNode".
@@ -288,7 +288,7 @@ func (x *exporter) exportObject(obj types.Object) {
 		x.exportName(sig)
 		x.write("\n")
 	case *types.Const:
-		if !t.IsExported() {
+		if !t.Exported() {
 			return
 		}
 		x.write("\tconst @\"\".%s ", t.Name())
