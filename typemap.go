@@ -716,7 +716,7 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 	global, ptr = tm.makeRuntimeTypeGlobal(interfaceType, typeString(i))
 	tm.types.Set(i, runtimeTypeInfo{global, ptr})
 	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
-	methodset := i.MethodSet()
+	methodset := types.NewMethodSet(i)
 	imethods := make([]llvm.Value, methodset.Len())
 	for index := 0; index < methodset.Len(); index++ {
 		method := methodset.At(index).Obj()
@@ -791,9 +791,9 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 	var methodset, pmethodset *types.MethodSet
 	if p != nil {
-		methodset = p.MethodSet()
+		methodset = types.NewMethodSet(p)
 	} else {
-		methodset = n.MethodSet()
+		methodset = types.NewMethodSet(n)
 	}
 
 	// Store methods. All methods must be stored, not only exported ones;
@@ -830,7 +830,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		if p == nil {
 			if tm.Sizeof(n) > int64(tm.target.PointerSize()) {
 				if pmethodset == nil {
-					pmethodset = types.NewPointer(n).MethodSet()
+					pmethodset = types.NewMethodSet(types.NewPointer(n))
 				}
 				pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
 				ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())
