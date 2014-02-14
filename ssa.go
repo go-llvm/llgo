@@ -154,6 +154,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
 	delete(u.undefinedFuncs, f)
 
+	// Push the function onto the debug context.
+	// TODO(axw) create a fake CU for synthetic functions
+	if u.GenerateDebug && f.Synthetic == "" {
+		u.debug.pushFunctionContext(llvmFunction, f.Signature, f.Pos())
+		defer u.debug.popFunctionContext()
+		u.debug.setLocation(u.builder, f.Pos())
+	}
+
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
 	if f.Recover != nil {
@@ -176,8 +184,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 		paramOffset++
 	}
+	// Map parameter positions to indices. We use this
+	// when processing locals to map back to parameters
+	// when generating debug metadata.
+	paramPos := make(map[token.Pos]int)
 	for i, param := range f.Params {
-		fr.env[param] = fr.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
+		paramPos[param.Pos()] = i + paramOffset
+		llparam := llvmFunction.Param(i + paramOffset)
+		fr.env[param] = fr.NewValue(llparam, param.Type())
 	}
 
 	// Allocate stack space for locals in the prologue block.
@@ -189,6 +203,13 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
 		fr.env[local] = value
+		if fr.GenerateDebug {
+			paramIndex, ok := paramPos[local.Pos()]
+			if !ok {
+				paramIndex = -1
+			}
+			fr.debug.declare(fr.builder, local, alloca, paramIndex)
+		}
 	}
 
 	// Move any allocs relating to named results from the entry block
@@ -280,6 +301,10 @@ type frame struct {
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
+	if fr.GenerateDebug {
+		fr.debug.pushBlockContext(b.Instrs[0].Pos())
+		defer fr.debug.popBlockContext()
+	}
 	fr.builder.SetInsertPointAtEnd(llb)
 	for _, instr := range b.Instrs {
 		fr.instruction(instr)
@@ -373,6 +398,9 @@ func (fr *frame) backpatcher(v ssa.Value) func() {
 
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
+	if fr.GenerateDebug {
+		fr.debug.setLocation(fr.builder, instr.Pos())
+	}
 
 	// Check if we'll need to backpatch; see comment
 	// in fr.value().

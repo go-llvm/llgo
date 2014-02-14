@@ -5,183 +5,140 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
-	"go/ast"
+	"debug/dwarf"
 	"go/token"
+
+	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/types"
+
+	"github.com/axw/gollvm/llvm"
+	"github.com/axw/llgo/debug"
 )
 
-// llgo constants.
 const (
-	LLGOAuthor   = "Andrew Wilkins <axwalk@gmail.com>"
-	LLGOProducer = "llgo " + LLGOVersion + " (" + LLGOAuthor + ")"
+	// non-standard debug metadata tags
+	tagAutoVariable dwarf.Tag = 0x100
+	tagArgVariable  dwarf.Tag = 0x101
 )
 
-// Go builtin types.
-var (
-	int32_debug_type = &llvm.BasicTypeDescriptor{
-		Name:         "int32",
-		Size:         32,
-		Alignment:    32,
-		TypeEncoding: llvm.DW_ATE_signed,
-	}
-	void_debug_type = &llvm.BasicTypeDescriptor{
-		Name:      "void",
-		Size:      0,
-		Alignment: 0,
-	}
-)
-
-func (c *compiler) tollvmDebugDescriptor(t types.Type) llvm.DebugDescriptor {
-	switch t := t.(type) {
-	case *types.Pointer:
-		return llvm.NewPointerDerivedType(c.tollvmDebugDescriptor(t.Elem()))
-	case nil:
-		return void_debug_type
-	}
-	bt := &llvm.BasicTypeDescriptor{
-		Name:      t.String(),
-		Size:      uint64(c.types.Sizeof(t) * 8),
-		Alignment: uint64(c.types.Alignof(t) * 8),
-	}
-	if basic, ok := t.(*types.Basic); ok {
-		switch bi := basic.Info(); {
-		case bi&types.IsBoolean != 0:
-			bt.TypeEncoding = llvm.DW_ATE_boolean
-		case bi&types.IsUnsigned != 0:
-			bt.TypeEncoding = llvm.DW_ATE_unsigned
-		case bi&types.IsInteger != 0:
-			bt.TypeEncoding = llvm.DW_ATE_signed
-		case bi&types.IsFloat != 0:
-			bt.TypeEncoding = llvm.DW_ATE_float
-		}
-	}
-	return bt
+type debugInfo struct {
+	debug.DebugInfo
+	debug.TypeMap
+	module       llvm.Module
+	blockUid     uint32
+	cu           map[*token.File]*debug.CompileUnitDescriptor
+	debugContext []debug.DebugDescriptor
 }
 
-func (c *compiler) pushDebugContext(d llvm.DebugDescriptor) {
-	c.debug_context = append(c.debug_context, d)
+func (d *debugInfo) pushContext(dd debug.DebugDescriptor) {
+	d.debugContext = append(d.debugContext, dd)
 }
 
-func (c *compiler) popDebugContext() (top llvm.DebugDescriptor) {
-	n := len(c.debug_context)
-	top, c.debug_context = c.debug_context[n-1], c.debug_context[:n-1]
+func (d *debugInfo) popContext() (top debug.DebugDescriptor) {
+	n := len(d.debugContext)
+	top, d.debugContext = d.debugContext[n-1], d.debugContext[:n-1]
 	return top
 }
 
-func (c *compiler) currentDebugContext() llvm.DebugDescriptor {
-	if len(c.debug_context) == 0 {
+func (d *debugInfo) context() debug.DebugDescriptor {
+	if len(d.debugContext) == 0 {
 		return nil
 	}
-	return c.debug_context[len(c.debug_context)-1]
+	return d.debugContext[len(d.debugContext)-1]
 }
 
-func (c *compiler) setDebugLine(pos token.Pos) {
-	ctx := c.currentDebugContext()
-	if ctx == nil {
-		return
-	}
-	file := c.fileset.File(pos)
-	ld := &llvm.LineDescriptor{
+func (d *debugInfo) pushBlockContext(pos token.Pos) {
+	uid := d.blockUid
+	d.blockUid++
+	file := d.Fset.File(pos)
+	d.pushContext(&debug.BlockDescriptor{
+		File:    &d.getCompileUnit(file).Path,
 		Line:    uint32(file.Line(pos)),
-		Context: ctx,
-	}
-	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(ld))
+		Context: d.context(),
+		Id:      uid,
+	})
 }
 
-var uniqueId uint32
-
-func (c *compiler) createBlockMetadata(stmt *ast.BlockStmt) llvm.DebugDescriptor {
-	ctx := c.currentDebugContext()
-	if ctx == nil {
-		return nil
-	}
-	uniqueId++
-	file := c.fileset.File(stmt.Pos())
-	fd := llvm.FileDescriptor(file.Name())
-	return &llvm.BlockDescriptor{
-		File:    &fd,
-		Line:    uint32(file.Line(stmt.Pos())),
-		Context: ctx,
-		Id:      uniqueId,
-	}
+func (d *debugInfo) popBlockContext() {
+	d.popContext()
 }
 
-func (c *compiler) createFunctionMetadata(f *ast.FuncDecl, fn *LLVMValue) llvm.DebugDescriptor {
-	if len(c.debug_context) == 0 {
-		return nil
+func (d *debugInfo) getCompileUnit(file *token.File) *debug.CompileUnitDescriptor {
+	if d.cu == nil {
+		d.cu = make(map[*token.File]*debug.CompileUnitDescriptor)
 	}
+	cu := d.cu[file]
+	if cu == nil {
+		var path string
+		if file != nil {
+			path = d.Fset.File(file.Pos(0)).Name()
+		}
+		cu = &debug.CompileUnitDescriptor{
+			Language: debug.DW_LANG_Go,
+			Path:     debug.FileDescriptor(path),
+			Producer: "llgo",
+			Runtime:  LLGORuntimeVersion,
+		}
+		d.cu[file] = cu
+	}
+	return cu
+}
 
-	file := c.fileset.File(f.Pos())
-	fnptr := fn.value
-	fun := fnptr.IsAFunction()
-	if fun.IsNil() {
-		fnptr = llvm.ConstExtractValue(fn.value, []uint32{0})
-	}
-	meta := &llvm.SubprogramDescriptor{
+func (d *debugInfo) pushFunctionContext(fnptr llvm.Value, sig *types.Signature, pos token.Pos) {
+	subprog := &debug.SubprogramDescriptor{
 		Name:        fnptr.Name(),
-		DisplayName: f.Name.Name,
-		Path:        llvm.FileDescriptor(file.Name()),
-		Line:        uint32(file.Line(f.Pos())),
-		ScopeLine:   uint32(file.Line(f.Body.Pos())),
-		Context:     &llvm.ContextDescriptor{llvm.FileDescriptor(file.Name())},
-		Function:    fnptr}
-
-	var result types.Type
-	var metaparams []llvm.DebugDescriptor
-	if ftyp, ok := fn.Type().(*types.Signature); ok {
-		if recv := ftyp.Recv(); recv != nil {
-			metaparams = append(metaparams, c.tollvmDebugDescriptor(recv.Type()))
-		}
-		if ftyp.Params() != nil {
-			for i := 0; i < ftyp.Params().Len(); i++ {
-				p := ftyp.Params().At(i)
-				metaparams = append(metaparams, c.tollvmDebugDescriptor(p.Type()))
-			}
-		}
-		if ftyp.Results() != nil {
-			result = ftyp.Results().At(0).Type()
-			// TODO: what to do with multiple returns?
-			for i := 1; i < ftyp.Results().Len(); i++ {
-				p := ftyp.Results().At(i)
-				metaparams = append(metaparams, c.tollvmDebugDescriptor(p.Type()))
-			}
-		}
+		DisplayName: fnptr.Name(),
+		Function:    fnptr,
 	}
-
-	meta.Type = llvm.NewSubroutineCompositeType(
-		c.tollvmDebugDescriptor(result),
-		metaparams,
-	)
-
-	// compile unit is the first context object pushed
-	compileUnit := c.debug_context[0].(*llvm.CompileUnitDescriptor)
-	compileUnit.Subprograms = append(compileUnit.Subprograms, meta)
-	return meta
+	file := d.Fset.File(pos)
+	cu := d.getCompileUnit(file)
+	subprog.File = file.Name()
+	subprog.Context = &cu.Path
+	if file != nil {
+		subprog.Line = uint32(file.Line(pos))
+		subprog.ScopeLine = uint32(file.Line(pos)) // TODO(axw)
+	}
+	sigType := d.TypeDebugDescriptor(sig).(*debug.CompositeTypeDescriptor)
+	subroutineType := sigType.Members[0]
+	subprog.Type = subroutineType
+	cu.Subprograms = append(cu.Subprograms, subprog)
+	d.pushContext(subprog)
 }
 
-// createLocalVariableMetadata creates and returns a debug descriptor for
-// a local variable in a function.
-//
-// obj is the go/types object for the var.
-// paramIndex is 0 for "auto" variables (non-parameter stack vars), and a
-// 1-based index for parameter vars.
-func (c *compiler) createLocalVariableMetadata(obj types.Object, paramIndex int) llvm.DebugDescriptor {
-	ctx := c.currentDebugContext()
-	if ctx == nil {
-		return nil
+func (d *debugInfo) popFunctionContext() {
+	d.popContext()
+}
+
+// declare creates an llvm.dbg.declare call for the specified function
+// parameter or local variable.
+func (d *debugInfo) declare(b llvm.Builder, v ssa.Value, llv llvm.Value, paramIndex int) {
+	tag := tagAutoVariable
+	if paramIndex >= 0 {
+		tag = tagArgVariable
 	}
-	tag := llvm.DW_TAG_auto_variable
-	if paramIndex > 0 {
-		tag = llvm.DW_TAG_arg_variable
+	ld := debug.NewLocalVariableDescriptor(tag)
+	ld.Argument = uint32(paramIndex + 1)
+	ld.Name = llv.Name()
+	if file := d.Fset.File(v.Pos()); file != nil {
+		ld.Line = uint32(file.Position(v.Pos()).Line)
+		ld.File = &d.getCompileUnit(file).Path
 	}
-	position := c.fileset.Position(obj.Pos())
-	ld := llvm.NewLocalVariableDescriptor(tag)
-	ld.Argument = uint32(paramIndex)
-	ld.Line = uint32(position.Line)
-	ld.Name = obj.Name()
-	ld.File = &llvm.ContextDescriptor{llvm.FileDescriptor(position.Filename)}
-	ld.Type = c.tollvmDebugDescriptor(obj.Type())
-	ld.Context = ctx
-	return ld
+	ld.Type = d.TypeDebugDescriptor(deref(v.Type()))
+	ld.Context = d.context()
+	b.InsertDeclare(d.module, llvm.MDNode([]llvm.Value{llv}), d.MDNode(ld))
+}
+
+// value creates an llvm.dbg.value call for the specified register value.
+func (d *debugInfo) value(b llvm.Builder, v ssa.Value, llv llvm.Value, paramIndex int) {
+	// TODO(axw)
+}
+
+func (d *debugInfo) setLocation(b llvm.Builder, pos token.Pos) {
+	position := d.Fset.Position(pos)
+	b.SetCurrentDebugLocation(llvm.MDNode([]llvm.Value{
+		llvm.ConstInt(llvm.Int32Type(), uint64(position.Line), true),
+		llvm.ConstInt(llvm.Int32Type(), uint64(position.Column), true),
+		d.MDNode(d.context()),
+		llvm.Value{},
+	}))
 }

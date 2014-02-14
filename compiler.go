@@ -178,8 +178,7 @@ type compiler struct {
 	// compile PNaCl modules.
 	pnacl bool
 
-	debug_context []llvm.DebugDescriptor
-	debug_info    *llvm.DebugInfo
+	debug debugInfo
 }
 
 func (c *compiler) logf(format string, v ...interface{}) {
@@ -271,6 +270,11 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	compiler.builder = llvm.GlobalContext().NewBuilder()
 	defer compiler.builder.Dispose()
 
+	// Initialise debugging.
+	compiler.debug.module = compiler.module.Module
+	compiler.debug.Fset = impcfg.Fset
+	compiler.debug.Sizes = compiler.llvmtypes
+
 	mainPkg.Build()
 	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
@@ -278,36 +282,13 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		compiler.processAnnotations(unit, runtimePkginfo)
 	}
 
-	/*
-		compiler.debug_info = &llvm.DebugInfo{}
-		// Compile each file in the package.
-		for _, file := range files {
-			if compiler.GenerateDebug {
-				cu := &llvm.CompileUnitDescriptor{
-					Language: llvm.DW_LANG_Go,
-					Path:     llvm.FileDescriptor(fset.File(file.Pos()).Name()),
-					Producer: LLGOProducer,
-					Runtime:  LLGORuntimeVersion,
-				}
-				compiler.pushDebugContext(cu)
-				compiler.pushDebugContext(&cu.Path)
-			}
-			for _, decl := range file.Decls {
-				compiler.VisitDecl(decl)
-			}
-			if compiler.GenerateDebug {
-				compiler.popDebugContext()
-				cu := compiler.popDebugContext()
-				if len(compiler.debug_context) > 0 {
-					log.Panicln(compiler.debug_context)
-				}
-				compiler.module.AddNamedMetadataOperand(
-					"llvm.dbg.cu",
-					compiler.debug_info.MDNode(cu),
-				)
-			}
-		}
-	*/
+	// Finalise debugging.
+	for _, cu := range compiler.debug.cu {
+		compiler.module.AddNamedMetadataOperand(
+			"llvm.dbg.cu",
+			compiler.debug.MDNode(cu),
+		)
+	}
 
 	// Export runtime type information.
 	var exportedTypes []types.Type
@@ -373,7 +354,7 @@ func (c *compiler) createMainFunction() error {
 	ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{llvm.Int32Type(), ptrptr, ptrptr}, true)
 	main := llvm.AddFunction(c.module.Module, "main", ftyp)
 
-	c.builder.SetCurrentDebugLocation(c.debug_info.MDNode(nil))
+	c.builder.SetCurrentDebugLocation(c.debug.MDNode(nil))
 	entry := llvm.AddBasicBlock(main, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
 	runtimeMainParamTypes := runtimeMain.Type().ElementType().ParamTypes()
