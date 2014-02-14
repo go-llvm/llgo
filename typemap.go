@@ -5,12 +5,13 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/go/types/typemap"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"reflect"
+
+	"code.google.com/p/go.tools/go/types"
+	"code.google.com/p/go.tools/go/types/typemap"
+	"github.com/axw/gollvm/llvm"
 )
 
 type MethodResolver interface {
@@ -46,6 +47,7 @@ type TypeMap struct {
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
 	alg            *algorithmMap
+	types.MethodSetCache
 
 	hashAlgFunctionType,
 	equalAlgFunctionType,
@@ -716,7 +718,7 @@ func (tm *TypeMap) interfaceRuntimeType(i *types.Interface) (global, ptr llvm.Va
 	global, ptr = tm.makeRuntimeTypeGlobal(interfaceType, typeString(i))
 	tm.types.Set(i, runtimeTypeInfo{global, ptr})
 	interfaceType = llvm.ConstInsertValue(interfaceType, rtype, []uint32{0})
-	methodset := types.NewMethodSet(i)
+	methodset := tm.MethodSet(i)
 	imethods := make([]llvm.Value, methodset.Len())
 	for index := 0; index < methodset.Len(); index++ {
 		method := methodset.At(index).Obj()
@@ -791,9 +793,9 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 	var methodset, pmethodset *types.MethodSet
 	if p != nil {
-		methodset = types.NewMethodSet(p)
+		methodset = tm.MethodSet(p)
 	} else {
-		methodset = types.NewMethodSet(n)
+		methodset = tm.MethodSet(n)
 	}
 
 	// Store methods. All methods must be stored, not only exported ones;
@@ -830,7 +832,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		if p == nil {
 			if tm.Sizeof(n) > int64(tm.target.PointerSize()) {
 				if pmethodset == nil {
-					pmethodset = types.NewMethodSet(types.NewPointer(n))
+					pmethodset = tm.MethodSet(types.NewPointer(n))
 				}
 				pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
 				ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())

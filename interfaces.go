@@ -16,7 +16,7 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 	llitab := c.builder.CreateExtractValue(lliface, 0, "")
 	llvalue := c.builder.CreateExtractValue(lliface, 1, "")
 	sig := method.Type().(*types.Signature)
-	methodset := types.NewMethodSet(sig)
+	methodset := c.types.MethodSet(sig.Recv().Type())
 	// TODO(axw) cache ordered method index
 	var index int
 	for i := 0; i < methodset.Len(); i++ {
