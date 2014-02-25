@@ -18,6 +18,10 @@ func linkdeps(pkg *build.Package, output string) error {
 	deps := make(map[string]bool)
 	deps["runtime"] = true
 	deps["unsafe"] = true
+	if len(pkg.CgoFiles) > 0 {
+		pkg.Imports = append(pkg.Imports, "runtime/cgo")
+		pkg.Imports = append(pkg.Imports, "syscall")
+	}
 
 	var mkdeps func(pkg *build.Package, imports []string) error
 	mkdeps = func(pkg *build.Package, imports []string) error {

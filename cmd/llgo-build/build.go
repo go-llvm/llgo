@@ -6,7 +6,6 @@ package main
 
 import (
 	"fmt"
-	llgobuild "github.com/axw/llgo/build"
 	"go/build"
 	"io"
 	"io/ioutil"
@@ -15,7 +14,10 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	llgobuild "github.com/axw/llgo/build"
 )
 
 const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
@@ -31,6 +33,9 @@ func (r *renamedFileInfo) Name() string {
 
 func runCmd(cmd *exec.Cmd) error {
 	if printcommands {
+		if cmd.Dir != "" {
+			log.Printf("[cwd=%s]", cmd.Dir)
+		}
 		s := fmt.Sprint(cmd.Args)
 		log.Println(s[1 : len(s)-1])
 	}
@@ -38,11 +43,11 @@ func runCmd(cmd *exec.Cmd) error {
 }
 
 func getPackage(pkgpath string) (pkg *build.Package, err error) {
-	// "runtime" is special: it's mostly written from scratch,
-	// so we don't both with the overlay.
-	if pkgpath == "runtime" {
-		pkgpath = llgoPkgPrefix + "runtime"
-		defer func() { pkg.ImportPath = "runtime" }()
+	// These packages are special: they're mostly written from
+	// scratch, so we don't both with the overlay.
+	if pkgpath == "runtime" || pkgpath == "runtime/cgo" {
+		defer func(pkgpath string) { pkg.ImportPath = pkgpath }(pkgpath)
+		pkgpath = llgoPkgPrefix + pkgpath
 	}
 
 	// Make a copy, as we'll be modifying ReadDir/OpenFile.
@@ -127,12 +132,20 @@ func getPackage(pkgpath string) (pkg *build.Package, err error) {
 		if overlaypkg == nil {
 			overlaypkg = pkg
 		}
+		// TODO(axw) factor out the repeated code
 		for i, filename := range pkg.GoFiles {
 			pkgdir := pkg.Dir
 			if overlayentries[filename] {
 				pkgdir = overlaypkg.Dir
 			}
 			pkg.GoFiles[i] = path.Join(pkgdir, filename)
+		}
+		for i, filename := range pkg.CgoFiles {
+			pkgdir := pkg.Dir
+			if overlayentries[filename] {
+				pkgdir = overlaypkg.Dir
+			}
+			pkg.CgoFiles[i] = path.Join(pkgdir, filename)
 		}
 		for i, filename := range pkg.TestGoFiles {
 			pkgdir := pkg.Dir
@@ -157,7 +170,9 @@ func getPackage(pkgpath string) (pkg *build.Package, err error) {
 		}
 		for i, filename := range pkg.SFiles {
 			pkgdir := pkg.Dir
-			if overlayentries[filename] {
+			if strings.HasSuffix(filename, ".S") {
+				// .S files go straight to clang
+			} else if overlayentries[filename] {
 				pkgdir = overlaypkg.Dir
 				filename = filename[:len(filename)-2] + ".ll"
 			} else {
@@ -202,6 +217,47 @@ func buildPackages(pkgpaths []string) error {
 	return nil
 }
 
+var cgoRe = regexp.MustCompile(`[/\\:]`)
+
+func runCgo(pkgpath string, cgofiles, cppflags, cflags []string) (gofiles, cfiles []string, err error) {
+	args := []string{
+		"tool", "cgo",
+		"-gccgo",
+		"-gccgopkgpath", pkgpath,
+		"-gccgoprefix", "woobie",
+		"-objdir", workdir,
+		"--",
+	}
+	args = append(args, cppflags...)
+	args = append(args, cflags...)
+	args = append(args, cgofiles...)
+	cmd := exec.Command("go", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = runCmd(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Get the names of the generated Go and C files.
+	gofiles = []string{filepath.Join(workdir, "_cgo_gotypes.go")}
+	cfiles = []string{filepath.Join(workdir, "_cgo_export.c")}
+	for _, fn := range cgofiles {
+		f := cgoRe.ReplaceAllString(fn[:len(fn)-2], "_")
+		gofiles = append(gofiles, filepath.Join(workdir, f+"cgo1.go"))
+		cfiles = append(cfiles, filepath.Join(workdir, f+"cgo2.c"))
+	}
+
+	// gccgo uses "//extern" to name external symbols;
+	// translate them to "// #llgo name:".
+	for _, gofile := range gofiles {
+		if err := translateGccgoExterns(gofile); err != nil {
+			return nil, nil, fmt.Errorf("failed to translate gccgo extern comments for %q: %v", gofile, err)
+		}
+	}
+
+	return gofiles, cfiles, nil
+}
+
 func buildPackage(pkg *build.Package, output string) error {
 	args := []string{"-c", "-triple", triple}
 	dir, file := path.Split(pkg.ImportPath)
@@ -223,41 +279,67 @@ func buildPackage(pkg *build.Package, output string) error {
 		args = append(args, "-importpath", pkg.ImportPath)
 	}
 
+	var cgoCFLAGS, cgoCPPFLAGS []string
+	if len(pkg.CFiles) > 0 || len(pkg.CgoFiles) > 0 {
+		cgoCFLAGS = append(envFields("CGO_CFLAGS"), pkg.CgoCFLAGS...)
+		cgoCPPFLAGS = append(envFields("CGO_CPPFLAGS"), pkg.CgoCPPFLAGS...)
+		//cgoCXXFLAGS = append(envFields("CGO_CXXFLAGS"), pkg.CgoCXXFLAGS...)
+		//cgoLDFLAGS = append(envFields("CGO_LDFLAGS"), pkg.CgoLDFLAGS...)
+		// TODO(axw) process pkg-config
+		cgoCPPFLAGS = append(cgoCPPFLAGS, "-I", workdir, "-I", pkg.Dir)
+	}
+	var gofiles, cfiles []string
+	if len(pkg.CgoFiles) > 0 {
+		var err error
+		gofiles, cfiles, err = runCgo(pkg.ImportPath, pkg.CgoFiles, cgoCPPFLAGS, cgoCFLAGS)
+		if err != nil {
+			return err
+		}
+	}
+
+	gofiles = append(gofiles, pkg.GoFiles...)
+	cfiles = append(cfiles, pkg.CFiles...)
+
 	_, file = path.Split(output)
 	tempfile := path.Join(workdir, file+".bc")
 	args = append(args, fmt.Sprintf("-g=%v", generateDebug))
 	args = append(args, "-o", tempfile)
-	args = append(args, pkg.GoFiles...)
+	args = append(args, gofiles...)
 	if test {
 		args = append(args, pkg.TestGoFiles...)
 	}
 	cmd := exec.Command(llgobin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := runCmd(cmd)
-	if err != nil {
+	if err := runCmd(cmd); err != nil {
 		return err
 	}
 
-	var cgoCFLAGS []string
-	if len(pkg.CFiles) > 0 {
-		cgoCFLAGS = strings.Fields(os.Getenv("CGO_CFLAGS"))
+	// Remove the .S files and add them to cfiles.
+	for i := 0; i < len(pkg.SFiles); i++ {
+		sfile := pkg.SFiles[i]
+		if strings.HasSuffix(sfile, ".S") {
+			cfiles = append(cfiles, sfile)
+			pkg.SFiles = append(pkg.SFiles[:i], pkg.SFiles[i+1:]...)
+			i--
+		}
 	}
 
 	// Compile and link .c files in.
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
-	for _, cfile := range pkg.CFiles {
+	for _, cfile := range cfiles {
 		bcfile := filepath.Join(workdir, filepath.Base(cfile+".bc"))
 		args = []string{"-c", "-o", bcfile}
 		if triple != "pnacl" {
 			args = append(args, "-target", triple, "-emit-llvm")
 		}
 		args = append(args, cgoCFLAGS...)
+		args = append(args, cgoCPPFLAGS...)
 		args = append(args, cfile)
 		cmd := exec.Command(clang, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = runCmd(cmd)
+		err := runCmd(cmd)
 		if err != nil {
 			os.Remove(bcfile)
 			return err
@@ -279,16 +361,14 @@ func buildPackage(pkg *build.Package, output string) error {
 		cmd := exec.Command(llvmlink, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		err = runCmd(cmd)
-		if err != nil {
+		if err := runCmd(cmd); err != nil {
 			return err
 		}
 	}
 
 	// If it's a command, link in the dependencies.
 	if pkg.IsCommand() {
-		err = linkdeps(pkg, tempfile)
-		if err != nil {
+		if err := linkdeps(pkg, tempfile); err != nil {
 			return err
 		}
 		if run {
@@ -298,7 +378,7 @@ func buildPackage(pkg *build.Package, output string) error {
 			return runCmd(cmd)
 		}
 	} else if test {
-		if err = linktest(pkg, tempfile); err != nil {
+		if err := linktest(pkg, tempfile); err != nil {
 			return err
 		}
 	}

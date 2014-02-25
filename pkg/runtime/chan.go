@@ -423,7 +423,6 @@ func chanclose(c_ unsafe.Pointer) {
 	c.lock.unlock()
 }
 
-// #llgo name: runtime.selectsize
 func selectsize(size int32) uintptr {
 	var n int32
 	if size > 1 {
@@ -435,7 +434,6 @@ func selectsize(size int32) uintptr {
 		uintptr(size)*unsafe.Sizeof(uint16(0))
 }
 
-// #llgo name: runtime.selectinit
 func selectinit(size int32, ptr unsafe.Pointer) {
 	sel := (*Select)(ptr)
 	sel.tcase = uint16(size)
@@ -446,7 +444,6 @@ func selectinit(size int32, ptr unsafe.Pointer) {
 	sel.pollorder_ = (*uint16)(ptr)
 }
 
-// #llgo name: runtime.selectdefault
 func selectdefault(selectp_ unsafe.Pointer) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
@@ -460,7 +457,6 @@ func selectdefault(selectp_ unsafe.Pointer) {
 	cas.kind = CaseDefault
 }
 
-// #llgo name: runtime.selectsend
 func selectsend(selectp_, ch, elem unsafe.Pointer) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
@@ -480,7 +476,6 @@ func selectsend(selectp_, ch, elem unsafe.Pointer) {
 	cas.sg.elem = elem
 }
 
-// #llgo name: runtime.selectrecv
 func selectrecv(selectp_, ch, elem unsafe.Pointer, received *bool) {
 	selectp := (*Select)(selectp_)
 	i := selectp.ncase
@@ -552,7 +547,6 @@ func (s *Select) unlock() {
 	}
 }
 
-// #llgo name: runtime.selectgo
 func selectgo(selectp_ unsafe.Pointer) int {
 	sel := (*Select)(selectp_)
 	for i := uint16(0); i < sel.ncase; i++ {

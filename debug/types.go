@@ -9,7 +9,7 @@ import (
 	"go/token"
 
 	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/go/types/typemap"
+	"code.google.com/p/go.tools/go/types/typeutil"
 )
 
 // TypeMap contains information for mapping Go types
@@ -17,7 +17,7 @@ import (
 type TypeMap struct {
 	Sizes types.Sizes
 	Fset  *token.FileSet
-	m     typemap.M
+	m     typeutil.Map
 }
 
 var voidType = BasicTypeDescriptor{

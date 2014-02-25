@@ -10,7 +10,7 @@ import (
 	"reflect"
 
 	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/go/types/typemap"
+	"code.google.com/p/go.tools/go/types/typeutil"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -30,7 +30,7 @@ type llvmTypeMap struct {
 	// in CreateStore and CreateLoad.
 	ptrstandin llvm.Type
 
-	types typemap.M
+	types typeutil.Map
 }
 
 type runtimeTypeInfo struct {
@@ -43,7 +43,7 @@ type TypeMap struct {
 
 	module         llvm.Module
 	pkgpath        string
-	types          typemap.M
+	types          typeutil.Map
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
 	alg            *algorithmMap

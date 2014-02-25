@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"go/build"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -65,6 +67,7 @@ func goFilesPackage(gofiles []string) (*build.Package, error) {
 	return buildctx.ImportDir(dir, 0)
 }
 
+// moveFile moves src to dst, catering for filesystem differences.
 func moveFile(src, dst string) error {
 	if printcommands {
 		if dst == "-" {
@@ -110,4 +113,25 @@ func moveFile(src, dst string) error {
 		return os.Remove(src)
 	}
 	return nil
+}
+
+var gccgoExternRegexp = regexp.MustCompile("(?m)^//extern ")
+
+// translateGccgoExterns rewrites a specified file so that
+// any lines beginning with "//extern " are rewritten to
+// use llgo's equivalent "// #llgo name: ".
+func translateGccgoExterns(filename string) error {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	data = gccgoExternRegexp.ReplaceAllLiteral(data, []byte("// #llgo name: "))
+	return ioutil.WriteFile(filename, data, 0644)
+}
+
+// envFields gets the environment variable with the
+// specified name and splits it into fields separated
+// by whitespace.
+func envFields(key string) []string {
+	return strings.Fields(os.Getenv(key))
 }
