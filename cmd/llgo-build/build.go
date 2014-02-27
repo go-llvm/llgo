@@ -246,6 +246,7 @@ func runCgo(pkgpath string, cgofiles, cppflags, cflags []string) (gofiles, cfile
 		gofiles = append(gofiles, filepath.Join(workdir, f+"cgo1.go"))
 		cfiles = append(cfiles, filepath.Join(workdir, f+"cgo2.c"))
 	}
+	cfiles = append(cfiles, filepath.Join(workdir, "_cgo_defun.c"))
 
 	// gccgo uses "//extern" to name external symbols;
 	// translate them to "// #llgo name:".

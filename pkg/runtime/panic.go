@@ -4,6 +4,8 @@
 
 package runtime
 
+import "unsafe"
+
 type defers struct {
 	j      jmp_buf
 	caller uintptr
@@ -37,4 +39,11 @@ func callniladic(f func()) {
 	// This exists just to avoid reproducing the
 	// Go function calling logic in the C code.
 	f()
+}
+
+// #llgo name: runtime_throw
+// #llgo attr: noreturn
+func throw(cstr *byte) {
+	str := _string{cstr, int(c_strlen(cstr))}
+	panic_(*(*string)(unsafe.Pointer(&str)))
 }

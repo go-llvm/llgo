@@ -2,13 +2,14 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-package syscall
+#include <errno.h>
+#include <stdint.h>
 
-func Cgocall()     {}
-func CgocallDone() {}
+uintptr_t GetErrno() {
+    return errno;
+}
 
-// defined in cgo.c
-
-func GetErrno() Errno
-func SetErrno(n Errno)
+void SetErrno(uintptr_t value) {
+    errno = value;
+}
 

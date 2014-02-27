@@ -77,8 +77,7 @@ func buildRuntime() (reterr error) {
 	}
 
 	badPackages := []string{
-		"net",         // Issue #71
-		"os/user",     // Issue #72
+		"net", // Issue #71
 	}
 	if triple == "pnacl" {
 		badPackages = append(badPackages,
