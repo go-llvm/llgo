@@ -85,7 +85,6 @@ func linkdeps(pkg *build.Package, output string) error {
 		return err
 	}
 
-	// Finally, link with clang++ to get exception handling.
 	if !emitllvm || triple == "pnacl" {
 		input := output
 		if strings.Contains(triple, "darwin") || strings.Contains(triple, "mac") {
@@ -102,12 +101,11 @@ func linkdeps(pkg *build.Package, output string) error {
 			}
 		}
 
-		clangxx := clang + "++"
 		args := []string{"-pthread", "-g", "-o", output, input}
 		if triple == "pnacl" {
 			args = append(args, "-l", "ppapi")
 		}
-		cmd := exec.Command(clangxx, args...)
+		cmd := exec.Command(clang, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err = runCmd(cmd); err != nil {

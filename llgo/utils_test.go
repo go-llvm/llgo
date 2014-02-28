@@ -183,11 +183,11 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 		args = append([]string{"-g"}, args...)
 	}
 
-	cmd = exec.Command("clang++", args...)
+	cmd = exec.Command("clang", args...)
 	data, err = cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")
-		return output, fmt.Errorf("clang++ failed: %v", err)
+		return output, fmt.Errorf("clang failed: %v", err)
 	}
 
 	cmd = exec.Command(exepath)

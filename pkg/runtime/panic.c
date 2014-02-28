@@ -22,6 +22,8 @@ void initdefers(struct Defers *d)
 	LLGO_ASM_EXPORT("runtime.initdefers") __attribute__((noinline));
 void rundefers(void)
 	LLGO_ASM_EXPORT("runtime.rundefers") __attribute__((noinline));
+void callniladic(struct Func f)
+	LLGO_ASM_EXPORT("runtime.callniladic") __attribute__((noinline));
 void raise() __attribute__((noreturn));
 
 // raise jumps to the next "defers" jmp_buf,
@@ -39,6 +41,12 @@ void panic(struct Eface error) {
 	memcpy(&p->value, &error, sizeof(struct Eface));
 	tlspanic = p;
 	raise();
+}
+
+static void pop_panic() {
+	struct Panic *p = tlspanic->next;
+	free(tlspanic);
+	tlspanic = p;
 }
 
 struct Panic* current_panic() {
@@ -101,3 +109,25 @@ void rundefers(void) {
 	}
 }
 
+void guardedcall0(struct Func f) {
+	struct Defers defers;
+	initdefers(&defers);
+	if (setjmp(defers.j) == 0) {
+		callniladic(f);
+	} else {
+		pop_panic();
+	}
+	rundefers();
+}
+
+void guardedcall1(struct Func f, struct Func errback) {
+	struct Defers defers;
+	initdefers(&defers);
+	if (setjmp(defers.j) == 0) {
+		callniladic(f);
+	} else {
+		callniladic(errback);
+		pop_panic();
+	}
+	rundefers();
+}

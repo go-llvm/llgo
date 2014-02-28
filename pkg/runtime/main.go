@@ -9,9 +9,6 @@ package runtime
 // #llgo name: main.init
 func main_init()
 
-// Defined in panic.ll
-func guardedcall1(f func(), errback func())
-
 // Defined in main.ll
 func ccall(f *int8)
 
