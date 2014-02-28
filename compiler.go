@@ -63,53 +63,10 @@ type CompilerOptions struct {
 	OrderedCompilation bool
 }
 
-// Based on parseArch from LLVM's lib/Support/Triple.cpp.
-// This is used to match the target machine type.
-func parseArch(arch string) string {
-	switch arch {
-	case "i386", "i486", "i586", "i686", "i786", "i886", "i986":
-		return "x86"
-	case "amd64", "x86_64":
-		return "x86-64"
-	case "powerpc":
-		return "ppc"
-	case "powerpc64", "ppu":
-		return "ppc64"
-	case "mblaze":
-		return "mblaze"
-	case "arm", "xscale":
-		return "arm"
-	case "thumb":
-		return "thumb"
-	case "spu", "cellspu":
-		return "cellspu"
-	case "msp430":
-		return "msp430"
-	case "mips", "mipseb", "mipsallegrex":
-		return "mips"
-	case "mipsel", "mipsallegrexel":
-		return "mipsel"
-	case "mips64", "mips64eb":
-		return "mips64"
-	case "mipsel64":
-		return "mipsel64"
-	case "r600", "hexagon", "sparc", "sparcv9", "tce",
-		"xcore", "nvptx", "nvptx64", "le32", "amdil":
-		return arch
-	}
-	if strings.HasPrefix(arch, "armv") {
-		return "arm"
-	} else if strings.HasPrefix(arch, "thumbv") {
-		return "thumb"
-	}
-	return "unknown"
-}
-
 type Compiler struct {
-	opts    CompilerOptions
-	machine *llvm.TargetMachine
-	target  llvm.TargetData
-	pnacl   bool
+	opts       CompilerOptions
+	dataLayout string
+	pnacl      bool
 }
 
 func NewCompiler(opts CompilerOptions) (*Compiler, error) {
@@ -118,39 +75,22 @@ func NewCompiler(opts CompilerOptions) (*Compiler, error) {
 		compiler.opts.TargetTriple = PNaClTriple
 		compiler.pnacl = true
 	}
-	// Triples are several fields separated by '-' characters.
-	// The first field is the architecture. The architecture's
-	// canonical form may include a '-' character, which would
-	// have been translated to '_' for inclusion in a triple.
-	triple := compiler.opts.TargetTriple
-	arch := triple[:strings.IndexRune(triple, '-')]
-	arch = parseArch(arch)
-	for target := llvm.FirstTarget(); target.C != nil && compiler.machine == nil; target = target.NextTarget() {
-		if arch == target.Name() {
-			compiler.machine = new(llvm.TargetMachine)
-			*compiler.machine = target.CreateTargetMachine(
-				triple, "", "",
-				llvm.CodeGenLevelDefault,
-				llvm.RelocDefault,
-				llvm.CodeModelDefault,
-			)
-			runtime.SetFinalizer(compiler.machine, func(m *llvm.TargetMachine) { m.Dispose() })
-		}
+	dataLayout, err := llvmDataLayout(compiler.opts.TargetTriple)
+	if err != nil {
+		return nil, err
 	}
-	if compiler.machine == nil {
-		return nil, fmt.Errorf("Invalid target triple: %s", triple)
-	}
-	compiler.target = compiler.machine.TargetData()
+	compiler.dataLayout = dataLayout
 	return compiler, nil
 }
 
 func (c *Compiler) Compile(filenames []string, importpath string) (m *Module, err error) {
+	target := llvm.NewTargetData(c.dataLayout)
 	compiler := &compiler{
 		CompilerOptions: c.opts,
-		machine:         c.machine,
-		target:          c.target,
+		dataLayout:      c.dataLayout,
+		target:          target,
 		pnacl:           c.pnacl,
-		llvmtypes:       NewLLVMTypeMap(c.target),
+		llvmtypes:       NewLLVMTypeMap(target),
 	}
 	return compiler.compile(filenames, importpath)
 }
@@ -158,11 +98,11 @@ func (c *Compiler) Compile(filenames []string, importpath string) (m *Module, er
 type compiler struct {
 	CompilerOptions
 
-	builder llvm.Builder
-	module  *Module
-	machine *llvm.TargetMachine
-	target  llvm.TargetData
-	fileset *token.FileSet
+	builder    llvm.Builder
+	module     *Module
+	dataLayout string
+	target     llvm.TargetData
+	fileset    *token.FileSet
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -240,7 +180,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	modulename := importpath
 	compiler.module = &Module{Module: llvm.NewModule(modulename), Name: modulename}
 	compiler.module.SetTarget(compiler.TargetTriple)
-	compiler.module.SetDataLayout(compiler.target.String())
+	compiler.module.SetDataLayout(compiler.dataLayout)
 
 	// Create a new translation unit.
 	unit := newUnit(compiler, mainPkg)
