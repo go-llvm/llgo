@@ -76,9 +76,7 @@ func buildRuntime() (reterr error) {
 		return err
 	}
 
-	badPackages := []string{
-		"net", // Issue #71
-	}
+	var badPackages []string
 	if triple == "pnacl" {
 		badPackages = append(badPackages,
 			"crypto/md5",
@@ -99,16 +97,43 @@ func buildRuntime() (reterr error) {
 		return false
 	}
 
+	visited := make(map[string]bool)
+	var stdpkgs []string
+	var mkdeps func(imports []string) error
+	mkdeps = func(imports []string) error {
+		for _, path := range imports {
+			if path == "C" || path == "unsafe" || visited[path] {
+				continue
+			}
+			visited[path] = true
+			pkg, err := build.Import(path, "", 0)
+			if err != nil {
+				return err
+			}
+			if err = mkdeps(pkg.Imports); err != nil {
+				return err
+			}
+			stdpkgs = append(stdpkgs, path)
+		}
+		return nil
+	}
+
 	output, err := command("go", "list", "std").CombinedOutput()
 	if err != nil {
 		return err
 	}
-
-	// Always build runtime and syscall first
-	// TODO: Real import dependency discovery to build packages in the order they depend on each other
-	runtimePackages := append([]string{"runtime", "syscall"}, strings.Split(strings.TrimSpace(string(output)), "\n")...)
-	for _, pkg := range runtimePackages {
-		if strings.HasPrefix(pkg, "cmd/") || isBad(pkg) {
+	var unordered []string
+	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if !strings.HasPrefix(path, "cmd/") {
+			unordered = append(unordered, path)
+		}
+	}
+	err = mkdeps(unordered)
+	if err != nil {
+		return err
+	}
+	for _, pkg := range stdpkgs {
+		if pkg == "unsafe" || isBad(pkg) {
 			continue
 		}
 		log.Printf("- %s", pkg)
