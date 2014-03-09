@@ -97,6 +97,11 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 		return v
 	}
 	name := f.String()
+	if f.Enclosing != nil {
+		// Anonymous functions are not guaranteed to
+		// have unique identifiers at the global scope.
+		name = f.Enclosing.String() + ":" + name
+	}
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
