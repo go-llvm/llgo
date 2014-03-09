@@ -255,7 +255,6 @@ func runCgo(pkgpath string, cgofiles, cppflags, cflags []string) (gofiles, cfile
 			return nil, nil, fmt.Errorf("failed to translate gccgo extern comments for %q: %v", gofile, err)
 		}
 	}
-
 	return gofiles, cfiles, nil
 }
 
@@ -280,14 +279,24 @@ func buildPackage(pkg *build.Package, output string) error {
 		args = append(args, "-importpath", pkg.ImportPath)
 	}
 
-	var cgoCFLAGS, cgoCPPFLAGS []string
+	var cgoCFLAGS, cgoCPPFLAGS, cgoLDFLAGS []string
 	if len(pkg.CFiles) > 0 || len(pkg.CgoFiles) > 0 {
+		// TODO(axw) process pkg-config
 		cgoCFLAGS = append(envFields("CGO_CFLAGS"), pkg.CgoCFLAGS...)
 		cgoCPPFLAGS = append(envFields("CGO_CPPFLAGS"), pkg.CgoCPPFLAGS...)
 		//cgoCXXFLAGS = append(envFields("CGO_CXXFLAGS"), pkg.CgoCXXFLAGS...)
-		//cgoLDFLAGS = append(envFields("CGO_LDFLAGS"), pkg.CgoLDFLAGS...)
-		// TODO(axw) process pkg-config
 		cgoCPPFLAGS = append(cgoCPPFLAGS, "-I", workdir, "-I", pkg.Dir)
+		cgoLDFLAGS = append(envFields("CGO_LDFLAGS"), pkg.CgoLDFLAGS...)
+		// Get the library dir in which to find libgcc, libstdc++, etc.
+		// We need to do this because we rely on clang to link; in Ubuntu 14.04
+		// beta 1, there is no g++-4.9, but there is gccgo-4.9. Clang sees the
+		// partial 4.9 lib directory and uses it instead of 4.8, which is what
+		// should be used.
+		if gcclib, err := findGcclib(); err != nil {
+			return fmt.Errorf("failed to locate gcc lib dir: %v", err)
+		} else if gcclib != "." {
+			cgoLDFLAGS = append(cgoLDFLAGS, "-L", gcclib)
+		}
 	}
 	var gofiles, cfiles []string
 	if len(pkg.CgoFiles) > 0 {
@@ -381,6 +390,12 @@ func buildPackage(pkg *build.Package, output string) error {
 	} else if test {
 		if err := linktest(pkg, tempfile); err != nil {
 			return err
+		}
+	} else {
+		if output != "-" && len(cgoLDFLAGS) > 0 {
+			if err := writeLdflags(pkg.ImportPath, cgoLDFLAGS); err != nil {
+				return err
+			}
 		}
 	}
 	return moveFile(tempfile, output)

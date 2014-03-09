@@ -6,6 +6,7 @@ package main
 
 import (
 	"go/build"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,10 +24,13 @@ func linkdeps(pkg *build.Package, output string) error {
 		pkg.Imports = append(pkg.Imports, "syscall")
 	}
 
-	var mkdeps func(pkg *build.Package, imports []string) error
-	mkdeps = func(pkg *build.Package, imports []string) error {
+	var mkdeps func(imports ...string) error
+	mkdeps = func(imports ...string) error {
 		for _, path := range imports {
 			if path == "C" {
+				if err := mkdeps("runtime/cgo", "syscall"); err != nil {
+					return err
+				}
 				continue
 			}
 			if !deps[path] {
@@ -35,7 +39,7 @@ func linkdeps(pkg *build.Package, output string) error {
 				if err != nil {
 					return err
 				}
-				if err = mkdeps(pkg, pkg.Imports); err != nil {
+				if err = mkdeps(pkg.Imports...); err != nil {
 					return err
 				}
 				depslist = append(depslist, path)
@@ -44,15 +48,15 @@ func linkdeps(pkg *build.Package, output string) error {
 		return nil
 	}
 
-	err := mkdeps(pkg, pkg.Imports)
+	err := mkdeps(pkg.Imports...)
 	if err != nil {
 		return err
 	}
 	if test {
-		if err = mkdeps(pkg, pkg.TestImports); err != nil {
+		if err = mkdeps(pkg.TestImports...); err != nil {
 			return err
 		}
-		if err = mkdeps(pkg, pkg.XTestImports); err != nil {
+		if err = mkdeps(pkg.XTestImports...); err != nil {
 			return err
 		}
 	}
@@ -64,6 +68,7 @@ func linkdeps(pkg *build.Package, output string) error {
 
 	llvmlink := filepath.Join(llvmbindir, "llvm-link")
 	args := []string{"-o", output, output}
+	var ldflags []string
 	for _, path := range depslist {
 		if path == pkg.ImportPath {
 			continue
@@ -77,6 +82,11 @@ func linkdeps(pkg *build.Package, output string) error {
 			}
 		}
 		args = append(args, bcfile)
+		if pkgldflags, err := readLdflags(path); err != nil {
+			return err
+		} else {
+			ldflags = append(ldflags, pkgldflags...)
+		}
 	}
 	cmd := exec.Command(llvmlink, args...)
 	cmd.Stdout = os.Stdout
@@ -101,11 +111,12 @@ func linkdeps(pkg *build.Package, output string) error {
 			}
 		}
 
-		args := []string{"-pthread", "-g", "-o", output, input}
+		args := []string{"-pthread", "-v", "-g", "-o", output, input}
 		if triple == "pnacl" {
 			args = append(args, "-l", "ppapi")
 		}
-		cmd := exec.Command(clang, args...)
+		args = append(args, ldflags...)
+		cmd := exec.Command(clang+"++", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err = runCmd(cmd); err != nil {
@@ -114,4 +125,21 @@ func linkdeps(pkg *build.Package, output string) error {
 	}
 
 	return nil
+}
+
+// writeLdflags writes CGO_LDFLAGS flags to a file, one argument per line.
+func writeLdflags(pkgpath string, flags []string) error {
+	file := filepath.Join(pkgroot, pkgpath+".ldflags")
+	return ioutil.WriteFile(file, []byte(strings.Join(flags, "\n")), 0644)
+}
+
+// readLdflags reads CGO_LDFLAGS written to a file by writeLdflags.
+func readLdflags(pkgpath string) ([]string, error) {
+	data, err := ioutil.ReadFile(filepath.Join(pkgroot, pkgpath+".ldflags"))
+	if err == nil {
+		return strings.Split(string(data), "\n"), nil
+	} else if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return nil, err
 }
