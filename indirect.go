@@ -9,22 +9,51 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-// indirectFunction creates an indirect function from a
+// createThunk creates a thunk from a
 // given function and arguments, suitable for use with
 // "defer" and "go".
-func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue {
-	nilarytyp := types.NewSignature(nil, nil, nil, nil, false)
-	if len(args) == 0 {
-		val := fn.LLVMValue()
-		ptr := c.builder.CreateExtractValue(val, 0, "")
-		ctx := c.builder.CreateExtractValue(val, 1, "")
-		fnval := llvm.Undef(c.types.ToLLVM(nilarytyp))
-		ptr = c.builder.CreateBitCast(ptr, fnval.Type().StructElementTypes()[0], "")
-		ctx = c.builder.CreateBitCast(ctx, fnval.Type().StructElementTypes()[1], "")
-		fnval = c.builder.CreateInsertValue(fnval, ptr, 0, "")
-		fnval = c.builder.CreateInsertValue(fnval, ctx, 1, "")
-		return c.NewValue(fnval, nilarytyp)
+func (fr *frame) createThunk(call *CallCommon) (thunk LLVMValue, arg LLVMValue) {
+	var nonconstargs []llvm.Value
+	var nonconsttypes []llvm.Type
+	var args []llvm.Value
+	packArg := func(arg llvm.Value) {
+		if arg.IsAConstant() {
+			args = append(args, arg)
+		} else {
+			args = append(args, nil)
+			nonconstargs = append(nonconstargs, arg)
+			nonconsttypes = append(nonconsttypes, arg.Type())
+		}
 	}
+
+	builtin, isbuiltin := call.Value.(*Builtin)
+	if !isbuiltin {
+		packArg(fr.value(call.Value).LLVMValue())
+	}
+
+	for _, arg := call.Args {
+		packArg(fr.value(arg).LLVMValue())
+	}
+
+	structtype := llvm.StructType(nonconsttypes, false)
+	argstruct := fr.createTypeMalloc(structtype)
+	for i, llvmarg := range llvmargs {
+		argptr := fr.builder.CreateStructGEP(argstruct, i, "")
+		fr.builder.CreateStore(llvmarg, argptr)
+	}
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	thunkfntype := llvm.FunctionType(llvm.VoidType(), []llvm.Type{i8ptr}, false)
+	thunkfn := llvm.NewFunction(fr.module, "", thunkfntype)
+	thunk := fr.builder.CreateBitCast(thunkfn, i8ptr, "")
+	arg := fr.builder.CreateBitCast(argstruct, i8ptr, "")
+	return
+	/*
+
+
+
+
+
+
 
 	// Check if function pointer or context pointer is global/null.
 	fnval := fn.LLVMValue()
@@ -75,12 +104,6 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 	// has loaded the arguments from it.
 	structtyp := llvm.StructType(llvmargtypes, false)
 	argstruct := c.createTypeMalloc(structtyp)
-	for i, llvmarg := range llvmargs {
-		argptr := c.builder.CreateGEP(argstruct, []llvm.Value{
-			llvm.ConstInt(llvm.Int32Type(), 0, false),
-			llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}, "")
-		c.builder.CreateStore(llvmarg, argptr)
-	}
 
 	// Create a function that will take a pointer to a structure of the type
 	// defined above, or no parameters if there are none to pass.
@@ -128,4 +151,5 @@ func (c *compiler) indirectFunction(fn *LLVMValue, args []*LLVMValue) *LLVMValue
 	fnval = c.builder.CreateInsertValue(fnval, i8argstruct, 1, "")
 	fn = c.NewValue(fnval, nilarytyp)
 	return fn
+	*/
 }

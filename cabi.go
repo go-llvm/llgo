@@ -145,7 +145,7 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 		}
 		return &structBType{fields}
 
-	case *types.Pointer, *types.Signature:
+	case *types.Pointer, *types.Signature, *types.Map:
 		return &ptrBType{llvm.Int8Type()}
 
 	case *types.Interface:

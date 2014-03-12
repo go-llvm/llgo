@@ -7,164 +7,71 @@ package llgo
 import (
 	"fmt"
 
-	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
 )
 
-func getPrintf(module llvm.Module) llvm.Value {
-	printf := module.NamedFunction("printf")
-	if printf.IsNil() {
-		charPtr := llvm.PointerType(llvm.Int8Type(), 0)
-		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{charPtr}, true)
-		printf = llvm.AddFunction(module, "printf", ftyp)
-		printf.SetFunctionCallConv(llvm.CCallConv)
-	}
-	return printf
-}
+func (fr *frame) printValues(println_ bool, values ...Value) {
+	for i, value := range values {
+		llvm_value := value.LLVMValue()
 
-func getFflush(module llvm.Module) llvm.Value {
-	fflush := module.NamedFunction("fflush")
-	if fflush.IsNil() {
-		voidPtr := llvm.PointerType(llvm.Int8Type(), 0)
-		ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{voidPtr}, false)
-		fflush = llvm.AddFunction(module, "fflush", ftyp)
-		fflush.SetFunctionCallConv(llvm.CCallConv)
-	}
-	return fflush
-}
+		typ := value.Type().Underlying()
+		if name, isname := typ.(*types.Named); isname {
+			typ = name.Underlying()
+		}
 
-func (c *compiler) getBoolString(v llvm.Value) llvm.Value {
-	startBlock := c.builder.GetInsertBlock()
-	resultBlock := llvm.InsertBasicBlock(startBlock, "")
-	resultBlock.MoveAfter(startBlock)
-	falseBlock := llvm.InsertBasicBlock(resultBlock, "")
+		if println_ && i > 0 {
+			fr.runtime.printSpace.call(fr)
+		}
+		switch typ := typ.(type) {
+		case *types.Basic:
+			switch typ.Kind() {
+			case types.Uint8, types.Uint16, types.Uint32, types.Uintptr, types.Uint, types.Uint64:
+				i64 := fr.llvmtypes.ctx.Int64Type()
+				zext := fr.builder.CreateZExt(llvm_value, i64, "")
+				fr.runtime.printUint64.call(fr, zext)
 
-	CharPtr := llvm.PointerType(llvm.Int8Type(), 0)
-	falseString := c.builder.CreateGlobalStringPtr("false", "")
-	falseString = c.builder.CreateBitCast(falseString, CharPtr, "")
-	trueString := c.builder.CreateGlobalStringPtr("true", "")
-	trueString = c.builder.CreateBitCast(trueString, CharPtr, "")
+			case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+				i64 := fr.llvmtypes.ctx.Int64Type()
+				sext := fr.builder.CreateSExt(llvm_value, i64, "")
+				fr.runtime.printInt64.call(fr, sext)
 
-	c.builder.CreateCondBr(v, resultBlock, falseBlock)
-	c.builder.SetInsertPointAtEnd(falseBlock)
-	c.builder.CreateBr(resultBlock)
-	c.builder.SetInsertPointAtEnd(resultBlock)
-	result := c.builder.CreatePHI(CharPtr, "")
-	result.AddIncoming([]llvm.Value{trueString, falseString},
-		[]llvm.BasicBlock{startBlock, falseBlock})
-	return result
-}
+			case types.Float32:
+				llvm_value = fr.builder.CreateFPExt(llvm_value, fr.llvmtypes.ctx.DoubleType(), "")
+				fallthrough
+			case types.Float64:
+				fr.runtime.printDouble.call(fr, llvm_value)
 
-func (c *compiler) printValues(println_ bool, values ...Value) {
-	var args []llvm.Value = nil
-	if len(values) > 0 {
-		format := ""
-		args = make([]llvm.Value, 0, len(values)+1)
-		for i, value := range values {
-			llvm_value := value.LLVMValue()
+			case types.String, types.UntypedString:
+				fr.runtime.printString.call(fr, llvm_value)
 
-			typ := value.Type().Underlying()
-			if name, isname := typ.(*types.Named); isname {
-				typ = name.Underlying()
-			}
+			case types.Bool:
+				fr.runtime.printBool.call(fr, llvm_value)
 
-			if println_ && i > 0 {
-				format += " "
-			}
-			switch typ := typ.(type) {
-			case *types.Basic:
-				switch typ.Kind() {
-				case types.Uint8:
-					format += "%hhu"
-				case types.Uint16:
-					format += "%hu"
-				case types.Uint32:
-					format += "%u"
-				case types.Uintptr, types.Uint:
-					format += "%lu"
-				case types.Uint64:
-					format += "%llu" // FIXME windows
-				case types.Int:
-					format += "%ld"
-				case types.Int8:
-					format += "%hhd"
-				case types.Int16:
-					format += "%hd"
-				case types.Int32:
-					format += "%d"
-				case types.Int64:
-					format += "%lld" // FIXME windows
-				case types.Float32:
-					llvm_value = c.builder.CreateFPExt(llvm_value, llvm.DoubleType(), "")
-					fallthrough
-				case types.Float64:
-					printfloat := c.runtime.printfloat.LLVMValue()
-					args := []llvm.Value{llvm_value}
-					llvm_value = c.builder.CreateCall(printfloat, args, "")
-					fallthrough
-				case types.String, types.UntypedString:
-					ptrval := c.builder.CreateExtractValue(llvm_value, 0, "")
-					lenval := c.builder.CreateExtractValue(llvm_value, 1, "")
-					llvm_value = ptrval
-					args = append(args, lenval)
-					format += "%.*s"
-				case types.Bool:
-					format += "%s"
-					llvm_value = c.getBoolString(llvm_value)
-				case types.UnsafePointer:
-					format += "%p"
-				default:
-					panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
-				}
-
-			case *types.Interface:
-				format += "(0x%lx,0x%lx)"
-				ival := c.builder.CreateExtractValue(llvm_value, 0, "")
-				itype := c.builder.CreateExtractValue(llvm_value, 1, "")
-				args = append(args, ival)
-				llvm_value = itype
-
-			case *types.Slice, *types.Array:
-				// If we see a constant array, we either:
-				//     Create an internal constant if it's a constant array, or
-				//     Create space on the stack and store it there.
-				init_ := value.(*LLVMValue)
-				init_value := init_.LLVMValue()
-				llvm_value = c.builder.CreateAlloca(init_value.Type(), "")
-				c.builder.CreateStore(init_value, llvm_value)
-				// FIXME don't assume string...
-				format += "%s"
-
-			case *types.Pointer:
-				format += "0x%lx"
+			case types.UnsafePointer:
+				fr.runtime.printPointer.call(fr, llvm_value)
 
 			default:
-				panic(fmt.Sprintf("Unhandled type kind: %s (%T)", typ, typ))
+				panic(fmt.Sprint("Unhandled Basic Kind: ", typ.Kind))
 			}
 
-			args = append(args, llvm_value)
-		}
-		if println_ {
-			format += "\n"
-		}
-		formatval := c.builder.CreateGlobalStringPtr(format, "")
-		args = append([]llvm.Value{formatval}, args...)
-	} else {
-		var format string
-		if println_ {
-			format = "\n"
-		}
-		args = []llvm.Value{c.builder.CreateGlobalStringPtr(format, "")}
-	}
-	printf := getPrintf(c.module.Module)
-	c.NewValue(c.builder.CreateCall(printf, args, ""), types.Typ[types.Int32])
-	fflush := getFflush(c.module.Module)
-	fileptr := llvm.ConstNull(fflush.Type().ElementType().ParamTypes()[0])
-	c.builder.CreateCall(fflush, []llvm.Value{fileptr}, "")
-}
+		case *types.Interface:
+			if typ.Empty() {
+				fr.runtime.printEmptyInterface.call(fr, llvm_value)
+			} else {
+				fr.runtime.printInterface.call(fr, llvm_value)
+			}
 
-func (c *compiler) printf(format string, args ...interface{}) {
-	s := exact.MakeString(fmt.Sprintf(format, args...))
-	c.printValues(true, c.NewConstValue(s, types.Typ[types.String]))
+		case *types.Slice:
+			fr.runtime.printSlice.call(fr, llvm_value)
+
+		case *types.Pointer, *types.Map, *types.Chan, *types.Signature:
+			fr.runtime.printPointer.call(fr, llvm_value)
+
+		default:
+			panic(fmt.Sprintf("Unhandled type kind: %s (%T)", typ, typ))
+		}
+	}
+	if println_ {
+		fr.runtime.printNl.call(fr)
+	}
 }

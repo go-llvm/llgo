@@ -25,6 +25,21 @@ type runtimeType struct {
 	llvm llvm.Type
 }
 
+type runtimeFnInfo struct {
+	fi *functionTypeInfo
+	fn llvm.Value
+}
+
+func (rfi *runtimeFnInfo) init(tm *llvmTypeMap, m llvm.Module, name string, args []types.Type, results []types.Type) {
+	rfi.fi = new(functionTypeInfo)
+	*rfi.fi = tm.getFunctionTypeInfo(args, results)
+	rfi.fn = rfi.fi.declare(m, name)
+}
+
+func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
+	return rfi.fi.call(f.llvmtypes.ctx, f.allocaBuilder, f.builder, rfi.fn, args)
+}
+
 // runtimeInterface is a struct containing references to
 // runtime types and intrinsic function declarations.
 type runtimeInterface struct {
@@ -106,6 +121,18 @@ type runtimeInterface struct {
 	f64eqalg,
 	c64eqalg,
 	c128eqalg *LLVMValue
+
+	printBool,
+	printDouble,
+	printEmptyInterface,
+	printInterface,
+	printInt64,
+	printNl,
+	printPointer,
+	printSlice,
+	printSpace,
+	printString,
+	printUint64 runtimeFnInfo
 }
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
@@ -205,6 +232,29 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		}
 		*field = fr.ResolveFunc(obj.(*types.Func))
 	}
+
+	emptyInterface := types.NewInterface(nil, nil)
+	intSlice := types.NewSlice(types.Typ[types.Int])
+	for _, rt := range [...]struct {
+		name          string
+		rfi           *runtimeFnInfo
+		args, results []types.Type
+	}{
+		{name: "__go_print_bool", rfi: &ri.printBool, args: []types.Type{types.Typ[types.Bool]}},
+		{name: "__go_print_double", rfi: &ri.printDouble, args: []types.Type{types.Typ[types.Float64]}},
+		{name: "__go_print_empty_interface", rfi: &ri.printEmptyInterface, args: []types.Type{emptyInterface}},
+		{name: "__go_print_interface", rfi: &ri.printInterface, args: []types.Type{emptyInterface}},
+		{name: "__go_print_int64", rfi: &ri.printInt64, args: []types.Type{types.Typ[types.Int64]}},
+		{name: "__go_print_nl", rfi: &ri.printNl},
+		{name: "__go_print_pointer", rfi: &ri.printPointer, args: []types.Type{types.Typ[types.UnsafePointer]}},
+		{name: "__go_print_slice", rfi: &ri.printSlice, args: []types.Type{intSlice}},
+		{name: "__go_print_space", rfi: &ri.printSpace},
+		{name: "__go_print_string", rfi: &ri.printString, args: []types.Type{types.Typ[types.String]}},
+		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
+	} {
+		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)
+	}
+
 	return &ri, nil
 }
 
