@@ -16,7 +16,7 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 	llitab := c.builder.CreateExtractValue(lliface, 0, "")
 	llvalue := c.builder.CreateExtractValue(lliface, 1, "")
 	sig := method.Type().(*types.Signature)
-	methodset := sig.Recv().Type().MethodSet()
+	methodset := c.types.MethodSet(sig.Recv().Type())
 	// TODO(axw) cache ordered method index
 	var index int
 	for i := 0; i < methodset.Len(); i++ {
@@ -36,7 +36,7 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 	}, "")
 	llifn = c.builder.CreateLoad(llifn, "")
 	// Strip receiver.
-	sig = types.NewSignature(nil, nil, sig.Params(), sig.Results(), sig.IsVariadic())
+	sig = types.NewSignature(nil, nil, sig.Params(), sig.Results(), sig.Variadic())
 	llfn := llvm.Undef(c.types.ToLLVM(sig))
 	llifn = c.builder.CreateIntToPtr(llifn, llfn.Type().StructElementTypes()[0], "")
 	llfn = c.builder.CreateInsertValue(llfn, llifn, 0, "")

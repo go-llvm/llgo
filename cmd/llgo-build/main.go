@@ -18,7 +18,7 @@ import (
 
 var (
 	llvmbindir    string
-	llgobin       string
+	llgobin       string = "llgo"
 	triple        string
 	defaulttriple string
 	clang         string

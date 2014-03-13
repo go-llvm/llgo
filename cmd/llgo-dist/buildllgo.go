@@ -10,7 +10,6 @@ import (
 	gobuild "go/build"
 	"log"
 	"os"
-	"path"
 	"strings"
 )
 
@@ -71,11 +70,9 @@ func buildLlgo() error {
 		return err
 	}
 
-	pkg, err = gobuild.Import(llgopkgpath, "", gobuild.FindOnly)
-	if err != nil {
+	if llgobin, err = findCommand(llgopkgpath); err != nil {
 		return err
 	}
-	llgobin = path.Join(pkg.BinDir, "llgo")
 
 	// If the user did not specify -triple on the command
 	// line, ask llgo for it now.

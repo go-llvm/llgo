@@ -440,7 +440,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	srctyp = srctyp.Underlying()
 
 	// Identical (underlying) types? Just swap in the destination type.
-	if types.IsIdentical(srctyp, dsttyp) {
+	if types.Identical(srctyp, dsttyp) {
 		return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 	}
 
@@ -449,7 +449,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		if dsttyp, ok := dsttyp.(*types.Pointer); ok {
 			srctyp := srctyp.Elem().Underlying()
 			dsttyp := dsttyp.Elem().Underlying()
-			if types.IsIdentical(srctyp, dsttyp) {
+			if types.Identical(srctyp, dsttyp) {
 				return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
 			}
 		}
@@ -467,7 +467,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		}
 
 		// string -> []byte
-		if types.IsIdentical(dsttyp, byteslice) {
+		if types.Identical(dsttyp, byteslice) {
 			c := v.compiler
 			value := v.LLVMValue()
 			strdata := c.builder.CreateExtractValue(value, 0, "")
@@ -492,13 +492,13 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 		}
 
 		// string -> []rune
-		if types.IsIdentical(dsttyp, runeslice) {
+		if types.Identical(dsttyp, runeslice) {
 			return v.stringToRuneSlice()
 		}
 	}
 
 	// []byte -> string
-	if types.IsIdentical(srctyp, byteslice) && isString(dsttyp) {
+	if types.Identical(srctyp, byteslice) && isString(dsttyp) {
 		c := v.compiler
 		value := v.LLVMValue()
 		data := c.builder.CreateExtractValue(value, 0, "")
@@ -522,7 +522,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 	}
 
 	// []rune -> string
-	if types.IsIdentical(srctyp, runeslice) && isString(dsttyp) {
+	if types.Identical(srctyp, runeslice) && isString(dsttyp) {
 		return v.runeSliceToString()
 	}
 

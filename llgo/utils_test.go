@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	testCompiler      llgo.Compiler
+	testCompiler      *llgo.Compiler
 	tempdir           string
 	runtimemodulefile string
 )
@@ -123,7 +123,8 @@ func getRuntimeModuleFile() (string, error) {
 		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
 		args := []string{"-c", "-emit-llvm", "-o", bcfile, cfile}
 		if runtime.GOOS != "darwin" {
-			// TODO(q): -g breaks badly on my system at the moment, so is not enabled on darwin for now
+			// TODO(q): -g breaks badly on my system at the moment,
+			// so is not enabled on darwin for now
 			args = append([]string{"-g"}, args...)
 		}
 		cmd := exec.Command("clang", args...)
@@ -182,11 +183,11 @@ func runMainFunction(m *llgo.Module) (output []string, err error) {
 		args = append([]string{"-g"}, args...)
 	}
 
-	cmd = exec.Command("clang++", args...)
+	cmd = exec.Command("clang", args...)
 	data, err = cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")
-		return output, fmt.Errorf("clang++ failed: %v", err)
+		return output, fmt.Errorf("clang failed: %v", err)
 	}
 
 	cmd = exec.Command(exepath)
@@ -223,7 +224,6 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to initialise compiler: %s", err)
 	}
-	defer testCompiler.Dispose()
 
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)

@@ -9,12 +9,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/build"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -65,6 +69,7 @@ func goFilesPackage(gofiles []string) (*build.Package, error) {
 	return buildctx.ImportDir(dir, 0)
 }
 
+// moveFile moves src to dst, catering for filesystem differences.
 func moveFile(src, dst string) error {
 	if printcommands {
 		if dst == "-" {
@@ -110,4 +115,42 @@ func moveFile(src, dst string) error {
 		return os.Remove(src)
 	}
 	return nil
+}
+
+var gccgoExternRegexp = regexp.MustCompile("(?m)^//extern ")
+
+// translateGccgoExterns rewrites a specified file so that
+// any lines beginning with "//extern " are rewritten to
+// use llgo's equivalent "// #llgo name: ".
+func translateGccgoExterns(filename string) error {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	data = gccgoExternRegexp.ReplaceAllLiteral(data, []byte("// #llgo name: "))
+	return ioutil.WriteFile(filename, data, 0644)
+}
+
+// find the library directory for the version
+// of gcc found in $PATH.
+func findGcclib() (string, error) {
+	// TODO(axw) allow the use of $CC in place of cc. If we do this,
+	// we'll need to work around partial installations of gcc, e.g.
+	// ones without g++ (thus lacking libstdc++).
+	var buf bytes.Buffer
+	cmd := exec.Command("gcc", "--print-libgcc-file-name")
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = &buf
+	if err := runCmd(cmd); err != nil {
+		return "", err
+	}
+	libfile := buf.String()
+	return filepath.Dir(libfile), nil
+}
+
+// envFields gets the environment variable with the
+// specified name and splits it into fields separated
+// by whitespace.
+func envFields(key string) []string {
+	return strings.Fields(os.Getenv(key))
 }

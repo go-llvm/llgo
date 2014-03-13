@@ -4,6 +4,8 @@
 
 package runtime
 
+import "unsafe"
+
 type defers struct {
 	j      jmp_buf
 	caller uintptr
@@ -27,6 +29,7 @@ func pushdefer(f func())
 func initdefers(*defers)
 func rundefers()
 func current_panic() *panicstack
+func pop_panic()
 func recover_(int32) interface{}
 
 // #llgo name: llvm.setjmp
@@ -38,3 +41,16 @@ func callniladic(f func()) {
 	// Go function calling logic in the C code.
 	f()
 }
+
+// #llgo name: runtime_throw
+// #llgo attr: noreturn
+func throw(cstr *byte) {
+	str := _string{cstr, int(c_strlen(cstr))}
+	panic_(*(*string)(unsafe.Pointer(&str)))
+}
+
+// guardedcall0 calls f, swallowing and panics.
+func guardedcall0(f func())
+
+// guardedcall1 calls f, calling errback if a panic occurs.
+func guardedcall1(f func(), errback func())

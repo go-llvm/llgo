@@ -53,7 +53,7 @@ func report(err error) {
 	exitCode = 2
 }
 
-func compileFiles(compiler llgo.Compiler, filenames []string, importpath string) (*llgo.Module, error) {
+func compileFiles(compiler *llgo.Compiler, filenames []string, importpath string) (*llgo.Module, error) {
 	return compiler.Compile(filenames, importpath)
 }
 
@@ -174,7 +174,7 @@ func computeTriple() string {
 	return fmt.Sprintf("%s-unknown-%s", tripleArch, targetOS)
 }
 
-func initCompiler() (llgo.Compiler, error) {
+func initCompiler() (*llgo.Compiler, error) {
 	opts := llgo.CompilerOptions{TargetTriple: computeTriple()}
 	if *trace || os.Getenv("LLGO_TRACE") == "1" {
 		opts.Logger = log.New(os.Stderr, "", 0)
@@ -206,7 +206,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "initCompiler failed: %s\n", err)
 		os.Exit(1)
 	}
-	defer compiler.Dispose()
 
 	module, err := compileFiles(compiler, flag.Args(), *importpath)
 	if err == nil {

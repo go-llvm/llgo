@@ -9,9 +9,9 @@ import (
 	"go/token"
 	"sort"
 
+	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/ssa"
-	"code.google.com/p/go.tools/ssa/ssautil"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -97,6 +97,11 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 		return v
 	}
 	name := f.String()
+	if f.Enclosing != nil {
+		// Anonymous functions are not guaranteed to
+		// have unique identifiers at the global scope.
+		name = f.Enclosing.String() + ":" + name
+	}
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
@@ -141,8 +146,15 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	// Only define functions from this package.
 	if f.Pkg == nil {
-		if r := f.Signature.Recv(); r != nil && r.Pkg() != nil && r.Pkg() != u.pkg.Object {
-			return
+		if r := f.Signature.Recv(); r != nil {
+			if r.Pkg() != nil && r.Pkg() != u.pkg.Object {
+				return
+			} else if named, ok := r.Type().(*types.Named); ok && named.Obj().Parent() == types.Universe {
+				// This condition is true iff f is error.Error.
+				if u.pkg.Object.Path() != "runtime" {
+					return
+				}
+			}
 		}
 	} else if f.Pkg != u.pkg {
 		return
@@ -158,6 +170,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
 	delete(u.undefinedFuncs, f)
+
+	// Push the function onto the debug context.
+	// TODO(axw) create a fake CU for synthetic functions
+	if u.GenerateDebug && f.Synthetic == "" {
+		u.debug.pushFunctionContext(llvmFunction, f.Signature, f.Pos())
+		defer u.debug.popFunctionContext()
+		u.debug.setLocation(u.builder, f.Pos())
+	}
 
 	// Functions that call recover must not be inlined, or we
 	// can't tell whether the recover call is valid at runtime.
@@ -181,8 +201,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 		paramOffset++
 	}
+	// Map parameter positions to indices. We use this
+	// when processing locals to map back to parameters
+	// when generating debug metadata.
+	paramPos := make(map[token.Pos]int)
 	for i, param := range f.Params {
-		fr.env[param] = fr.NewValue(llvmFunction.Param(i+paramOffset), param.Type())
+		paramPos[param.Pos()] = i + paramOffset
+		llparam := llvmFunction.Param(i + paramOffset)
+		fr.env[param] = fr.NewValue(llparam, param.Type())
 	}
 
 	// Allocate stack space for locals in the prologue block.
@@ -194,6 +220,13 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		u.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
 		fr.env[local] = value
+		if fr.GenerateDebug {
+			paramIndex, ok := paramPos[local.Pos()]
+			if !ok {
+				paramIndex = -1
+			}
+			fr.debug.declare(fr.builder, local, alloca, paramIndex)
+		}
 	}
 
 	// Move any allocs relating to named results from the entry block
@@ -288,6 +321,10 @@ type frame struct {
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
+	if fr.GenerateDebug {
+		fr.debug.pushBlockContext(b.Instrs[0].Pos())
+		defer fr.debug.popBlockContext()
+	}
 	fr.builder.SetInsertPointAtEnd(llb)
 	for _, instr := range b.Instrs {
 		fr.instruction(instr)
@@ -381,6 +418,9 @@ func (fr *frame) backpatcher(v ssa.Value) func() {
 
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
+	if fr.GenerateDebug {
+		fr.debug.setLocation(fr.builder, instr.Pos())
+	}
 
 	// Check if we'll need to backpatch; see comment
 	// in fr.value().

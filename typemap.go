@@ -6,13 +6,14 @@ package llgo
 
 import (
 	"bytes"
-	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/go/types/typemap"
-	"code.google.com/p/go.tools/ssa"
-	"code.google.com/p/go.tools/ssa/ssautil"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
 	"strconv"
+
+	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/ssa/ssautil"
+	"code.google.com/p/go.tools/go/types"
+	"code.google.com/p/go.tools/go/types/typeutil"
+	"github.com/axw/gollvm/llvm"
 )
 
 type MethodResolver interface {
@@ -33,7 +34,7 @@ type llvmTypeMap struct {
 	// in CreateStore and CreateLoad.
 	ptrstandin llvm.Type
 
-	types typemap.M
+	types typeutil.Map
 }
 
 type typeDescInfo struct {
@@ -47,10 +48,11 @@ type TypeMap struct {
 
 	module         llvm.Module
 	pkgpath        string
-	types          typemap.M
+	types          typeutil.Map
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
 	alg            *algorithmMap
+	types.MethodSetCache
 
 	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
 
@@ -343,7 +345,7 @@ func (tm *llvmTypeMap) funcLLVMType(f *types.Signature, name string) llvm.Type {
 			paramvars[i+1] = params.At(i)
 		}
 		params = types.NewTuple(paramvars...)
-		f := types.NewSignature(nil, nil, params, f.Results(), f.IsVariadic())
+		f := types.NewSignature(nil, nil, params, f.Results(), f.Variadic())
 		return tm.toLLVM(f, name)
 	}
 
@@ -552,7 +554,7 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 			for i := 0; i != p.Len(); i++ {
 				ctx.mangleType(p.At(i).Type(), b)
 			}
-			if t.IsVariadic() {
+			if t.Variadic() {
 				b.WriteRune('V')
 			}
 			b.WriteRune('e')
@@ -1014,7 +1016,7 @@ func (tm *TypeMap) makeFuncType(t types.Type, f *types.Signature) llvm.Value {
 	vals[0] = tm.makeCommonType(t)
 	// dotdotdot
 	variadic := 0
-	if f.IsVariadic() {
+	if f.Variadic() {
 		variadic = 1
 	}
 	vals[1] = llvm.ConstInt(llvm.Int8Type(), uint64(variadic), false)
@@ -1030,7 +1032,7 @@ func (tm *TypeMap) makeInterfaceType(t types.Type, i *types.Interface) llvm.Valu
 	var vals [2]llvm.Value
 	vals[0] = tm.makeCommonType(t)
 
-	methodset := i.MethodSet()
+	methodset := tm.MethodSet(i)
 	imethods := make([]llvm.Value, methodset.Len())
 	for index := 0; index < methodset.Len(); index++ {
 		method := methodset.At(index).Obj()
@@ -1097,9 +1099,9 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 
 	var methodset, pmethodset *types.MethodSet
 	if p != nil {
-		methodset = p.MethodSet()
+		methodset = tm.MethodSet(p)
 	} else {
-		methodset = n.MethodSet()
+		methodset = tm.MethodSet(n)
 	}
 
 	// Store methods. All methods must be stored, not only exported ones;
@@ -1120,7 +1122,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
 		// mtyp (method type, no receiver)
 		{
-			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.IsVariadic())
+			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
 			mtyp := tm.ToRuntime(ftyp)
 			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
 		}
@@ -1136,7 +1138,7 @@ func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
 		if p == nil {
 			if tm.Sizeof(n) > int64(tm.target.PointerSize()) {
 				if pmethodset == nil {
-					pmethodset = types.NewPointer(n).MethodSet()
+					pmethodset = tm.MethodSet(types.NewPointer(n))
 				}
 				pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
 				ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())

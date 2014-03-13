@@ -5,47 +5,48 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
+	"code.google.com/p/go.tools/go/ssa"
 	"github.com/axw/gollvm/llvm"
 )
 
 // createThunk creates a thunk from a
 // given function and arguments, suitable for use with
 // "defer" and "go".
-func (fr *frame) createThunk(call *CallCommon) (thunk LLVMValue, arg LLVMValue) {
+func (fr *frame) createThunk(call *ssa.CallCommon) (thunk llvm.Value, arg llvm.Value) {
 	var nonconstargs []llvm.Value
 	var nonconsttypes []llvm.Type
 	var args []llvm.Value
 	packArg := func(arg llvm.Value) {
-		if arg.IsAConstant() {
+		if arg.IsAConstant().C != nil {
 			args = append(args, arg)
 		} else {
-			args = append(args, nil)
+			args = append(args, llvm.Value{nil})
 			nonconstargs = append(nonconstargs, arg)
 			nonconsttypes = append(nonconsttypes, arg.Type())
 		}
 	}
 
-	builtin, isbuiltin := call.Value.(*Builtin)
+	builtin, isbuiltin := call.Value.(*ssa.Builtin)
 	if !isbuiltin {
 		packArg(fr.value(call.Value).LLVMValue())
 	}
 
-	for _, arg := call.Args {
+	for _, arg := range call.Args {
 		packArg(fr.value(arg).LLVMValue())
 	}
 
 	structtype := llvm.StructType(nonconsttypes, false)
 	argstruct := fr.createTypeMalloc(structtype)
-	for i, llvmarg := range llvmargs {
+	for i, arg := range args {
 		argptr := fr.builder.CreateStructGEP(argstruct, i, "")
-		fr.builder.CreateStore(llvmarg, argptr)
+		fr.builder.CreateStore(arg, argptr)
 	}
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	thunkfntype := llvm.FunctionType(llvm.VoidType(), []llvm.Type{i8ptr}, false)
-	thunkfn := llvm.NewFunction(fr.module, "", thunkfntype)
-	thunk := fr.builder.CreateBitCast(thunkfn, i8ptr, "")
-	arg := fr.builder.CreateBitCast(argstruct, i8ptr, "")
+	thunkfn := llvm.AddFunction(fr.module.Module, "", thunkfntype)
+	thunkfn.SetLinkage(llvm.InternalLinkage)
+	thunk = fr.builder.CreateBitCast(thunkfn, i8ptr, "")
+	arg = fr.builder.CreateBitCast(argstruct, i8ptr, "")
 	return
 	/*
 

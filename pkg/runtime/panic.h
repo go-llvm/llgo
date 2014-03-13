@@ -53,5 +53,11 @@ uintptr_t runtime_caller_region(int skip)
 void guardedcall0(struct Func f)
 	LLGO_ASM_EXPORT("runtime.guardedcall0");
 
+// guardedcall1 calls the given niladic function,
+// preventing any panics from escaping, calling
+// errback if one does occur.
+void guardedcall1(struct Func f, struct Func errback)
+	LLGO_ASM_EXPORT("runtime.guardedcall1");
+
 #endif
 
