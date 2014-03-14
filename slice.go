@@ -9,26 +9,6 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-// makeLiteralSlice allocates a new slice, storing in it the provided elements.
-func (c *compiler) makeLiteralSlice(v []llvm.Value, elttyp types.Type) llvm.Value {
-	n := llvm.ConstInt(c.types.inttype, uint64(len(v)), false)
-	eltType := c.types.ToLLVM(elttyp)
-	arrayType := llvm.ArrayType(eltType, len(v))
-	mem := c.createMalloc(llvm.SizeOf(arrayType))
-	mem = c.builder.CreateIntToPtr(mem, llvm.PointerType(eltType, 0), "")
-	for i, value := range v {
-		indices := []llvm.Value{llvm.ConstInt(llvm.Int32Type(), uint64(i), false)}
-		ep := c.builder.CreateGEP(mem, indices, "")
-		c.builder.CreateStore(value, ep)
-	}
-	slicetyp := types.NewSlice(elttyp)
-	struct_ := llvm.Undef(c.types.ToLLVM(slicetyp))
-	struct_ = c.builder.CreateInsertValue(struct_, mem, 0, "")
-	struct_ = c.builder.CreateInsertValue(struct_, n, 1, "")
-	struct_ = c.builder.CreateInsertValue(struct_, n, 2, "")
-	return struct_
-}
-
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
 func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {

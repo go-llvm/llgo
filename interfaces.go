@@ -91,7 +91,7 @@ func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 				llv = llvm.ConstNull(i8ptr)
 			}
 		} else {
-			ptr := c.createTypeMalloc(lltyp)
+			ptr := c.createTypeMalloc(v.Type())
 			c.builder.CreateStore(llv, ptr)
 			llv = c.builder.CreateBitCast(ptr, i8ptr, "")
 		}

@@ -502,12 +502,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	//case *ssa.DebugRef:
 
 	case *ssa.Defer:
+		panic("defer not supported yet")
+	/*
 		fn, args, result := fr.prepareCall(instr)
 		if result != nil {
 			panic("illegal use of builtin in defer statement")
 		}
 		fn = fr.indirectFunction(fn, args)
 		fr.createCall(fr.runtime.pushdefer, []*LLVMValue{fn})
+		*/
 
 	case *ssa.Extract:
 		var elem llvm.Value
@@ -535,12 +538,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.NewValue(fieldptr, fieldptrtyp)
 
 	case *ssa.Go:
-		fn, args, result := fr.prepareCall(instr)
-		if result != nil {
-			panic("illegal use of builtin in go statement")
-		}
-		fn = fr.indirectFunction(fn, args)
-		fr.createCall(fr.runtime.Go, []*LLVMValue{fn})
+		fn, arg := fr.createThunk(&instr.Call)
+		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
 		cond := fr.value(instr.Cond).LLVMValue()
@@ -596,12 +595,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeChan(instr.Type(), fr.value(instr.Size))
 
 	case *ssa.MakeClosure:
+		panic("closures not supported yet")
+		/*
 		fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
 		bindings := make([]*LLVMValue, len(instr.Bindings))
 		for i, binding := range instr.Bindings {
 			bindings[i] = fr.value(binding)
 		}
 		fr.env[instr] = fr.makeClosure(fn, bindings)
+		*/
 
 	case *ssa.MakeInterface:
 		receiver := fr.value(instr.X)

@@ -74,7 +74,6 @@ type runtimeInterface struct {
 	mustConvertE2I,
 	mustConvertE2V,
 	eqtyp,
-	Go,
 	initdefers,
 	stackrestore,
 	stacksave,
@@ -122,6 +121,9 @@ type runtimeInterface struct {
 	c64eqalg,
 	c128eqalg *LLVMValue
 
+	Go,
+	New,
+	NewNopointers,
 	printBool,
 	printDouble,
 	printEmptyInterface,
@@ -177,7 +179,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"mustConvertE2V":    &ri.mustConvertE2V,
 		"convertI2E":        &ri.convertI2E,
 		"eqtyp":             &ri.eqtyp,
-		"Go":                &ri.Go,
 		"initdefers":        &ri.initdefers,
 		"llvm_stackrestore": &ri.stackrestore,
 		"llvm_stacksave":    &ri.stacksave,
@@ -240,6 +241,9 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		rfi           *runtimeFnInfo
 		args, results []types.Type
 	}{
+		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
+		{name: "__go_new", rfi: &ri.New, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
+		{name: "__go_new_nopointers", rfi: &ri.NewNopointers, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_print_bool", rfi: &ri.printBool, args: []types.Type{types.Typ[types.Bool]}},
 		{name: "__go_print_double", rfi: &ri.printDouble, args: []types.Type{types.Typ[types.Float64]}},
 		{name: "__go_print_empty_interface", rfi: &ri.printEmptyInterface, args: []types.Type{emptyInterface}},
@@ -272,8 +276,24 @@ func parseRuntime(buildctx *build.Context, fset *token.FileSet) ([]*ast.File, er
 	return parseFiles(fset, filenames)
 }
 
-func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
-	malloc := c.runtime.malloc.LLVMValue()
+func (c *compiler) createZExtOrTrunc(v llvm.Value, t llvm.Type, name string) llvm.Value {
+	switch n := v.Type().IntTypeWidth() - t.IntTypeWidth(); {
+	case n < 0:
+		v = c.builder.CreateZExt(v, c.target.IntPtrType(), "")
+	case n > 0:
+		v = c.builder.CreateTrunc(v, c.target.IntPtrType(), "")
+	}
+	return v
+}
+
+func (c *compiler) createMalloc(size llvm.Value, hasPointers bool) llvm.Value {
+	var malloc *runtimeFnInfo
+	if hasPointers {
+		malloc := c.runtime.New.LLVMValue()
+	} else {
+		malloc := c.runtime.NewNopointers.LLVMValue()
+	}
+
 	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
 	case n < 0:
 		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
@@ -283,9 +303,8 @@ func (c *compiler) createMalloc(size llvm.Value) llvm.Value {
 	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")
 }
 
-func (c *compiler) createTypeMalloc(t llvm.Type) llvm.Value {
-	ptr := c.createMalloc(llvm.SizeOf(t))
-	return c.builder.CreateIntToPtr(ptr, llvm.PointerType(t, 0), "")
+func (c *compiler) createTypeMalloc(t types.Type) llvm.Value {
+	return c.createMalloc(llvm.ConstInt(c.target.IntPtrType(), c.llvmtypes.Sizeof(t), false), hasPointers(t))
 }
 
 func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {

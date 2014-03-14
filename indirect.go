@@ -6,6 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/types"
 	"github.com/axw/gollvm/llvm"
 )
 
@@ -14,28 +15,28 @@ import (
 // "defer" and "go".
 func (fr *frame) createThunk(call *ssa.CallCommon) (thunk llvm.Value, arg llvm.Value) {
 	var nonconstargs []llvm.Value
-	var nonconsttypes []llvm.Type
+	var nonconsttypes []*types.Var
 	var args []llvm.Value
-	packArg := func(arg llvm.Value) {
-		if arg.IsAConstant().C != nil {
-			args = append(args, arg)
+	packArg := func(arg *LLVMValue) {
+		if arg.LLVMValue().IsAConstant().C != nil {
+			args = append(args, arg.LLVMValue())
 		} else {
 			args = append(args, llvm.Value{nil})
-			nonconstargs = append(nonconstargs, arg)
-			nonconsttypes = append(nonconsttypes, arg.Type())
+			nonconstargs = append(nonconstargs, arg.LLVMValue())
+			nonconsttypes = append(nonconsttypes, types.NewField(0, nil, "", arg.Type(), true))
 		}
 	}
 
-	builtin, isbuiltin := call.Value.(*ssa.Builtin)
+	_, isbuiltin := call.Value.(*ssa.Builtin)
 	if !isbuiltin {
-		packArg(fr.value(call.Value).LLVMValue())
+		packArg(fr.value(call.Value))
 	}
 
 	for _, arg := range call.Args {
-		packArg(fr.value(arg).LLVMValue())
+		packArg(fr.value(arg))
 	}
 
-	structtype := llvm.StructType(nonconsttypes, false)
+	structtype := types.NewStruct(nonconsttypes, nil)
 	argstruct := fr.createTypeMalloc(structtype)
 	for i, arg := range args {
 		argptr := fr.builder.CreateStructGEP(argstruct, i, "")
