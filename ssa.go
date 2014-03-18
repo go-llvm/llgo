@@ -449,22 +449,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs).(*LLVMValue)
 
 	case *ssa.Call:
-		fn, args, result := fr.prepareCall(instr)
-		// Some builtins may only be used immediately, and not
-		// deferred; in this case, "fn" will be nil, and result
-		// may be non-nil (it will be nil for builtins without
-		// results.)
-		if fn == nil {
-			if result != nil {
-				fr.env[instr] = result
-			}
+		tuple := fr.callInstruction(instr)
+		if len(tuple) == 1 {
+			fr.env[instr] = tuple[0]
 		} else {
-			tuple := fr.createCall(fn, args)
-			if len(tuple) == 1 {
-				fr.env[instr] = tuple[0]
-			} else {
-				fr.tuples[instr] = tuple
-			}
+			fr.tuples[instr] = tuple
 		}
 
 	case *ssa.ChangeInterface:
@@ -782,113 +771,79 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	}
 }
 
-// prepareCall returns the evaluated function and arguments.
-//
-// For builtins that may not be used in go/defer, prepareCall
-// will emits inline code. In this case, prepareCall returns
-// nil for fn and args, and returns a non-nil value for result.
-func (fr *frame) prepareCall(instr ssa.CallInstruction) (fn *LLVMValue, args []*LLVMValue, result *LLVMValue) {
-	call := instr.Common()
-	args = make([]*LLVMValue, len(call.Args))
-	for i, arg := range call.Args {
-		args[i] = fr.value(arg)
-	}
-
-	if call.IsInvoke() {
-		fn := fr.interfaceMethod(fr.value(call.Value), call.Method)
-		return fn, args, nil
-	}
-
-	switch v := call.Value.(type) {
-	case *ssa.Builtin:
-		// handled below
-	case *ssa.Function:
-		// Function handled specially; value() will convert
-		// a function to one with a context argument.
-		fn = fr.resolveFunction(v)
-		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(fn.Type()))
-		pair = llvm.ConstInsertValue(pair, fn.LLVMValue(), []uint32{0})
-		fn = fr.NewValue(pair, fn.Type())
-		return fn, args, nil
-	default:
-		fn = fr.value(call.Value)
-		return fn, args, nil
-	}
-
-	// Builtins may only be used in calls (i.e. can't be assigned),
-	// and only print[ln], panic and recover may be used in go/defer.
-	builtin := call.Value.(*ssa.Builtin)
+func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMValue) []*LLVMValue {
 	switch builtin.Name() {
 	case "print", "println":
-		// print/println generates a call-site specific anonymous
-		// function to print the values. It's not inline because
-		// print/println may be deferred.
-		params := make([]*types.Var, len(call.Args))
-		for i, arg := range call.Args {
-			// make sure to use args[i].Type(), not call.Args[i].Type(),
-			// as the evaluated expression converts untyped.
-			params[i] = types.NewParam(arg.Pos(), nil, arg.Name(), args[i].Type())
-		}
-		sig := types.NewSignature(nil, nil, types.NewTuple(params...), nil, false)
-		llfntyp := fr.llvmtypes.ToLLVM(sig)
-		llfnptr := llvm.AddFunction(fr.module.Module, "", llfntyp.StructElementTypes()[0].ElementType())
-		currBlock := fr.builder.GetInsertBlock()
-		entry := llvm.AddBasicBlock(llfnptr, "entry")
-		fr.builder.SetInsertPointAtEnd(entry)
-		internalArgs := make([]Value, len(args))
-		for i, arg := range args {
-			internalArgs[i] = fr.NewValue(llfnptr.Param(i), arg.Type())
-		}
-		fr.printValues(builtin.Name() == "println", internalArgs...)
-		fr.builder.CreateRetVoid()
-		fr.builder.SetInsertPointAtEnd(currBlock)
-		return fr.NewValue(llfnptr, sig), args, nil
+		fr.printValues(builtin.Name() == "println", args...)
+		return nil
 
 	case "panic":
 		panic("TODO: panic")
 
 	case "recover":
-		// TODO(axw) determine number of frames to skip in pc check
-		indirect := fr.NewValue(llvm.ConstNull(llvm.Int32Type()), types.Typ[types.Int32])
-		return fr.runtime.recover_, []*LLVMValue{indirect}, nil
+		panic("TODO: recover")
 
 	case "append":
-		return nil, nil, fr.callAppend(args[0], args[1])
+		return []*LLVMValue { fr.callAppend(args[0], args[1]) }
 
 	case "close":
-		return fr.runtime.chanclose, args, nil
+		panic("TODO: close")
 
 	case "cap":
-		return nil, nil, fr.callCap(args[0])
+		return []*LLVMValue { fr.callCap(args[0]) }
 
 	case "len":
-		return nil, nil, fr.callLen(args[0])
+		return []*LLVMValue { fr.callLen(args[0]) }
 
 	case "copy":
-		return nil, nil, fr.callCopy(args[0], args[1])
+		return []*LLVMValue { fr.callCopy(args[0], args[1]) }
 
 	case "delete":
 		fr.callDelete(args[0], args[1])
-		return nil, nil, nil
+		return nil
 
 	case "real":
-		return nil, nil, args[0].extractComplexComponent(0)
+		return []*LLVMValue { args[0].extractComplexComponent(0) }
 
 	case "imag":
-		return nil, nil, args[0].extractComplexComponent(1)
+		return []*LLVMValue { args[0].extractComplexComponent(1) }
 
 	case "complex":
 		r := args[0].LLVMValue()
 		i := args[1].LLVMValue()
-		typ := instr.Value().Type()
 		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
-		return nil, nil, fr.NewValue(cmplx, typ)
+		return []*LLVMValue { fr.NewValue(cmplx, typ) }
 
 	default:
 		panic("unimplemented: " + builtin.Name())
 	}
+}
+
+// prepareCall returns the evaluated function and arguments.
+//
+// For builtins that may not be used in go/defer, prepareCall
+// will emits inline code. In this case, prepareCall returns
+// nil for fn and args, and returns a non-nil value for result.
+func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
+	call := instr.Common()
+	args := make([]*LLVMValue, len(call.Args))
+	for i, arg := range call.Args {
+		args[i] = fr.value(arg)
+	}
+
+	if builtin, ok := call.Value.(*ssa.Builtin); ok {
+		return fr.callBuiltin(instr.Value().Type(), builtin, args)
+	}
+
+	var fn *LLVMValue
+	if call.IsInvoke() {
+		fn = fr.interfaceMethod(fr.value(call.Value), call.Method)
+	} else {
+		fn = fr.value(call.Value)
+	}
+	return fr.createCall(fn, args)
 }
 
 func hasDefer(f *ssa.Function) bool {

@@ -10,7 +10,7 @@ import (
 	"code.google.com/p/go.tools/go/types"
 )
 
-func (fr *frame) printValues(println_ bool, values ...Value) {
+func (fr *frame) printValues(println_ bool, values ...*LLVMValue) {
 	for i, value := range values {
 		llvm_value := value.LLVMValue()
 
