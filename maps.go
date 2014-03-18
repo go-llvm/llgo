@@ -10,18 +10,18 @@ import (
 )
 
 // makeMap implements make(maptype[, initial space])
-func (c *compiler) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
-	f := c.runtime.makemap.LLVMValue()
-	dyntyp := c.types.ToRuntime(typ)
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
+func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
+	f := fr.runtime.makemap.LLVMValue()
+	dyntyp := fr.types.ToRuntime(typ)
+	dyntyp = fr.builder.CreatePtrToInt(dyntyp, fr.target.IntPtrType(), "")
 	var cap llvm.Value
 	if cap_ != nil {
-		cap = cap_.Convert(types.Typ[types.Int]).LLVMValue()
+		cap = fr.convert(cap_, types.Typ[types.Int]).LLVMValue()
 	} else {
-		cap = llvm.ConstNull(c.types.inttype)
+		cap = llvm.ConstNull(fr.types.inttype)
 	}
-	m := c.builder.CreateCall(f, []llvm.Value{dyntyp, cap}, "")
-	return c.NewValue(m, typ)
+	m := fr.builder.CreateCall(f, []llvm.Value{dyntyp, cap}, "")
+	return fr.NewValue(m, typ)
 }
 
 // mapLookup implements v[, ok] = m[k]

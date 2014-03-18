@@ -276,35 +276,30 @@ func parseRuntime(buildctx *build.Context, fset *token.FileSet) ([]*ast.File, er
 	return parseFiles(fset, filenames)
 }
 
-func (c *compiler) createZExtOrTrunc(v llvm.Value, t llvm.Type, name string) llvm.Value {
+func (fr *frame) createZExtOrTrunc(v llvm.Value, t llvm.Type, name string) llvm.Value {
 	switch n := v.Type().IntTypeWidth() - t.IntTypeWidth(); {
 	case n < 0:
-		v = c.builder.CreateZExt(v, c.target.IntPtrType(), "")
+		v = fr.builder.CreateZExt(v, fr.target.IntPtrType(), name)
 	case n > 0:
-		v = c.builder.CreateTrunc(v, c.target.IntPtrType(), "")
+		v = fr.builder.CreateTrunc(v, fr.target.IntPtrType(), name)
 	}
 	return v
 }
 
-func (c *compiler) createMalloc(size llvm.Value, hasPointers bool) llvm.Value {
-	var malloc *runtimeFnInfo
+func (fr *frame) createMalloc(size llvm.Value, hasPointers bool) llvm.Value {
+	var allocator *runtimeFnInfo
 	if hasPointers {
-		malloc := c.runtime.New.LLVMValue()
+		allocator = &fr.runtime.New
 	} else {
-		malloc := c.runtime.NewNopointers.LLVMValue()
+		allocator = &fr.runtime.NewNopointers
 	}
 
-	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
-	case n < 0:
-		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
-	case n > 0:
-		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
-	}
-	return c.builder.CreateCall(malloc, []llvm.Value{size}, "")
+	return allocator.call(fr, fr.createZExtOrTrunc(size, fr.target.IntPtrType(), ""))[0]
 }
 
-func (c *compiler) createTypeMalloc(t types.Type) llvm.Value {
-	return c.createMalloc(llvm.ConstInt(c.target.IntPtrType(), c.llvmtypes.Sizeof(t), false), hasPointers(t))
+func (fr *frame) createTypeMalloc(t types.Type) llvm.Value {
+	size := llvm.ConstInt(fr.target.IntPtrType(), uint64(fr.llvmtypes.Sizeof(t)), false)
+	return fr.createMalloc(size, hasPointers(t))
 }
 
 func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {

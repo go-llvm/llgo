@@ -432,7 +432,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
-		typ := fr.llvmtypes.ToLLVM(deref(instr.Type()))
+		typ := deref(instr.Type())
+		llvmtyp := fr.llvmtypes.ToLLVM(typ)
 		var value llvm.Value
 		if instr.Heap {
 			value = fr.createTypeMalloc(typ)
@@ -441,11 +442,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		} else {
 			value = fr.env[instr].LLVMValue()
 		}
-		fr.memsetZero(value, llvm.SizeOf(typ))
+		fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 
 	case *ssa.BinOp:
 		lhs, rhs := fr.value(instr.X), fr.value(instr.Y)
-		fr.env[instr] = lhs.BinaryOp(instr.Op, rhs).(*LLVMValue)
+		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs).(*LLVMValue)
 
 	case *ssa.Call:
 		fn, args, result := fr.prepareCall(instr)
@@ -497,7 +498,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if _, ok := instr.X.(*ssa.Phi); ok {
 			v = phiValue(fr.compiler, v)
 		}
-		fr.env[instr] = v.Convert(instr.Type()).(*LLVMValue)
+		fr.env[instr] = fr.convert(v, instr.Type()).(*LLVMValue)
 
 	//case *ssa.DebugRef:
 

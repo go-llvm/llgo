@@ -11,16 +11,16 @@ import (
 
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
-func (c *compiler) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
-	length = length.Convert(types.Typ[types.Int]).(*LLVMValue)
-	capacity = capacity.Convert(types.Typ[types.Int]).(*LLVMValue)
-	makeslice := c.runtime.makeslice.LLVMValue()
-	runtimeType := c.builder.CreatePtrToInt(c.types.ToRuntime(sliceType), c.target.IntPtrType(), "")
-	llslice := c.builder.CreateCall(makeslice, []llvm.Value{
+func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
+	length = fr.convert(length, types.Typ[types.Int]).(*LLVMValue)
+	capacity = fr.convert(capacity, types.Typ[types.Int]).(*LLVMValue)
+	makeslice := fr.runtime.makeslice.LLVMValue()
+	runtimeType := fr.builder.CreatePtrToInt(fr.types.ToRuntime(sliceType), fr.target.IntPtrType(), "")
+	llslice := fr.builder.CreateCall(makeslice, []llvm.Value{
 		runtimeType, length.LLVMValue(), capacity.LLVMValue(),
 	}, "")
-	llslice = c.coerceSlice(llslice, c.types.ToLLVM(sliceType))
-	return c.NewValue(llslice, sliceType)
+	llslice = fr.coerceSlice(llslice, fr.types.ToLLVM(sliceType))
+	return fr.NewValue(llslice, sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a
@@ -38,60 +38,60 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 	return dst
 }
 
-func (c *compiler) slice(x, low, high *LLVMValue) *LLVMValue {
+func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 	if low != nil {
-		low = low.Convert(types.Typ[types.Int]).(*LLVMValue)
+		low = fr.convert(low, types.Typ[types.Int]).(*LLVMValue)
 	} else {
-		low = c.NewValue(llvm.ConstNull(c.types.inttype), types.Typ[types.Int])
+		low = fr.NewValue(llvm.ConstNull(fr.types.inttype), types.Typ[types.Int])
 	}
 
 	if high != nil {
-		high = high.Convert(types.Typ[types.Int]).(*LLVMValue)
+		high = fr.convert(high, types.Typ[types.Int]).(*LLVMValue)
 	} else {
 		// all bits set is -1
-		high = c.NewValue(llvm.ConstAllOnes(c.types.inttype), types.Typ[types.Int])
+		high = fr.NewValue(llvm.ConstAllOnes(fr.types.inttype), types.Typ[types.Int])
 	}
 
 	switch typ := x.Type().Underlying().(type) {
 	case *types.Pointer: // *array
-		sliceslice := c.runtime.sliceslice.LLVMValue()
+		sliceslice := fr.runtime.sliceslice.LLVMValue()
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := llvm.Undef(i8slice) // temporary slice
 		arraytyp := typ.Elem().Underlying().(*types.Array)
 		arrayptr := x.LLVMValue()
-		arrayptr = c.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
-		arraylen := llvm.ConstInt(c.llvmtypes.inttype, uint64(arraytyp.Len()), false)
-		sliceValue = c.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
-		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
-		sliceValue = c.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
+		arrayptr = fr.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
+		arraylen := llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
+		sliceValue = fr.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
+		sliceValue = fr.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
+		sliceValue = fr.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
 		sliceTyp := types.NewSlice(arraytyp.Elem())
-		runtimeTyp := c.types.ToRuntime(sliceTyp)
-		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+		runtimeTyp := fr.types.ToRuntime(sliceTyp)
+		runtimeTyp = fr.builder.CreatePtrToInt(runtimeTyp, fr.target.IntPtrType(), "")
 		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
-		result := c.builder.CreateCall(sliceslice, args, "")
-		llvmSliceTyp := c.types.ToLLVM(sliceTyp)
-		return c.NewValue(c.coerceSlice(result, llvmSliceTyp), sliceTyp)
+		result := fr.builder.CreateCall(sliceslice, args, "")
+		llvmSliceTyp := fr.types.ToLLVM(sliceTyp)
+		return fr.NewValue(fr.coerceSlice(result, llvmSliceTyp), sliceTyp)
 	case *types.Slice:
-		sliceslice := c.runtime.sliceslice.LLVMValue()
+		sliceslice := fr.runtime.sliceslice.LLVMValue()
 		i8slice := sliceslice.Type().ElementType().ReturnType()
 		sliceValue := x.LLVMValue()
 		sliceTyp := sliceValue.Type()
-		sliceValue = c.coerceSlice(sliceValue, i8slice)
-		runtimeTyp := c.types.ToRuntime(x.Type())
-		runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
+		sliceValue = fr.coerceSlice(sliceValue, i8slice)
+		runtimeTyp := fr.types.ToRuntime(x.Type())
+		runtimeTyp = fr.builder.CreatePtrToInt(runtimeTyp, fr.target.IntPtrType(), "")
 		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
-		result := c.builder.CreateCall(sliceslice, args, "")
-		return c.NewValue(c.coerceSlice(result, sliceTyp), x.Type())
+		result := fr.builder.CreateCall(sliceslice, args, "")
+		return fr.NewValue(fr.coerceSlice(result, sliceTyp), x.Type())
 	case *types.Basic:
-		stringslice := c.runtime.stringslice.LLVMValue()
+		stringslice := fr.runtime.stringslice.LLVMValue()
 		llv := x.LLVMValue()
 		args := []llvm.Value{
-			c.coerceString(llv, stringslice.Type().ElementType().ParamTypes()[0]),
+			fr.coerceString(llv, stringslice.Type().ElementType().ParamTypes()[0]),
 			low.LLVMValue(),
 			high.LLVMValue(),
 		}
-		result := c.builder.CreateCall(stringslice, args, "")
-		return c.NewValue(c.coerceString(result, llv.Type()), x.Type())
+		result := fr.builder.CreateCall(stringslice, args, "")
+		return fr.NewValue(fr.coerceString(result, llv.Type()), x.Type())
 	default:
 		panic("unimplemented")
 	}

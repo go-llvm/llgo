@@ -73,38 +73,38 @@ func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	return c.NewValue(c.builder.CreateCall(f, args, ""), types.Typ[types.Bool])
 }
 
-func (c *compiler) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
+func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	llv := v.LLVMValue()
 	lltyp := llv.Type()
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	if lltyp.TypeKind() == llvm.PointerTypeKind {
-		llv = c.builder.CreateBitCast(llv, i8ptr, "")
+		llv = fr.builder.CreateBitCast(llv, i8ptr, "")
 	} else {
 		// If the value fits exactly in a pointer, then we can just
 		// bitcast it. Otherwise we need to malloc.
-		if c.target.TypeStoreSize(lltyp) <= uint64(c.target.PointerSize()) {
-			bits := c.target.TypeSizeInBits(lltyp)
+		if fr.target.TypeStoreSize(lltyp) <= uint64(fr.target.PointerSize()) {
+			bits := fr.target.TypeSizeInBits(lltyp)
 			if bits > 0 {
-				llv = coerce(c.builder, llv, llvm.IntType(int(bits)))
-				llv = c.builder.CreateIntToPtr(llv, i8ptr, "")
+				llv = coerce(fr.builder, llv, llvm.IntType(int(bits)))
+				llv = fr.builder.CreateIntToPtr(llv, i8ptr, "")
 			} else {
 				llv = llvm.ConstNull(i8ptr)
 			}
 		} else {
-			ptr := c.createTypeMalloc(v.Type())
-			c.builder.CreateStore(llv, ptr)
-			llv = c.builder.CreateBitCast(ptr, i8ptr, "")
+			ptr := fr.createTypeMalloc(v.Type())
+			fr.builder.CreateStore(llv, ptr)
+			llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
 		}
 	}
-	value := llvm.Undef(c.types.ToLLVM(iface))
-	rtype := c.types.ToRuntime(v.Type())
-	rtype = c.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
-	value = c.builder.CreateInsertValue(value, rtype, 0, "")
-	value = c.builder.CreateInsertValue(value, llv, 1, "")
+	value := llvm.Undef(fr.types.ToLLVM(iface))
+	rtype := fr.types.ToRuntime(v.Type())
+	rtype = fr.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
+	value = fr.builder.CreateInsertValue(value, rtype, 0, "")
+	value = fr.builder.CreateInsertValue(value, llv, 1, "")
 	if iface.Underlying().(*types.Interface).NumMethods() > 0 {
-		result := c.NewValue(value, types.NewInterface(nil, nil))
+		result := fr.NewValue(value, types.NewInterface(nil, nil))
 		result, _ = result.convertE2I(iface)
 		return result
 	}
-	return c.NewValue(value, iface)
+	return fr.NewValue(value, iface)
 }

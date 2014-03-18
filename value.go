@@ -14,16 +14,8 @@ import (
 
 // Value is an interface for representing values returned by Go expressions.
 type Value interface {
-	// BinaryOp applies the specified binary operator to this value and the
-	// specified right-hand operand, and returns a new Value.
-	BinaryOp(op token.Token, rhs Value) Value
-
 	// UnaryOp applies the specified unary operator and returns a new Value.
 	UnaryOp(op token.Token) Value
-
-	// Convert returns a new Value which has been converted to the specified
-	// type.
-	Convert(typ types.Type) Value
 
 	// LLVMValue returns an llvm.Value for this value.
 	LLVMValue() llvm.Value
@@ -49,40 +41,40 @@ func (c *compiler) NewValue(v llvm.Value, t types.Type) *LLVMValue {
 	return &LLVMValue{c, v, t}
 }
 
-func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
+func (fr *frame) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 	switch {
 	case v == nil:
-		llvmtyp := c.types.ToLLVM(typ)
-		return c.NewValue(llvm.ConstNull(llvmtyp), typ)
+		llvmtyp := fr.types.ToLLVM(typ)
+		return fr.NewValue(llvm.ConstNull(llvmtyp), typ)
 
 	case isString(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.String]
 		}
-		llvmtyp := c.types.ToLLVM(typ)
+		llvmtyp := fr.types.ToLLVM(typ)
 		strval := exact.StringVal(v)
 		strlen := len(strval)
 		i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 		var ptr llvm.Value
 		if strlen > 0 {
 			init := llvm.ConstString(strval, false)
-			ptr = llvm.AddGlobal(c.module.Module, init.Type(), "")
+			ptr = llvm.AddGlobal(fr.module.Module, init.Type(), "")
 			ptr.SetInitializer(init)
 			ptr = llvm.ConstBitCast(ptr, i8ptr)
 		} else {
 			ptr = llvm.ConstNull(i8ptr)
 		}
-		len_ := llvm.ConstInt(c.types.inttype, uint64(strlen), false)
+		len_ := llvm.ConstInt(fr.types.inttype, uint64(strlen), false)
 		llvmvalue := llvm.Undef(llvmtyp)
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, ptr, []uint32{0})
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, len_, []uint32{1})
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 
 	case isInteger(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Int]
 		}
-		llvmtyp := c.types.ToLLVM(typ)
+		llvmtyp := fr.types.ToLLVM(typ)
 		var llvmvalue llvm.Value
 		if isUnsigned(typ) {
 			v, _ := exact.Uint64Val(v)
@@ -91,7 +83,7 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 			v, _ := exact.Int64Val(v)
 			llvmvalue = llvm.ConstInt(llvmtyp, uint64(v), true)
 		}
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 
 	case isBoolean(typ):
 		if isUntyped(typ) {
@@ -103,28 +95,28 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		} else {
 			llvmvalue = llvm.ConstNull(llvm.Int1Type())
 		}
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 
 	case isFloat(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Float64]
 		}
-		llvmtyp := c.types.ToLLVM(typ)
+		llvmtyp := fr.types.ToLLVM(typ)
 		floatval, _ := exact.Float64Val(v)
 		llvmvalue := llvm.ConstFloat(llvmtyp, floatval)
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 
 	case typ == types.Typ[types.UnsafePointer]:
-		llvmtyp := c.types.ToLLVM(typ)
+		llvmtyp := fr.types.ToLLVM(typ)
 		v, _ := exact.Uint64Val(v)
 		llvmvalue := llvm.ConstInt(llvmtyp, v, false)
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 
 	case isComplex(typ):
 		if isUntyped(typ) {
 			typ = types.Typ[types.Complex128]
 		}
-		llvmtyp := c.types.ToLLVM(typ)
+		llvmtyp := fr.types.ToLLVM(typ)
 		floattyp := llvmtyp.StructElementTypes()[0]
 		llvmvalue := llvm.ConstNull(llvmtyp)
 		realv := exact.Real(v)
@@ -135,14 +127,14 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		llvmim := llvm.ConstFloat(floattyp, imagfloatval)
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmre, []uint32{0})
 		llvmvalue = llvm.ConstInsertValue(llvmvalue, llvmim, []uint32{1})
-		return c.NewValue(llvmvalue, typ)
+		return fr.NewValue(llvmvalue, typ)
 	}
 
 	// Special case for string -> [](byte|rune)
 	if u, ok := typ.Underlying().(*types.Slice); ok && isInteger(u.Elem()) {
 		if v.Kind() == exact.String {
-			strval := c.NewConstValue(v, types.Typ[types.String])
-			return strval.Convert(typ).(*LLVMValue)
+			strval := fr.NewConstValue(v, types.Typ[types.String])
+			return fr.convert(strval, typ).(*LLVMValue)
 		}
 	}
 
@@ -152,15 +144,14 @@ func (c *compiler) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 ///////////////////////////////////////////////////////////////////////////////
 // LLVMValue methods
 
-func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
+func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 	if op == token.NEQ {
-		result := lhs.BinaryOp(token.EQL, rhs_)
+		result := fr.binaryOp(lhs, token.EQL, rhs_)
 		return result.UnaryOp(token.NOT)
 	}
 
 	var result llvm.Value
-	c := lhs.compiler
-	b := lhs.compiler.builder
+	b := fr.builder
 
 	rhs := rhs_.(*LLVMValue)
 	switch typ := lhs.typ.Underlying().(type) {
@@ -168,27 +159,27 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		// TODO(axw) use runtime equality algorithm (will be suitably inlined).
 		// For now, we use compare all fields unconditionally and bitwise AND
 		// to avoid branching (i.e. so we don't create additional blocks).
-		var value Value = c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+		var value Value = fr.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
 		for i := 0; i < typ.NumFields(); i++ {
 			t := typ.Field(i).Type()
-			lhs := c.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
-			rhs := c.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
-			value = value.BinaryOp(token.AND, lhs.BinaryOp(token.EQL, rhs))
+			lhs := fr.NewValue(b.CreateExtractValue(lhs.LLVMValue(), i, ""), t)
+			rhs := fr.NewValue(b.CreateExtractValue(rhs.LLVMValue(), i, ""), t)
+			value = fr.binaryOp(value.(*LLVMValue), token.AND, fr.binaryOp(lhs, token.EQL, rhs))
 		}
 		return value
 
 	case *types.Slice:
 		// []T == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-		return c.NewValue(isnil, types.Typ[types.Bool])
+		return fr.NewValue(isnil, types.Typ[types.Bool])
 
 	case *types.Signature:
 		// func == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
-		return c.NewValue(isnil, types.Typ[types.Bool])
+		return fr.NewValue(isnil, types.Typ[types.Bool])
 
 	case *types.Interface:
-		return c.compareInterfaces(lhs, rhs)
+		return fr.compareInterfaces(lhs, rhs)
 	}
 
 	// Strings.
@@ -196,9 +187,9 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		if isString(rhs.typ) {
 			switch op {
 			case token.ADD:
-				return c.concatenateStrings(lhs, rhs)
+				return fr.concatenateStrings(lhs, rhs)
 			case token.EQL, token.LSS, token.GTR, token.LEQ, token.GEQ:
-				return c.compareStrings(lhs, rhs, op)
+				return fr.compareStrings(lhs, rhs, op)
 			default:
 				panic(fmt.Sprint("Unimplemented operator: ", op))
 			}
@@ -307,7 +298,7 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 		}
 		return lhs.compiler.NewValue(result, lhs.typ)
 	case token.SHL, token.SHR:
-		return lhs.shift(rhs, op)
+		return fr.shift(lhs, rhs, op)
 	case token.EQL:
 		if isFloat(lhs.typ) {
 			result = b.CreateFCmp(llvm.FloatOEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -375,8 +366,8 @@ func (lhs *LLVMValue) BinaryOp(op token.Token, rhs_ Value) Value {
 	panic("unreachable")
 }
 
-func (lhs *LLVMValue) shift(rhs *LLVMValue, op token.Token) *LLVMValue {
-	rhs = rhs.Convert(lhs.Type()).(*LLVMValue)
+func (fr *frame) shift(lhs *LLVMValue, rhs *LLVMValue, op token.Token) *LLVMValue {
+	rhs = fr.convert(rhs, lhs.Type()).(*LLVMValue)
 	lhsval := lhs.LLVMValue()
 	bits := rhs.LLVMValue()
 	unsigned := isUnsigned(lhs.Type())
@@ -427,8 +418,8 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	panic("unreachable")
 }
 
-func (v *LLVMValue) Convert(dsttyp types.Type) Value {
-	b := v.compiler.builder
+func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
+	b := fr.builder
 
 	// If it's a stack allocated value, we'll want to compare the
 	// value type, not the pointer type.
@@ -468,27 +459,26 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 		// string -> []byte
 		if types.Identical(dsttyp, byteslice) {
-			c := v.compiler
 			value := v.LLVMValue()
-			strdata := c.builder.CreateExtractValue(value, 0, "")
-			strlen := c.builder.CreateExtractValue(value, 1, "")
+			strdata := fr.builder.CreateExtractValue(value, 0, "")
+			strlen := fr.builder.CreateExtractValue(value, 1, "")
 
 			// Data must be copied, to prevent changes in
 			// the byte slice from mutating the string.
-			newdata := c.createMalloc(strlen)
-			memcpy := c.runtime.memcpy.LLVMValue()
-			c.builder.CreateCall(memcpy, []llvm.Value{
+			newdata := fr.createMalloc(strlen, false)
+			memcpy := fr.runtime.memcpy.LLVMValue()
+			fr.builder.CreateCall(memcpy, []llvm.Value{
 				newdata,
-				c.builder.CreatePtrToInt(strdata, c.target.IntPtrType(), ""),
+				fr.builder.CreatePtrToInt(strdata, fr.target.IntPtrType(), ""),
 				strlen,
 			}, "")
-			strdata = c.builder.CreateIntToPtr(newdata, strdata.Type(), "")
+			strdata = fr.builder.CreateIntToPtr(newdata, strdata.Type(), "")
 
-			struct_ := llvm.Undef(c.types.ToLLVM(byteslice))
-			struct_ = c.builder.CreateInsertValue(struct_, strdata, 0, "")
-			struct_ = c.builder.CreateInsertValue(struct_, strlen, 1, "")
-			struct_ = c.builder.CreateInsertValue(struct_, strlen, 2, "")
-			return c.NewValue(struct_, byteslice)
+			struct_ := llvm.Undef(fr.types.ToLLVM(byteslice))
+			struct_ = fr.builder.CreateInsertValue(struct_, strdata, 0, "")
+			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 1, "")
+			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 2, "")
+			return fr.NewValue(struct_, byteslice)
 		}
 
 		// string -> []rune
@@ -499,26 +489,25 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// []byte -> string
 	if types.Identical(srctyp, byteslice) && isString(dsttyp) {
-		c := v.compiler
 		value := v.LLVMValue()
-		data := c.builder.CreateExtractValue(value, 0, "")
-		len := c.builder.CreateExtractValue(value, 1, "")
+		data := fr.builder.CreateExtractValue(value, 0, "")
+		len := fr.builder.CreateExtractValue(value, 1, "")
 
 		// Data must be copied, to prevent changes in
 		// the byte slice from mutating the string.
-		newdata := c.createMalloc(len)
-		memcpy := c.runtime.memcpy.LLVMValue()
-		c.builder.CreateCall(memcpy, []llvm.Value{
+		newdata := fr.createMalloc(len, false)
+		memcpy := fr.runtime.memcpy.LLVMValue()
+		fr.builder.CreateCall(memcpy, []llvm.Value{
 			newdata,
-			c.builder.CreatePtrToInt(data, c.target.IntPtrType(), ""),
+			fr.builder.CreatePtrToInt(data, fr.target.IntPtrType(), ""),
 			len,
 		}, "")
-		data = c.builder.CreateIntToPtr(newdata, data.Type(), "")
+		data = fr.builder.CreateIntToPtr(newdata, data.Type(), "")
 
-		struct_ := llvm.Undef(c.types.ToLLVM(types.Typ[types.String]))
-		struct_ = c.builder.CreateInsertValue(struct_, data, 0, "")
-		struct_ = c.builder.CreateInsertValue(struct_, len, 1, "")
-		return c.NewValue(struct_, types.Typ[types.String])
+		struct_ := llvm.Undef(fr.types.ToLLVM(types.Typ[types.String]))
+		struct_ = fr.builder.CreateInsertValue(struct_, data, 0, "")
+		struct_ = fr.builder.CreateInsertValue(struct_, len, 1, "")
+		return fr.NewValue(struct_, types.Typ[types.String])
 	}
 
 	// []rune -> string
@@ -528,7 +517,7 @@ func (v *LLVMValue) Convert(dsttyp types.Type) Value {
 
 	// rune -> string
 	if isString(dsttyp) && isInteger(srctyp) {
-		return v.runeToString()
+		return fr.runeToString(v)
 	}
 
 	// TODO other special conversions?

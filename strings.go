@@ -99,10 +99,10 @@ func (c *compiler) stringIterNext(str *LLVMValue, preds []llvm.BasicBlock) *LLVM
 	return c.NewValue(tuple, typ)
 }
 
-func (v *LLVMValue) runeToString() *LLVMValue {
+func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
 	c := v.compiler
 	strrune := c.runtime.strrune.LLVMValue()
-	args := []llvm.Value{v.Convert(types.Typ[types.Int64]).LLVMValue()}
+	args := []llvm.Value{fr.convert(v, types.Typ[types.Int64]).LLVMValue()}
 	result := c.builder.CreateCall(strrune, args, "")
 	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
 	return c.NewValue(result, types.Typ[types.String])

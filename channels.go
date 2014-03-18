@@ -19,20 +19,20 @@ func (c *compiler) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
 }
 
 // chanSend implements ch<- x
-func (c *compiler) chanSend(ch *LLVMValue, elem *LLVMValue) {
+func (fr *frame) chanSend(ch *LLVMValue, elem *LLVMValue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
-	elem = elem.Convert(elemtyp).(*LLVMValue)
-	stackptr := c.stacksave()
-	elemptr := c.builder.CreateAlloca(elem.LLVMValue().Type(), "")
-	c.builder.CreateStore(elem.LLVMValue(), elemptr)
-	elemptr = c.builder.CreatePtrToInt(elemptr, c.target.IntPtrType(), "")
+	elem = fr.convert(elem, elemtyp).(*LLVMValue)
+	stackptr := fr.stacksave()
+	elemptr := fr.builder.CreateAlloca(elem.LLVMValue().Type(), "")
+	fr.builder.CreateStore(elem.LLVMValue(), elemptr)
+	elemptr = fr.builder.CreatePtrToInt(elemptr, fr.target.IntPtrType(), "")
 	nb := boolLLVMValue(false)
-	chansend := c.runtime.chansend.LLVMValue()
-	chantyp := c.types.ToRuntime(ch.typ.Underlying())
-	chantyp = c.builder.CreateBitCast(chantyp, chansend.Type().ElementType().ParamTypes()[0], "")
-	c.builder.CreateCall(chansend, []llvm.Value{chantyp, ch.LLVMValue(), elemptr, nb}, "")
+	chansend := fr.runtime.chansend.LLVMValue()
+	chantyp := fr.types.ToRuntime(ch.typ.Underlying())
+	chantyp = fr.builder.CreateBitCast(chantyp, chansend.Type().ElementType().ParamTypes()[0], "")
+	fr.builder.CreateCall(chansend, []llvm.Value{chantyp, ch.LLVMValue(), elemptr, nb}, "")
 	// Ignore result; only used in runtime.
-	c.stackrestore(stackptr)
+	fr.stackrestore(stackptr)
 }
 
 // chanRecv implements x[, ok] = <-ch
