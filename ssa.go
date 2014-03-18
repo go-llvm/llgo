@@ -96,7 +96,13 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
-	name := f.String()
+	var name string
+	if f.Package().Object.Path() == "main" && f.Name() == "init" {
+		name = "__go_init_main"
+	} else {
+		name = f.String()
+	}
+
 	if f.Enclosing != nil {
 		// Anonymous functions are not guaranteed to
 		// have unique identifiers at the global scope.
