@@ -535,18 +535,17 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).LLVMValue()
 		index := fr.value(instr.Index).LLVMValue()
-		var addr llvm.Value
 		var elemtyp types.Type
-		zero := llvm.ConstNull(index.Type())
 		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
 			elemtyp = typ.Elem()
 			x = fr.builder.CreateExtractValue(x, 0, "")
-			addr = fr.builder.CreateGEP(x, []llvm.Value{index}, "")
 		case *types.Pointer: // *array
 			elemtyp = typ.Elem().Underlying().(*types.Array).Elem()
-			addr = fr.builder.CreateGEP(x, []llvm.Value{zero, index}, "")
 		}
+		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(elemtyp), 0)
+		x = fr.builder.CreateBitCast(x, ptrtyp, "")
+		addr := fr.builder.CreateGEP(x, []llvm.Value{index}, "")
 		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp))
 
 	case *ssa.Jump:
