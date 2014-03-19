@@ -10,6 +10,7 @@ import (
 	"go/build"
 	"go/token"
 	"path"
+	"strconv"
 
 	"code.google.com/p/go.tools/go/types"
 
@@ -90,7 +91,6 @@ type runtimeInterface struct {
 	maplookup,
 	memcpy,
 	memequal,
-	memset,
 	panic_,
 	pushdefer,
 	recover_,
@@ -120,6 +120,9 @@ type runtimeInterface struct {
 	f64eqalg,
 	c64eqalg,
 	c128eqalg *LLVMValue
+
+	// LLVM intrinsics
+	memset llvm.Value
 
 	Go,
 	New,
@@ -195,7 +198,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"maplookup":         &ri.maplookup,
 		"memcpy":            &ri.memcpy,
 		"memequal":          &ri.memequal,
-		"memset":            &ri.memset,
 		"panic_":            &ri.panic_,
 		"pushdefer":         &ri.pushdefer,
 		"recover_":          &ri.recover_,
@@ -259,6 +261,10 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)
 	}
 
+	memsetName := "llvm.memset.p0i8.i" + strconv.Itoa(tm.target.IntPtrType().IntTypeWidth())
+	memsetType := llvm.FunctionType(llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0), llvm.Int8Type(), tm.target.IntPtrType(), llvm.Int32Type(), llvm.Int1Type()}, false)
+	ri.memset = llvm.AddFunction(module, memsetName, memsetType)
+
 	return &ri, nil
 }
 
@@ -302,17 +308,14 @@ func (fr *frame) createTypeMalloc(t types.Type) llvm.Value {
 	return fr.createMalloc(size, hasPointers(t))
 }
 
-func (c *compiler) memsetZero(ptr llvm.Value, size llvm.Value) {
-	memset := c.runtime.memset.LLVMValue()
-	switch n := size.Type().IntTypeWidth() - c.target.IntPtrType().IntTypeWidth(); {
-	case n < 0:
-		size = c.builder.CreateZExt(size, c.target.IntPtrType(), "")
-	case n > 0:
-		size = c.builder.CreateTrunc(size, c.target.IntPtrType(), "")
-	}
-	ptr = c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), "")
+func (fr *frame) memsetZero(ptr llvm.Value, size llvm.Value) {
+	memset := fr.runtime.memset
+	ptr = fr.builder.CreateBitCast(ptr, llvm.PointerType(llvm.Int8Type(), 0), "")
 	fill := llvm.ConstNull(llvm.Int8Type())
-	c.builder.CreateCall(memset, []llvm.Value{ptr, fill, size}, "")
+	size = fr.createZExtOrTrunc(size, fr.target.IntPtrType(), "")
+	align := llvm.ConstInt(llvm.Int32Type(), 1, false)
+	isvolatile := llvm.ConstNull(llvm.Int1Type())
+	fr.builder.CreateCall(memset, []llvm.Value{ptr, fill, size, align, isvolatile}, "")
 }
 
 func (c *compiler) stacksave() llvm.Value {
