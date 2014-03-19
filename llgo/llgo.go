@@ -45,6 +45,7 @@ var printTriple = flag.Bool("print-triple", false, "Print out target triple and 
 var compileOnly = flag.Bool("c", false, "Compile only, don't link")
 var generateDebug = flag.Bool("g", true, "Generate source level debug information")
 var outputFile = flag.String("o", "-", "Output filename")
+var gccgoPath = flag.String("gccgo-path", "gccgo", "Path to gccgo to read import data for")
 
 var exitCode = 0
 
@@ -183,6 +184,7 @@ func initCompiler() (*llgo.Compiler, error) {
 		opts.OrderedCompilation = true
 	}
 	opts.GenerateDebug = *generateDebug
+	opts.GccgoPath = *gccgoPath
 	return llgo.NewCompiler(opts)
 }
 

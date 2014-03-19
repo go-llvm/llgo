@@ -16,6 +16,7 @@ import (
 	llgobuild "github.com/axw/llgo/build"
 	llgoimporter "github.com/axw/llgo/importer"
 
+	"code.google.com/p/go.tools/go/gccgoimporter"
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
@@ -61,6 +62,10 @@ type CompilerOptions struct {
 	// OrderedCompilation attempts to do some sorting to compile
 	// functions in a deterministic order
 	OrderedCompilation bool
+
+	// GccgoPath is the path to the gccgo binary whose libgo we read import
+	// data from
+	GccgoPath string
 }
 
 type Compiler struct {
@@ -132,10 +137,15 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
+	var inst gccgoimporter.GccgoInstallation
+	err = inst.InitFromDriver(compiler.GccgoPath)
+	if err != nil {
+		return nil, err
+	}
 	impcfg := &loader.Config{
 		Fset: token.NewFileSet(),
 		TypeChecker: types.Config{
-			Import: llgoimporter.NewImporter(buildctx).Import,
+			Import: inst.GetImporter(nil),
 			Sizes:  compiler.llvmtypes,
 		},
 		Build: &buildctx.Context,
