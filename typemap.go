@@ -238,8 +238,6 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 		return tm.basicLLVMType(t)
 	case *types.Array:
 		return tm.arrayLLVMType(t)
-	case *types.Slice:
-		return tm.sliceLLVMType(t, name)
 	case *types.Struct:
 		return tm.structLLVMType(t, name)
 	case *types.Pointer:
@@ -257,7 +255,7 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 		}
 		return tm.nameLLVMType(t)
 	}
-	panic(fmt.Errorf("unhandled: %T", t))
+	return tm.getBackendType(t).ToLLVM(tm.ctx)
 }
 
 func (tm *llvmTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
@@ -296,21 +294,6 @@ func (tm *llvmTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 
 func (tm *llvmTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
 	return llvm.ArrayType(tm.ToLLVM(a.Elem()), int(a.Len()))
-}
-
-func (tm *llvmTypeMap) sliceLLVMType(s *types.Slice, name string) llvm.Type {
-	typ, ok := tm.types.At(s).(llvm.Type)
-	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed(name)
-		tm.types.Set(s, typ)
-		elements := []llvm.Type{
-			llvm.PointerType(tm.ToLLVM(s.Elem()), 0),
-			tm.inttype,
-			tm.inttype,
-		}
-		typ.StructSetBody(elements, false)
-	}
-	return typ
 }
 
 func (tm *llvmTypeMap) structLLVMType(s *types.Struct, name string) llvm.Type {

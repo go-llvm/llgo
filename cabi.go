@@ -94,6 +94,12 @@ func (tm *llvmTypeMap) classify(t ...types.Type) abiArgInfo {
 	}
 }
 
+func (tm *llvmTypeMap) sliceBackendType() backendType {
+	i8ptr := &ptrBType{llvm.Int8Type()}
+	uintptr := &intBType{tm.target.PointerSize(), false}
+	return &structBType{[]backendType{i8ptr, uintptr, uintptr}}
+}
+
 func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 	switch t := t.(type) {
 	case *types.Named:
@@ -151,6 +157,9 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 	case *types.Interface:
 		i8ptr := &ptrBType{llvm.Int8Type()}
 		return &structBType{[]backendType{i8ptr, i8ptr}}
+
+	case *types.Slice:
+		return tm.sliceBackendType()
 	}
 
 	panic("unhandled type: " + t.String())
