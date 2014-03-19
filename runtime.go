@@ -305,7 +305,8 @@ func (fr *frame) createMalloc(size llvm.Value, hasPointers bool) llvm.Value {
 
 func (fr *frame) createTypeMalloc(t types.Type) llvm.Value {
 	size := llvm.ConstInt(fr.target.IntPtrType(), uint64(fr.llvmtypes.Sizeof(t)), false)
-	return fr.createMalloc(size, hasPointers(t))
+	malloc := fr.createMalloc(size, hasPointers(t))
+	return fr.builder.CreateBitCast(malloc, llvm.PointerType(fr.types.ToLLVM(t), 0), "")
 }
 
 func (fr *frame) memsetZero(ptr llvm.Value, size llvm.Value) {

@@ -44,9 +44,8 @@ func (fr *frame) createThunk(call *ssa.CallCommon) (thunk llvm.Value, arg llvm.V
 	} else {
 		structtype := types.NewStruct(nonconsttypes, nil)
 		arg = fr.createTypeMalloc(structtype)
-		argstruct := fr.builder.CreateBitCast(arg, llvm.PointerType(fr.types.ToLLVM(structtype), 0), "")
 		for i, arg := range nonconstargs {
-			argptr := fr.builder.CreateStructGEP(argstruct, i, "")
+			argptr := fr.builder.CreateStructGEP(arg, i, "")
 			fr.builder.CreateStore(arg, argptr)
 		}
 	}
