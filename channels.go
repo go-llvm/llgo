@@ -68,9 +68,9 @@ type selectState struct {
 	Send *LLVMValue
 }
 
-func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
-	stackptr := c.stacksave()
-	defer c.stackrestore(stackptr)
+func (fr *frame) chanSelect(states []selectState, blocking bool) *LLVMValue {
+	stackptr := fr.stacksave()
+	defer fr.stackrestore(stackptr)
 
 	n := uint64(len(states))
 	if !blocking {
@@ -78,11 +78,11 @@ func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
 		n++
 	}
 	lln := llvm.ConstInt(llvm.Int32Type(), n, false)
-	allocsize := c.builder.CreateCall(c.runtime.selectsize.LLVMValue(), []llvm.Value{lln}, "")
-	selectp := c.builder.CreateArrayAlloca(llvm.Int8Type(), allocsize, "selectp")
-	c.memsetZero(selectp, allocsize)
-	selectp = c.builder.CreatePtrToInt(selectp, c.target.IntPtrType(), "")
-	c.builder.CreateCall(c.runtime.selectinit.LLVMValue(), []llvm.Value{lln, selectp}, "")
+	allocsize := fr.builder.CreateCall(fr.runtime.selectsize.LLVMValue(), []llvm.Value{lln}, "")
+	selectp := fr.builder.CreateArrayAlloca(llvm.Int8Type(), allocsize, "selectp")
+	fr.memsetZero(selectp, allocsize)
+	selectp = fr.builder.CreatePtrToInt(selectp, fr.target.IntPtrType(), "")
+	fr.builder.CreateCall(fr.runtime.selectinit.LLVMValue(), []llvm.Value{lln, selectp}, "")
 
 	// Allocate stack for the values to send/receive.
 	//
@@ -97,47 +97,47 @@ func (c *compiler) chanSelect(states []selectState, blocking bool) *LLVMValue {
 		}
 	}
 	resType := tupleType(resTypes...)
-	llResType := c.types.ToLLVM(resType)
-	tupleptr := c.builder.CreateAlloca(llResType, "")
-	c.memsetZero(tupleptr, llvm.SizeOf(llResType))
+	llResType := fr.types.ToLLVM(resType)
+	tupleptr := fr.builder.CreateAlloca(llResType, "")
+	fr.memsetZero(tupleptr, llvm.SizeOf(llResType))
 
 	var recvindex int
 	ptrs := make([]llvm.Value, len(states))
 	for i, state := range states {
 		chantyp := state.Chan.Type().Underlying().(*types.Chan)
-		elemtyp := c.types.ToLLVM(chantyp.Elem())
+		elemtyp := fr.types.ToLLVM(chantyp.Elem())
 		if state.Dir == types.SendOnly {
-			ptrs[i] = c.builder.CreateAlloca(elemtyp, "")
-			c.builder.CreateStore(state.Send.LLVMValue(), ptrs[i])
+			ptrs[i] = fr.builder.CreateAlloca(elemtyp, "")
+			fr.builder.CreateStore(state.Send.LLVMValue(), ptrs[i])
 		} else {
-			ptrs[i] = c.builder.CreateStructGEP(tupleptr, recvindex+2, "")
+			ptrs[i] = fr.builder.CreateStructGEP(tupleptr, recvindex+2, "")
 			recvindex++
 		}
-		ptrs[i] = c.builder.CreatePtrToInt(ptrs[i], c.target.IntPtrType(), "")
+		ptrs[i] = fr.builder.CreatePtrToInt(ptrs[i], fr.target.IntPtrType(), "")
 	}
 
 	// Create select{send,recv} calls.
-	selectsend := c.runtime.selectsend.LLVMValue()
-	selectrecv := c.runtime.selectrecv.LLVMValue()
+	selectsend := fr.runtime.selectsend.LLVMValue()
+	selectrecv := fr.runtime.selectrecv.LLVMValue()
 	var received llvm.Value
 	if recvindex > 0 {
-		received = c.builder.CreateStructGEP(tupleptr, 1, "")
+		received = fr.builder.CreateStructGEP(tupleptr, 1, "")
 	}
 	if !blocking {
-		c.builder.CreateCall(c.runtime.selectdefault.LLVMValue(), []llvm.Value{selectp}, "")
+		fr.builder.CreateCall(fr.runtime.selectdefault.LLVMValue(), []llvm.Value{selectp}, "")
 	}
 	for i, state := range states {
 		ch := state.Chan.LLVMValue()
 		if state.Dir == types.SendOnly {
-			c.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
+			fr.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
 		} else {
-			c.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")
+			fr.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")
 		}
 	}
 
 	// Fire off the select.
-	index := c.builder.CreateCall(c.runtime.selectgo.LLVMValue(), []llvm.Value{selectp}, "")
-	tuple := c.builder.CreateLoad(tupleptr, "")
-	tuple = c.builder.CreateInsertValue(tuple, index, 0, "")
-	return c.NewValue(tuple, resType)
+	index := fr.builder.CreateCall(fr.runtime.selectgo.LLVMValue(), []llvm.Value{selectp}, "")
+	tuple := fr.builder.CreateLoad(tupleptr, "")
+	tuple = fr.builder.CreateInsertValue(tuple, index, 0, "")
+	return fr.NewValue(tuple, resType)
 }

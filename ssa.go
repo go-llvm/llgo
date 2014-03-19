@@ -215,7 +215,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	for _, local := range f.Locals {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
-		u.memsetZero(alloca, llvm.SizeOf(typ))
+		fr.memsetZero(alloca, llvm.SizeOf(typ))
 		value := fr.NewValue(alloca, local.Type())
 		fr.env[local] = value
 		if fr.GenerateDebug {
