@@ -23,13 +23,6 @@ type unit struct {
 	// undefinedFuncs contains functions that have been resolved
 	// (declared) but not defined.
 	undefinedFuncs map[*ssa.Function]bool
-
-	// funcvals is a map of *ssa.Function to LLVM functions that
-	// may be stored. Non-receiver functions in this map will have
-	// an additional context parameter, to enable non-branching
-	// calls with a pair-of-pointer function representation,
-	// without forcing the additional parameter on all functions.
-	funcvals map[*ssa.Function]*LLVMValue
 }
 
 func newUnit(c *compiler, pkg *ssa.Package) *unit {
@@ -38,7 +31,6 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 		pkg:            pkg,
 		globals:        make(map[ssa.Value]*LLVMValue),
 		undefinedFuncs: make(map[*ssa.Function]bool),
-		funcvals:       make(map[*ssa.Function]*LLVMValue),
 	}
 	return u
 }
@@ -346,24 +338,7 @@ func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 	case nil:
 		return nil
 	case *ssa.Function:
-		result, ok := fr.funcvals[v]
-		if ok {
-			return result
-		}
-		// fr.globals[v] has the function in raw pointer form;
-		// we must convert it to <f,ctx> form. If the function
-		// does not have a receiver, then create a wrapper
-		// function that has an additional "context" parameter.
-		f := fr.resolveFunction(v)
-		if v.Signature.Recv() == nil && len(v.FreeVars) == 0 {
-			f = contextFunction(fr.compiler, f)
-		}
-		pair := llvm.ConstNull(fr.llvmtypes.ToLLVM(f.Type()))
-		fnptr := llvm.ConstBitCast(f.LLVMValue(), pair.Type().StructElementTypes()[0])
-		pair = llvm.ConstInsertValue(pair, fnptr, []uint32{0})
-		result = fr.NewValue(pair, f.Type())
-		fr.funcvals[v] = result
-		return result
+		return fr.resolveFunction(v)
 	case *ssa.Const:
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
