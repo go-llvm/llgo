@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -90,104 +89,39 @@ func getRuntimeFiles() (gofiles []string, llfiles []string, cfiles []string, err
 	return
 }
 
-func getRuntimeModuleFile() (string, error) {
-	if runtimemodulefile != "" {
-		return runtimemodulefile, nil
-	}
-
-	gofiles, llfiles, cfiles, err := getRuntimeFiles()
-	if err != nil {
-		return "", err
-	}
-
-	var runtimeModule *llgo.Module
-	runtimeModule, err = compileFiles(testCompiler, gofiles, "runtime")
-	defer runtimeModule.Dispose()
-	if err != nil {
-		return "", err
-	}
-
-	outfile := filepath.Join(tempdir, "runtime.bc")
-	f, err := os.Create(outfile)
-	if err != nil {
-		return "", err
-	}
-	err = llvm.WriteBitcodeToFile(runtimeModule.Module, f)
-	if err != nil {
-		f.Close()
-		return "", err
-	}
-	f.Close()
-
-	for i, cfile := range cfiles {
-		bcfile := filepath.Join(tempdir, fmt.Sprintf("%d.bc", i))
-		args := []string{"-c", "-emit-llvm", "-o", bcfile, cfile}
-		if runtime.GOOS != "darwin" {
-			// TODO(q): -g breaks badly on my system at the moment,
-			// so is not enabled on darwin for now
-			args = append([]string{"-g"}, args...)
-		}
-		cmd := exec.Command("clang", args...)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("clang failed: %s", err)
-		}
-		llfiles = append(llfiles, bcfile)
-	}
-
-	if llfiles != nil {
-		args := append([]string{"-o", outfile, outfile}, llfiles...)
-		cmd := exec.Command("llvm-link", args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			err = fmt.Errorf("llvm-link failed: %s", err)
-			fmt.Fprintf(os.Stderr, string(output))
-			return "", err
-		}
-	}
-
-	runtimemodulefile = outfile
-	return runtimemodulefile, nil
-}
-
-func runMainFunction(m *llgo.Module) (output []string, err error) {
-	runtimeModule, err := getRuntimeModuleFile()
-	if err != nil {
-		return
-	}
-
-	err = llvm.VerifyModule(m.Module, llvm.ReturnStatusAction)
-	if err != nil {
-		return nil, fmt.Errorf("Verification failed: %v", err)
-	}
-
+func runMainFunction(files []string, importPath string) (output []string, err error) {
 	bcpath := filepath.Join(tempdir, "test.bc")
-	bcfile, err := os.Create(bcpath)
-	if err != nil {
-		return nil, err
-	}
-	llvm.WriteBitcodeToFile(m.Module, bcfile)
-	bcfile.Close()
-
-	cmd := exec.Command("llvm-link", "-o", bcpath, bcpath, runtimeModule)
+	args := []string{"-g=false", "-importpath=" + importPath, "-o", bcpath}
+	args = append(args, files...)
+	cmd := exec.Command("./llgo", args...)
 	data, err := cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")
-		return output, fmt.Errorf("llvm-link failed: %v", err)
+		return output, fmt.Errorf("llgo failed: %v", err)
 	}
 
-	exepath := filepath.Join(tempdir, "test")
-	args := []string{"-pthread", "-o", exepath, bcpath}
-	if runtime.GOOS != "darwin" {
-		// TODO(q): -g breaks badly on my system at the moment, so is not enabled on darwin for now
-		args = append([]string{"-g"}, args...)
-	}
-
-	cmd = exec.Command("clang", args...)
+	optbcpath := filepath.Join(tempdir, "test.opt.bc")
+	cmd = exec.Command("opt", "-O3", "-o", optbcpath, bcpath)
 	data, err = cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")
-		return output, fmt.Errorf("clang failed: %v", err)
+		return output, fmt.Errorf("opt failed: %v", err)
+	}
+
+	objpath := filepath.Join(tempdir, "test.o")
+	cmd = exec.Command("llc", "-filetype=obj", "-O3", "-o", objpath, optbcpath)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		output = strings.Split(strings.TrimSpace(string(data)), "\n")
+		return output, fmt.Errorf("llc failed: %v", err)
+	}
+
+	exepath := filepath.Join(tempdir, "test")
+	cmd = exec.Command("gccgo", "-o", exepath, objpath)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		output = strings.Split(strings.TrimSpace(string(data)), "\n")
+		return output, fmt.Errorf("gccgo failed: %v", err)
 	}
 
 	cmd = exec.Command(exepath)
@@ -219,12 +153,6 @@ func checkStringsEqualUnordered(out, expectedOut []string) error {
 }
 
 func runAndCheckMain(check func(a, b []string) error, files []string) error {
-	var err error
-	testCompiler, err = initCompiler()
-	if err != nil {
-		return fmt.Errorf("Failed to initialise compiler: %s", err)
-	}
-
 	// First run with "go run" to get the expected output.
 	cmd := exec.Command("go", append([]string{"run"}, files...)...)
 	gorun_out, err := cmd.CombinedOutput()
@@ -235,11 +163,7 @@ func runAndCheckMain(check func(a, b []string) error, files []string) error {
 
 	// Now compile to and interpret the LLVM bitcode, comparing the output to
 	// the output of "go run" above.
-	m, err := compileFiles(testCompiler, files, "main")
-	if err != nil {
-		return fmt.Errorf("compileFiles failed: %s", err)
-	}
-	output, err := runMainFunction(m)
+	output, err := runMainFunction(files, "main")
 	if err == nil {
 		err = check(output, expected)
 	} else {
