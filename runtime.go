@@ -97,7 +97,6 @@ type runtimeInterface struct {
 	rundefers,
 	chancap,
 	chanlen,
-	makeslice,
 	maplen,
 	runestostr,
 	selectdefault,
@@ -124,6 +123,7 @@ type runtimeInterface struct {
 	memset llvm.Value
 
 	Go,
+	makeSlice,
 	New,
 	NewNopointers,
 	printBool,
@@ -205,7 +205,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"chancap":           &ri.chancap,
 		"chanlen":           &ri.chanlen,
 		"maplen":            &ri.maplen,
-		"makeslice":         &ri.makeslice,
 		"selectdefault":     &ri.selectdefault,
 		"selectgo":          &ri.selectgo,
 		"selectinit":        &ri.selectinit,
@@ -243,6 +242,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		args, results []types.Type
 	}{
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
+		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},
 		{name: "__go_new", rfi: &ri.New, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_new_nopointers", rfi: &ri.NewNopointers, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_print_bool", rfi: &ri.printBool, args: []types.Type{types.Typ[types.Bool]}},

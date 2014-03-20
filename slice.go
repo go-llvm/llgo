@@ -12,15 +12,11 @@ import (
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
 func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
-	length = fr.convert(length, types.Typ[types.Int]).(*LLVMValue)
-	capacity = fr.convert(capacity, types.Typ[types.Int]).(*LLVMValue)
-	makeslice := fr.runtime.makeslice.LLVMValue()
-	runtimeType := fr.builder.CreatePtrToInt(fr.types.ToRuntime(sliceType), fr.target.IntPtrType(), "")
-	llslice := fr.builder.CreateCall(makeslice, []llvm.Value{
-		runtimeType, length.LLVMValue(), capacity.LLVMValue(),
-	}, "")
-	llslice = fr.coerceSlice(llslice, fr.types.ToLLVM(sliceType))
-	return fr.NewValue(llslice, sliceType)
+	length = fr.convert(length, types.Typ[types.Uintptr]).(*LLVMValue)
+	capacity = fr.convert(capacity, types.Typ[types.Uintptr]).(*LLVMValue)
+	runtimeType := fr.builder.CreateBitCast(fr.types.getTypeDescriptorPointer(sliceType), llvm.PointerType(llvm.Int8Type(), 0), "")
+	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.LLVMValue(), capacity.LLVMValue())
+	return fr.NewValue(llslice[0], sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a
