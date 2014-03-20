@@ -108,7 +108,6 @@ type runtimeInterface struct {
 	selectsize,
 	sliceappend,
 	slicecopy,
-	sliceslice,
 	strcat,
 	strcmp,
 	streqalg,
@@ -137,7 +136,8 @@ type runtimeInterface struct {
 	printSlice,
 	printSpace,
 	printString,
-	printUint64 runtimeFnInfo
+	printUint64,
+	runtimeError runtimeFnInfo
 }
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
@@ -214,7 +214,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"selectsize":        &ri.selectsize,
 		"sliceappend":       &ri.sliceappend,
 		"slicecopy":         &ri.slicecopy,
-		"sliceslice":        &ri.sliceslice,
 		"stringslice":       &ri.stringslice,
 		"strcat":            &ri.strcat,
 		"strcmp":            &ri.strcmp,
@@ -257,6 +256,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_print_space", rfi: &ri.printSpace},
 		{name: "__go_print_string", rfi: &ri.printString, args: []types.Type{types.Typ[types.String]}},
 		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
+		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)
 	}

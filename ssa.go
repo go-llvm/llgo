@@ -168,6 +168,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
 	delete(u.undefinedFuncs, f)
+	fr.function = llvmFunction
 
 	// Push the function onto the debug context.
 	// TODO(axw) create a fake CU for synthetic functions
@@ -312,6 +313,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 type frame struct {
 	*unit
+	function  llvm.Value
 	blocks    []llvm.BasicBlock
 	backpatch map[ssa.Value]*LLVMValue
 	env       map[ssa.Value]*LLVMValue

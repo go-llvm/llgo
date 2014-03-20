@@ -39,49 +39,25 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 }
 
 func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
-	if low != nil {
-		low = fr.convert(low, types.Typ[types.Int]).(*LLVMValue)
-	} else {
-		low = fr.NewValue(llvm.ConstNull(fr.types.inttype), types.Typ[types.Int])
-	}
-
-	if high != nil {
-		high = fr.convert(high, types.Typ[types.Int]).(*LLVMValue)
-	} else {
-		// all bits set is -1
-		high = fr.NewValue(llvm.ConstAllOnes(fr.types.inttype), types.Typ[types.Int])
-	}
-
+	var arrayptr, arraylen, arraycap llvm.Value
+	var elemtyp types.Type
+	var errcode uint64
 	switch typ := x.Type().Underlying().(type) {
 	case *types.Pointer: // *array
-		sliceslice := fr.runtime.sliceslice.LLVMValue()
-		i8slice := sliceslice.Type().ElementType().ReturnType()
-		sliceValue := llvm.Undef(i8slice) // temporary slice
+		errcode = 3 // TODO(pcc): symbolic
 		arraytyp := typ.Elem().Underlying().(*types.Array)
-		arrayptr := x.LLVMValue()
-		arrayptr = fr.builder.CreateBitCast(arrayptr, i8slice.StructElementTypes()[0], "")
-		arraylen := llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
-		sliceValue = fr.builder.CreateInsertValue(sliceValue, arrayptr, 0, "")
-		sliceValue = fr.builder.CreateInsertValue(sliceValue, arraylen, 1, "")
-		sliceValue = fr.builder.CreateInsertValue(sliceValue, arraylen, 2, "")
-		sliceTyp := types.NewSlice(arraytyp.Elem())
-		runtimeTyp := fr.types.ToRuntime(sliceTyp)
-		runtimeTyp = fr.builder.CreatePtrToInt(runtimeTyp, fr.target.IntPtrType(), "")
-		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
-		result := fr.builder.CreateCall(sliceslice, args, "")
-		llvmSliceTyp := fr.types.ToLLVM(sliceTyp)
-		return fr.NewValue(fr.coerceSlice(result, llvmSliceTyp), sliceTyp)
+		elemtyp = arraytyp.Elem()
+		arrayptr = x.LLVMValue()
+		arrayptr = fr.builder.CreateBitCast(arrayptr, llvm.PointerType(llvm.Int8Type(), 0), "")
+		arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
+		arraycap = arraylen
 	case *types.Slice:
-		sliceslice := fr.runtime.sliceslice.LLVMValue()
-		i8slice := sliceslice.Type().ElementType().ReturnType()
+		errcode = 4 // TODO(pcc): symbolic
+		elemtyp = typ.Elem()
 		sliceValue := x.LLVMValue()
-		sliceTyp := sliceValue.Type()
-		sliceValue = fr.coerceSlice(sliceValue, i8slice)
-		runtimeTyp := fr.types.ToRuntime(x.Type())
-		runtimeTyp = fr.builder.CreatePtrToInt(runtimeTyp, fr.target.IntPtrType(), "")
-		args := []llvm.Value{runtimeTyp, sliceValue, low.LLVMValue(), high.LLVMValue()}
-		result := fr.builder.CreateCall(sliceslice, args, "")
-		return fr.NewValue(fr.coerceSlice(result, sliceTyp), x.Type())
+		arrayptr = fr.builder.CreateExtractValue(sliceValue, 0, "")
+		arraylen = fr.builder.CreateExtractValue(sliceValue, 1, "")
+		arraycap = fr.builder.CreateExtractValue(sliceValue, 2, "")
 	case *types.Basic:
 		stringslice := fr.runtime.stringslice.LLVMValue()
 		llv := x.LLVMValue()
@@ -95,5 +71,54 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 	default:
 		panic("unimplemented")
 	}
-	panic("unreachable")
+
+	var lowval, highval llvm.Value
+	if low != nil {
+		lowval = fr.convert(low, types.Typ[types.Int]).LLVMValue()
+	} else {
+		lowval = llvm.ConstNull(fr.types.inttype)
+	}
+
+	if high != nil {
+		highval = fr.convert(high, types.Typ[types.Int]).LLVMValue()
+	} else {
+		highval = arraylen
+	}
+
+	// Bounds checking: low >= 0, high >= 0, low <= high <= size
+	zero := llvm.ConstNull(fr.types.inttype)
+	l0 := fr.builder.CreateICmp(llvm.IntSLT, lowval, zero, "")
+	h0 := fr.builder.CreateICmp(llvm.IntSLT, highval, zero, "")
+	zh := fr.builder.CreateICmp(llvm.IntSLT, arraycap, highval, "")
+	hl := fr.builder.CreateICmp(llvm.IntSLT, highval, lowval, "")
+
+	cond := fr.builder.CreateOr(l0, h0, "")
+	cond = fr.builder.CreateOr(cond, zh, "")
+	cond = fr.builder.CreateOr(cond, hl, "")
+
+	errorbb := llvm.AddBasicBlock(fr.function, "")
+	contbb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.CreateCondBr(cond, errorbb, contbb)
+
+	fr.builder.SetInsertPointAtEnd(errorbb)
+	fr.runtime.runtimeError.call(fr, llvm.ConstInt(llvm.Int32Type(), errcode, false))
+	fr.builder.CreateUnreachable()
+
+	fr.builder.SetInsertPointAtEnd(contbb)
+
+	slicelen := fr.builder.CreateSub(highval, lowval, "")
+	slicecap := fr.builder.CreateSub(arraycap, lowval, "")
+
+	elemsize := llvm.ConstInt(fr.llvmtypes.inttype, uint64(fr.llvmtypes.Sizeof(elemtyp)), false)
+	offset := fr.builder.CreateMul(lowval, elemsize, "")
+
+	sliceptr := fr.builder.CreateInBoundsGEP(arrayptr, []llvm.Value{offset}, "")
+
+	slicetyp := fr.llvmtypes.sliceBackendType().ToLLVM(fr.llvmtypes.ctx)
+	sliceValue := llvm.Undef(slicetyp)
+	sliceValue = fr.builder.CreateInsertValue(sliceValue, sliceptr, 0, "")
+	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicelen, 1, "")
+	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicecap, 2, "")
+
+	return fr.NewValue(sliceValue, types.NewSlice(elemtyp))
 }
