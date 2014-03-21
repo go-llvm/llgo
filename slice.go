@@ -81,15 +81,13 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		highval = arraylen
 	}
 
-	// Bounds checking: low >= 0, high >= 0, low <= high <= size
+	// Bounds checking: low >= 0, low <= high <= cap
 	zero := llvm.ConstNull(fr.types.inttype)
 	l0 := fr.builder.CreateICmp(llvm.IntSLT, lowval, zero, "")
-	h0 := fr.builder.CreateICmp(llvm.IntSLT, highval, zero, "")
 	zh := fr.builder.CreateICmp(llvm.IntSLT, arraycap, highval, "")
 	hl := fr.builder.CreateICmp(llvm.IntSLT, highval, lowval, "")
 
-	cond := fr.builder.CreateOr(l0, h0, "")
-	cond = fr.builder.CreateOr(cond, zh, "")
+	cond := fr.builder.CreateOr(l0, zh, "")
 	cond = fr.builder.CreateOr(cond, hl, "")
 
 	errorbb := llvm.AddBasicBlock(fr.function, "")
