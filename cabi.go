@@ -467,6 +467,7 @@ func (ri *indirectRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, 
 			builder.CreateStore(v, builder.CreateStructGEP(sretSlot, i, ""))
 		}
 	}
+	builder.CreateRetVoid()
 }
 
 type functionTypeInfo struct {
