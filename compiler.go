@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"log"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/axw/gollvm/llvm"
@@ -177,7 +178,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	program := ssa.Create(iprog, 0)
+	program := ssa.Create(iprog, ssa.GccgoImport)
 	var mainPkginfo, runtimePkginfo *loader.PackageInfo
 	if pkgs := iprog.InitialPackages(); len(pkgs) == 1 {
 		mainPkginfo, runtimePkginfo = pkgs[0], pkgs[0]
@@ -258,77 +259,55 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	}
 	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
-	/*
 	if importpath == "main" {
-		// Wrap "main.main" in a call to runtime.main.
-		if err = compiler.createMainFunction(); err != nil {
-			return nil, fmt.Errorf("failed to create main.main: %v", err)
+		if err = compiler.createInitMainFunction(mainPkg); err != nil {
+			return nil, fmt.Errorf("failed to create __go_init_main: %v", err)
 		}
 	} else {
-	*/
 		if err := llgoimporter.Export(buildctx, mainPkg.Object); err != nil {
 			return nil, fmt.Errorf("failed to export package data: %v", err)
 		}
-	/*
 	}
-	*/
+
 
 	return compiler.module, nil
 }
 
-func (c *compiler) createMainFunction() error {
-	// In a PNaCl program (plugin), there should not be a "main.main";
-	// instead, we expect a "main.CreateModule" function.
-	// See pkg/nacl/ppapi/ppapi.go for more details.
-	mainMain := c.module.NamedFunction("main.main")
-	/*
-		if c.pnacl {
-			// PNaCl's libppapi_stub.a implements "main", which simply
-			// calls through to PpapiPluginMain. We define our own "main"
-			// so that we can capture argc/argv.
-			if !mainMain.IsNil() {
-				return fmt.Errorf("Found main.main")
-			}
-			pluginMain := c.RuntimeFunction("PpapiPluginMain", "func() int32")
+type ByPriority []types.PackageInit
+func (a ByPriority) Len() int           { return len(a) }
+func (a ByPriority) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByPriority) Less(i, j int) bool { return a[i].Priority < a[j].Priority }
 
-			// Synthesise a main which has no return value. We could cast
-			// PpapiPluginMain, but this is potentially unsafe as its
-			// calling convention is unspecified.
-			ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
-			mainMain = llvm.AddFunction(c.module.Module, "main.main", ftyp)
-			entry := llvm.AddBasicBlock(mainMain, "entry")
-			c.builder.SetInsertPointAtEnd(entry)
-			c.builder.CreateCall(pluginMain, nil, "")
-			c.builder.CreateRetVoid()
-		} else */{
-		mainMain = c.module.NamedFunction("main.main")
+func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
+	var inits []types.PackageInit
+	for _, imp := range mainPkg.Object.Imports() {
+		inits = append(inits, imp.Inits()...)
 	}
+	sort.Sort(ByPriority(inits))
 
-	if mainMain.IsNil() {
-		return fmt.Errorf("Could not find main.main")
-	}
-
-	// runtime.main is called by main, with argc, argv, argp,
-	// and a pointer to main.main, which must be a niladic
-	// function with no result.
-	runtimeMain := c.runtime.main.LLVMValue()
-
-	ptrptr := llvm.PointerType(llvm.PointerType(llvm.Int8Type(), 0), 0)
-	ftyp := llvm.FunctionType(llvm.Int32Type(), []llvm.Type{llvm.Int32Type(), ptrptr, ptrptr}, true)
-	main := llvm.AddFunction(c.module.Module, "main", ftyp)
-
-	c.builder.SetCurrentDebugLocation(c.debug.MDNode(nil))
-	entry := llvm.AddBasicBlock(main, "entry")
+	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
+	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
+	entry := llvm.AddBasicBlock(initMain, "entry")
 	c.builder.SetInsertPointAtEnd(entry)
-	runtimeMainParamTypes := runtimeMain.Type().ElementType().ParamTypes()
-	args := []llvm.Value{
-		main.Param(0), // argc
-		main.Param(1), // argv
-		main.Param(2), // argp
-		c.builder.CreateBitCast(mainMain, runtimeMainParamTypes[3], ""),
+
+	seenInit := make(map[string]bool)
+
+	for _, init := range inits {
+		if seenInit[init.Function] {
+			continue
+		}
+		seenInit[init.Function] = true
+
+		initfn := llvm.AddFunction(c.module.Module, init.Function, ftyp)
+		c.builder.CreateCall(initfn, nil, "")
 	}
-	result := c.builder.CreateCall(runtimeMain, args, "")
-	c.builder.CreateRet(result)
+
+	maininitfn := c.module.Module.NamedFunction("main..import")
+	if maininitfn.C != nil {
+		c.builder.CreateCall(maininitfn, nil, "")
+	}
+
+	c.builder.CreateRetVoid()
 	return nil
 }
 
