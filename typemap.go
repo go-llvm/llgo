@@ -218,9 +218,6 @@ func (tm *llvmTypeMap) ToLLVM(t types.Type) llvm.Type {
 func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 	// Signature needs to be handled specially, to preprocess
 	// methods, moving the receiver to the parameter list.
-	if t, ok := t.(*types.Signature); ok {
-		return tm.funcLLVMType(t, name)
-	}
 	lt, ok := tm.types.At(t).(llvm.Type)
 	if !ok {
 		lt = tm.makeLLVMType(t, name)
@@ -314,59 +311,6 @@ func (tm *llvmTypeMap) structLLVMType(s *types.Struct, name string) llvm.Type {
 
 func (tm *llvmTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
 	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
-}
-
-func (tm *llvmTypeMap) funcLLVMType(f *types.Signature, name string) llvm.Type {
-	// If there's a receiver change the receiver to an
-	// additional (first) parameter, and take the value of
-	// the resulting signature instead.
-	if recv := f.Recv(); recv != nil {
-		params := f.Params()
-		paramvars := make([]*types.Var, int(params.Len()+1))
-		paramvars[0] = recv
-		for i := 0; i < int(params.Len()); i++ {
-			paramvars[i+1] = params.At(i)
-		}
-		params = types.NewTuple(paramvars...)
-		f := types.NewSignature(nil, nil, params, f.Results(), f.Variadic())
-		return tm.toLLVM(f, name)
-	}
-
-	if typ, ok := tm.types.At(f).(llvm.Type); ok {
-		return typ
-	}
-	typ := llvm.GlobalContext().StructCreateNamed(name)
-	tm.types.Set(f, typ)
-
-	params := f.Params()
-	param_types := make([]llvm.Type, params.Len())
-	for i := range param_types {
-		llvmtyp := tm.ToLLVM(params.At(i).Type())
-		param_types[i] = llvmtyp
-	}
-
-	var return_type llvm.Type
-	results := f.Results()
-	switch nresults := int(results.Len()); nresults {
-	case 0:
-		return_type = llvm.VoidType()
-	case 1:
-		return_type = tm.ToLLVM(results.At(0).Type())
-	default:
-		elements := make([]llvm.Type, nresults)
-		for i := range elements {
-			result := results.At(i)
-			elements[i] = tm.ToLLVM(result.Type())
-		}
-		return_type = llvm.StructType(elements, false)
-	}
-
-	fntyp := llvm.FunctionType(return_type, param_types, false)
-	fnptrtyp := llvm.PointerType(fntyp, 0)
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	elements := []llvm.Type{fnptrtyp, i8ptr} // func, closure
-	typ.StructSetBody(elements, false)
-	return typ
 }
 
 func (tm *llvmTypeMap) interfaceLLVMType(i *types.Interface, name string) llvm.Type {

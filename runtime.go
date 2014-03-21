@@ -76,9 +76,6 @@ type runtimeInterface struct {
 	mustConvertE2V,
 	eqtyp,
 	initdefers,
-	stackrestore,
-	stacksave,
-	setjmp,
 	main,
 	printfloat,
 	makemap,
@@ -183,9 +180,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"convertI2E":        &ri.convertI2E,
 		"eqtyp":             &ri.eqtyp,
 		"initdefers":        &ri.initdefers,
-		"llvm_stackrestore": &ri.stackrestore,
-		"llvm_stacksave":    &ri.stacksave,
-		"llvm_setjmp":       &ri.setjmp,
 		"main":              &ri.main,
 		"printfloat":        &ri.printfloat,
 		"makechan":          &ri.makechan,
@@ -320,9 +314,8 @@ func (fr *frame) memsetZero(ptr llvm.Value, size llvm.Value) {
 }
 
 func (c *compiler) stacksave() llvm.Value {
-	return c.builder.CreateCall(c.runtime.stacksave.LLVMValue(), nil, "")
+	return llvm.Value{C: nil}
 }
 
 func (c *compiler) stackrestore(ctx llvm.Value) {
-	c.builder.CreateCall(c.runtime.stackrestore.LLVMValue(), []llvm.Value{ctx}, "")
 }

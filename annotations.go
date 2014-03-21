@@ -8,6 +8,7 @@ import (
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
+	"github.com/axw/gollvm/llvm"
 	"go/ast"
 	"go/token"
 )
@@ -17,7 +18,7 @@ import (
 // llgo source annotations attached to each top-level
 // function and global variable.
 func (c *compiler) processAnnotations(u *unit, pkginfo *loader.PackageInfo) {
-	members := make(map[types.Object]*LLVMValue, len(u.globals))
+	members := make(map[types.Object]llvm.Value, len(u.globals))
 	for k, v := range u.globals {
 		members[k.(ssa.Member).Object()] = v
 	}
@@ -26,7 +27,7 @@ func (c *compiler) processAnnotations(u *unit, pkginfo *loader.PackageInfo) {
 			return
 		}
 		for _, ident := range idents {
-			if v := members[pkginfo.ObjectOf(ident)]; v != nil {
+			if v := members[pkginfo.ObjectOf(ident)]; !v.IsNil() {
 				for _, attr := range attrs {
 					attr.Apply(v)
 				}

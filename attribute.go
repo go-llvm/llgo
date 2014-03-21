@@ -5,7 +5,6 @@
 package llgo
 
 import (
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"github.com/axw/gollvm/llvm"
 	"go/ast"
@@ -17,7 +16,7 @@ const AttributeCommentPrefix = "#llgo "
 // Attribute represents an attribute associated with a
 // global variable or function.
 type Attribute interface {
-	Apply(Value)
+	Apply(llvm.Value)
 }
 
 // parseAttribute parses zero or more #llgo comment attributes associated with
@@ -74,8 +73,8 @@ func parseAttribute(line string) Attribute {
 
 type linkageAttribute llvm.Linkage
 
-func (a linkageAttribute) Apply(v Value) {
-	v.LLVMValue().SetLinkage(llvm.Linkage(a))
+func (a linkageAttribute) Apply(v llvm.Value) {
+	v.SetLinkage(llvm.Linkage(a))
 }
 
 func parseLinkageAttribute(value string) linkageAttribute {
@@ -120,21 +119,20 @@ func parseLinkageAttribute(value string) linkageAttribute {
 
 type nameAttribute string
 
-func (a nameAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Signature); isfunc {
-		fn := v.LLVMValue()
+func (a nameAttribute) Apply(v llvm.Value) {
+	if !v.IsAFunction().IsNil() {
 		name := string(a)
-		curr := fn.GlobalParent().NamedFunction(name)
-		if !curr.IsNil() && curr != fn {
+		curr := v.GlobalParent().NamedFunction(name)
+		if !curr.IsNil() && curr != v {
 			if curr.BasicBlocksCount() != 0 {
 				panic(fmt.Errorf("Want to take the name %s from a function that has a body!", name))
 			}
 			curr.SetName(name + "_llgo_replaced")
-			curr.ReplaceAllUsesWith(fn)
+			curr.ReplaceAllUsesWith(v)
 		}
-		fn.SetName(name)
+		v.SetName(name)
 	} else {
-		v.LLVMValue().SetName(string(a))
+		v.SetName(string(a))
 	}
 }
 
@@ -158,17 +156,16 @@ func parseLLVMAttribute(value string) llvmAttribute {
 
 type llvmAttribute llvm.Attribute
 
-func (a llvmAttribute) Apply(v Value) {
-	if _, isfunc := v.Type().(*types.Signature); isfunc {
-		fn := v.LLVMValue()
-		fn.AddFunctionAttr(llvm.Attribute(a))
+func (a llvmAttribute) Apply(v llvm.Value) {
+	if !v.IsAFunction().IsNil() {
+		v.AddFunctionAttr(llvm.Attribute(a))
 	} else {
-		v.LLVMValue().AddAttribute(llvm.Attribute(a))
+		v.AddAttribute(llvm.Attribute(a))
 	}
 }
 
 type tlsAttribute struct{}
 
-func (tlsAttribute) Apply(v Value) {
-	v.LLVMValue().SetThreadLocal(true)
+func (tlsAttribute) Apply(v llvm.Value) {
+	v.SetThreadLocal(true)
 }

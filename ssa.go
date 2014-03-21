@@ -18,7 +18,7 @@ import (
 type unit struct {
 	*compiler
 	pkg     *ssa.Package
-	globals map[ssa.Value]*LLVMValue
+	globals map[ssa.Value]llvm.Value
 
 	// undefinedFuncs contains functions that have been resolved
 	// (declared) but not defined.
@@ -29,7 +29,7 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 	u := &unit{
 		compiler:       c,
 		pkg:            pkg,
-		globals:        make(map[ssa.Value]*LLVMValue),
+		globals:        make(map[ssa.Value]llvm.Value),
 		undefinedFuncs: make(map[*ssa.Function]bool),
 	}
 	return u
@@ -45,7 +45,7 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 			llelemtyp := u.llvmtypes.ToLLVM(deref(v.Type()))
 			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
-			u.globals[v] = u.NewValue(global, v.Type())
+			u.globals[v] = global
 		}
 	}
 
@@ -85,6 +85,11 @@ func (u *unit) ResolveFunc(f *types.Func) *LLVMValue {
 }
 
 func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
+	llvmFunction := u.resolveFunctionGlobal(f)
+	return u.NewValue(llvm.ConstBitCast(llvmFunction, llvm.PointerType(llvm.Int8Type(), 0)), f.Signature)
+}
+
+func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
@@ -126,9 +131,8 @@ func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
 		*/
 		u.undefinedFuncs[f] = true
 	}
-	v := u.NewValue(llvmFunction, f.Signature)
-	u.globals[f] = v
-	return v
+	u.globals[f] = llvmFunction
+	return llvmFunction
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
@@ -161,7 +165,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := fr.resolveFunction(f).LLVMValue()
+	llvmFunction := fr.resolveFunctionGlobal(f)
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
 	delete(u.undefinedFuncs, f)
 	fr.function = llvmFunction
@@ -260,6 +264,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// We can short-circuit the check for defers with
 	// f.Recover != nil.
 	if f.Recover != nil || hasDefer(f) {
+		panic("setjmp unsupported")
+		/*
 		rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
 		defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
 		fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
@@ -300,6 +306,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		fr.builder.SetInsertPointAtEnd(rdblock)
 		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
 		term = fr.builder.CreateBr(recoverBlock)
+		*/
 	} else {
 		term = fr.builder.CreateBr(fr.blocks[0])
 	}
@@ -345,15 +352,14 @@ func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 		return fr.NewConstValue(v.Value, v.Type())
 	case *ssa.Global:
 		if g, ok := fr.globals[v]; ok {
-			return g
+			return fr.NewValue(g, v.Type())
 		}
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
 		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
 		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
-		global := fr.NewValue(llglobal, v.Type())
-		fr.globals[v] = global
-		return global
+		fr.globals[v] = llglobal
+		return fr.NewValue(llglobal, v.Type())
 	}
 	if value, ok := fr.env[v]; ok {
 		return value
