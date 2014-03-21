@@ -1,0 +1,13 @@
+#!/bin/sh -e
+
+cp gotest.out gotest.out.bak
+go build
+go test -v 2>&1 | cat > gotest.out
+
+echo -n "pass "
+grep PASS: gotest.out | wc -l
+
+echo -n "fail "
+grep FAIL: gotest.out | wc -l
+
+diff -u <(grep PASS: gotest.out.bak | sed -e 's/(.*//g') <(grep PASS: gotest.out | sed -e 's/(.*//g')
