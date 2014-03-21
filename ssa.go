@@ -167,8 +167,10 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	fr.logf("Define function: %s", f.String())
 	llvmFunction := fr.resolveFunction(f).LLVMValue()
+	fti := u.llvmtypes.getSignatureInfo(f.Signature)
 	delete(u.undefinedFuncs, f)
 	fr.function = llvmFunction
+	fr.retInf = fti.retInf
 
 	// Push the function onto the debug context.
 	// TODO(axw) create a fake CU for synthetic functions
@@ -200,19 +202,21 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 		paramOffset++
 	}
+
+	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
+	fr.builder.SetInsertPointAtEnd(prologueBlock)
+
 	// Map parameter positions to indices. We use this
 	// when processing locals to map back to parameters
 	// when generating debug metadata.
 	paramPos := make(map[token.Pos]int)
 	for i, param := range f.Params {
 		paramPos[param.Pos()] = i + paramOffset
-		llparam := llvmFunction.Param(i + paramOffset)
+		llparam := fti.argInfos[i].decode(llvm.GlobalContext(), fr.builder, fr.builder)
 		fr.env[param] = fr.NewValue(llparam, param.Type())
 	}
 
 	// Allocate stack space for locals in the prologue block.
-	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
-	fr.builder.SetInsertPointAtEnd(prologueBlock)
 	for _, local := range f.Locals {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
@@ -314,6 +318,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 type frame struct {
 	*unit
 	function  llvm.Value
+	retInf    retInfo
 	blocks    []llvm.BasicBlock
 	backpatch map[ssa.Value]*LLVMValue
 	env       map[ssa.Value]*LLVMValue
@@ -660,23 +665,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.Return:
-		switch n := len(instr.Results); n {
-		case 0:
-			// https://code.google.com/p/go/issues/detail?id=7022
-			if r := instr.Parent().Signature.Results(); r != nil && r.Len() > 0 {
-				fr.builder.CreateUnreachable()
-			} else {
-				fr.builder.CreateRetVoid()
-			}
-		case 1:
-			fr.builder.CreateRet(fr.value(instr.Results[0]).LLVMValue())
-		default:
-			values := make([]llvm.Value, n)
-			for i, result := range instr.Results {
-				values[i] = fr.value(result).LLVMValue()
-			}
-			fr.builder.CreateAggregateRet(values)
+		vals := make([]llvm.Value, len(instr.Results))
+		for i, res := range instr.Results {
+			vals[i] = fr.value(res).LLVMValue()
 		}
+		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
 	case *ssa.RunDefers:
 		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
