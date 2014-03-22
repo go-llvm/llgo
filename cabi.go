@@ -426,8 +426,8 @@ func (ri *directRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 		retval = args[0]
 	default:
 		retval = llvm.Undef(ctx.StructType(ri.retTypes, false))
-		for i, v := range vals {
-			retval = builder.CreateInsertValue(retval, v, i, "")
+		for i, a := range args {
+			retval = builder.CreateInsertValue(retval, a, i, "")
 		}
 	}
 	builder.CreateRet(val)
