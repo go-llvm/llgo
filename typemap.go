@@ -216,8 +216,6 @@ func (tm *llvmTypeMap) ToLLVM(t types.Type) llvm.Type {
 }
 
 func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
-	// Signature needs to be handled specially, to preprocess
-	// methods, moving the receiver to the parameter list.
 	lt, ok := tm.types.At(t).(llvm.Type)
 	if !ok {
 		lt = tm.makeLLVMType(t, name)
