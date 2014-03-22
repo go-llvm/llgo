@@ -37,7 +37,7 @@ func newAlgorithmMap(m llvm.Module, runtime *runtimeInterface, target llvm.Targe
 	}
 	uintptrType := target.IntPtrType()
 	voidPtrType := llvm.PointerType(llvm.Int8Type(), 0)
-	boolType := llvm.Int1Type()
+	boolType := llvm.Int8Type()
 	params := []llvm.Type{uintptrType, voidPtrType}
 	am.hashAlgFunctionType = llvm.FunctionType(uintptrType, params, false)
 	params = []llvm.Type{uintptrType, uintptrType, uintptrType}

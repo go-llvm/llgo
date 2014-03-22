@@ -525,6 +525,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		block := instr.Block()
 		trueBlock := fr.block(block.Succs[0])
 		falseBlock := fr.block(block.Succs[1])
+		cond = fr.builder.CreateTrunc(cond, llvm.Int1Type(), "")
 		fr.builder.CreateCondBr(cond, trueBlock, falseBlock)
 
 	case *ssa.Index:

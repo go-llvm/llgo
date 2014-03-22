@@ -56,6 +56,7 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 		panic("unreachable")
 	}
 	result = c.builder.CreateICmp(pred, result, zero, "")
+	result = c.builder.CreateZExt(result, llvm.Int8Type(), "")
 	return c.NewValue(result, types.Typ[types.Bool])
 }
 

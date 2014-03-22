@@ -100,7 +100,7 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 
 	uintptrType := tm.inttype
 	voidPtrType := llvm.PointerType(tm.ctx.Int8Type(), 0)
-	boolType := llvm.Int1Type()
+	boolType := llvm.Int8Type()
 	stringPtrType := llvm.PointerType(tm.stringType, 0)
 
 	// Create a unique type to represent recursive pointers.
@@ -257,9 +257,7 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 
 func (tm *llvmTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
 	switch b.Kind() {
-	case types.Bool:
-		return llvm.Int1Type()
-	case types.Int8, types.Uint8:
+	case types.Bool, types.Int8, types.Uint8:
 		return llvm.Int8Type()
 	case types.Int16, types.Uint16:
 		return llvm.Int16Type()

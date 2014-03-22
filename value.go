@@ -89,13 +89,7 @@ func (fr *frame) NewConstValue(v exact.Value, typ types.Type) *LLVMValue {
 		if isUntyped(typ) {
 			typ = types.Typ[types.Bool]
 		}
-		var llvmvalue llvm.Value
-		if exact.BoolVal(v) {
-			llvmvalue = llvm.ConstAllOnes(llvm.Int1Type())
-		} else {
-			llvmvalue = llvm.ConstNull(llvm.Int1Type())
-		}
-		return fr.NewValue(llvmvalue, typ)
+		return fr.NewValue(boolLLVMValue(exact.BoolVal(v)), typ)
 
 	case isFloat(typ):
 		if isUntyped(typ) {
@@ -171,11 +165,13 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 	case *types.Slice:
 		// []T == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+		isnil = b.CreateZExt(isnil, llvm.Int8Type(), "")
 		return fr.NewValue(isnil, types.Typ[types.Bool])
 
 	case *types.Signature:
 		// func == nil
 		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.LLVMValue(), 0, ""), "")
+		isnil = b.CreateZExt(isnil, llvm.Int8Type(), "")
 		return fr.NewValue(isnil, types.Typ[types.Bool])
 
 	case *types.Interface:
@@ -246,6 +242,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 			realeq := b.CreateFCmp(llvm.FloatOEQ, a_, c_, "")
 			imageq := b.CreateFCmp(llvm.FloatOEQ, b_, d_, "")
 			result = b.CreateAnd(realeq, imageq, "")
+			result = b.CreateZExt(result, llvm.Int8Type(), "")
 		default:
 			panic(fmt.Errorf("unhandled operator: %v", op))
 		}
@@ -305,6 +302,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 		} else {
 			result = b.CreateICmp(llvm.IntEQ, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
+		result = b.CreateZExt(result, llvm.Int8Type(), "")
 		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.LSS:
 		switch {
@@ -315,6 +313,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 		default:
 			result = b.CreateICmp(llvm.IntULT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
+		result = b.CreateZExt(result, llvm.Int8Type(), "")
 		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.LEQ:
 		switch {
@@ -325,6 +324,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 		default:
 			result = b.CreateICmp(llvm.IntULE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
+		result = b.CreateZExt(result, llvm.Int8Type(), "")
 		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.GTR:
 		switch {
@@ -335,6 +335,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 		default:
 			result = b.CreateICmp(llvm.IntUGT, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
+		result = b.CreateZExt(result, llvm.Int8Type(), "")
 		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.GEQ:
 		switch {
@@ -345,6 +346,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs_ Value) Value {
 		default:
 			result = b.CreateICmp(llvm.IntUGE, lhs.LLVMValue(), rhs.LLVMValue(), "")
 		}
+		result = b.CreateZExt(result, llvm.Int8Type(), "")
 		return lhs.compiler.NewValue(result, types.Typ[types.Bool])
 	case token.AND: // a & b
 		result = b.CreateAnd(lhs.LLVMValue(), rhs.LLVMValue(), "")
@@ -405,7 +407,7 @@ func (v *LLVMValue) UnaryOp(op token.Token) Value {
 	case token.ADD:
 		return v // No-op
 	case token.NOT:
-		value := b.CreateNot(v.LLVMValue(), "")
+		value := b.CreateXor(v.LLVMValue(), boolLLVMValue(true), "")
 		return v.compiler.NewValue(value, v.typ)
 	case token.XOR:
 		lhs := v.LLVMValue()
@@ -644,9 +646,9 @@ func (v *LLVMValue) extractComplexComponent(index int) *LLVMValue {
 
 func boolLLVMValue(v bool) (lv llvm.Value) {
 	if v {
-		lv = llvm.ConstAllOnes(llvm.Int1Type())
+		lv = llvm.ConstInt(llvm.Int8Type(), 1, false)
 	} else {
-		lv = llvm.ConstNull(llvm.Int1Type())
+		lv = llvm.ConstNull(llvm.Int8Type())
 	}
 	return lv
 }
