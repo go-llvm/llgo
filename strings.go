@@ -19,15 +19,9 @@ func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
 	return result
 }
 
-func (c *compiler) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
-	strcat := c.runtime.strcat.LLVMValue()
-	_string := strcat.Type().ElementType().ReturnType()
-	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
-	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
-	args := []llvm.Value{lhsstr, rhsstr}
-	result := c.builder.CreateCall(strcat, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
-	return c.NewValue(result, types.Typ[types.String])
+func (fr *frame) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
+	result := fr.runtime.stringPlus.call(fr, lhs.LLVMValue(), rhs.LLVMValue())
+	return fr.NewValue(result[0], types.Typ[types.String])
 }
 
 func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
