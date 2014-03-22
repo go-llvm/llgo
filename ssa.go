@@ -312,9 +312,16 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 	fr.allocaBuilder.SetInsertPointBefore(term)
 
-	for i, block := range f.Blocks {
-		fr.translateBlock(block, fr.blocks[i])
+	for _, block := range f.DomPreorder() {
+		fr.translateBlock(block, fr.blocks[block.Index])
 	}
+
+	fr.fixupPhis()
+}
+
+type pendingPhi struct {
+	ssa  *ssa.Phi
+	llvm llvm.Value
 }
 
 type frame struct {
@@ -322,9 +329,22 @@ type frame struct {
 	function  llvm.Value
 	retInf    retInfo
 	blocks    []llvm.BasicBlock
-	backpatch map[ssa.Value]*LLVMValue
 	env       map[ssa.Value]*LLVMValue
 	tuples    map[ssa.Value][]*LLVMValue
+	phis      []pendingPhi
+}
+
+func (fr *frame) fixupPhis() {
+	for _, phi := range fr.phis {
+		values := make([]llvm.Value, len(phi.ssa.Edges))
+		blocks := make([]llvm.BasicBlock, len(phi.ssa.Edges))
+		block := phi.ssa.Block()
+		for i, edge := range phi.ssa.Edges {
+			values[i] = fr.value(edge).LLVMValue()
+			blocks[i] = fr.block(block.Preds[i])
+		}
+		phi.llvm.AddIncoming(values, blocks)
+	}
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
@@ -365,58 +385,13 @@ func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 		return value
 	}
 
-	// Instructions are not necessarily visited before they are used (e.g. Phi
-	// edges) so we must "backpatch": create a value with the resultant type,
-	// and then replace it when we visit the instruction.
-	if b, ok := fr.backpatch[v]; ok {
-		return b
-	}
-	if fr.backpatch == nil {
-		fr.backpatch = make(map[ssa.Value]*LLVMValue)
-	}
-	// Note: we must not create a constant here (e.g. Undef/ConstNull), as
-	// it is not permissible to replace a constant with a non-constant.
-	// We must create the value in its own standalone basic block, so we can
-	// dispose of it after replacing.
-	currBlock := fr.builder.GetInsertBlock()
-	fr.builder.SetInsertPointAtEnd(llvm.AddBasicBlock(currBlock.Parent(), ""))
-	placeholder := fr.compiler.builder.CreatePHI(fr.llvmtypes.ToLLVM(v.Type()), "")
-	fr.builder.SetInsertPointAtEnd(currBlock)
-	value := fr.NewValue(placeholder, v.Type())
-	fr.backpatch[v] = value
-	return value
-}
-
-// backpatcher returns, if necessary, a function that may
-// be called to backpatch a placeholder value; if backpatching
-// is unnecessary, the backpatcher returns nil.
-//
-// When the returned function is called, it is expected that
-// fr.env[v] contains the value to backpatch.
-func (fr *frame) backpatcher(v ssa.Value) func() {
-	b := fr.backpatch[v]
-	if b == nil {
-		return nil
-	}
-	return func() {
-		b.LLVMValue().ReplaceAllUsesWith(fr.env[v].LLVMValue())
-		b.LLVMValue().InstructionParent().EraseFromParent()
-		delete(fr.backpatch, v)
-	}
+	panic("Instruction not visited yet")
 }
 
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
 	if fr.GenerateDebug {
 		fr.debug.setLocation(fr.builder, instr.Pos())
-	}
-
-	// Check if we'll need to backpatch; see comment
-	// in fr.value().
-	if v, ok := instr.(ssa.Value); ok {
-		if b := fr.backpatcher(v); b != nil {
-			defer b()
-		}
 	}
 
 	switch instr := instr.(type) {
@@ -465,17 +440,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
-		v := fr.NewValue(value, instr.Type())
-		if _, ok := instr.X.(*ssa.Phi); ok {
-			v = phiValue(fr.compiler, v)
-		}
-		fr.env[instr] = v
+		fr.env[instr] = fr.NewValue(value, instr.Type())
 
 	case *ssa.Convert:
 		v := fr.value(instr.X)
-		if _, ok := instr.X.(*ssa.Phi); ok {
-			v = phiValue(fr.compiler, v)
-		}
 		fr.env[instr] = fr.convert(v, instr.Type()).(*LLVMValue)
 
 	//case *ssa.DebugRef:
@@ -646,14 +614,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		typ := instr.Type()
 		phi := fr.builder.CreatePHI(fr.llvmtypes.ToLLVM(typ), instr.Comment)
 		fr.env[instr] = fr.NewValue(phi, typ)
-		values := make([]llvm.Value, len(instr.Edges))
-		blocks := make([]llvm.BasicBlock, len(instr.Edges))
-		block := instr.Block()
-		for i, edge := range instr.Edges {
-			values[i] = fr.value(edge).LLVMValue()
-			blocks[i] = fr.block(block.Preds[i])
-		}
-		phi.AddIncoming(values, blocks)
+		fr.phis = append(fr.phis, pendingPhi{instr, phi})
 
 	case *ssa.Range:
 		x := fr.value(instr.X)
@@ -874,13 +835,4 @@ func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 		c.builder.CreateAggregateRet(results)
 	}
 	return c.NewValue(wrapper, f.Type())
-}
-
-// phiValue returns a new value with the same value and type as the given Phi.
-// This is used for go.tools/ssa instructions that introduce new ssa.Values,
-// but would otherwise not generate a new LLVM value.
-func phiValue(c *compiler, v *LLVMValue) *LLVMValue {
-	llv := v.LLVMValue()
-	llv = c.builder.CreateSelect(llvm.ConstAllOnes(llvm.Int1Type()), llv, llv, "")
-	return c.NewValue(llv, v.Type())
 }
