@@ -324,6 +324,7 @@ type manglerContext struct {
 }
 
 func (ctx *manglerContext) init(prog *ssa.Program) {
+	ctx.ti = make(map[*types.Named]localNamedTypeInfo)
 	for f, _ := range ssautil.AllFunctions(prog) {
 		scopeNum := 0
 		var addNamedTypesToMap func(*types.Scope)
