@@ -231,8 +231,6 @@ func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 
 func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 	switch t := t.(type) {
-	case *types.Basic:
-		return tm.basicLLVMType(t)
 	case *types.Array:
 		return tm.arrayLLVMType(t)
 	case *types.Struct:
@@ -253,38 +251,6 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 		return tm.nameLLVMType(t)
 	}
 	return tm.getBackendType(t).ToLLVM(tm.ctx)
-}
-
-func (tm *llvmTypeMap) basicLLVMType(b *types.Basic) llvm.Type {
-	switch b.Kind() {
-	case types.Bool, types.Int8, types.Uint8:
-		return llvm.Int8Type()
-	case types.Int16, types.Uint16:
-		return llvm.Int16Type()
-	case types.Int32, types.Uint32:
-		return llvm.Int32Type()
-	case types.Uint, types.Int, types.Uintptr:
-		return tm.inttype
-	case types.Int64, types.Uint64:
-		return llvm.Int64Type()
-	case types.Float32:
-		return llvm.FloatType()
-	case types.Float64:
-		return llvm.DoubleType()
-	case types.UnsafePointer:
-		return llvm.PointerType(llvm.Int8Type(), 0)
-	case types.Complex64:
-		f32 := llvm.FloatType()
-		elements := []llvm.Type{f32, f32}
-		return llvm.StructType(elements, false)
-	case types.Complex128:
-		f64 := llvm.DoubleType()
-		elements := []llvm.Type{f64, f64}
-		return llvm.StructType(elements, false)
-	case types.String:
-		return tm.stringType
-	}
-	panic(fmt.Sprint("unhandled kind: ", b.Kind))
 }
 
 func (tm *llvmTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
