@@ -11,71 +11,66 @@ import (
 
 // makeMap implements make(maptype[, initial space])
 func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
-	f := fr.runtime.makemap.LLVMValue()
-	dyntyp := fr.types.ToRuntime(typ)
-	dyntyp = fr.builder.CreatePtrToInt(dyntyp, fr.target.IntPtrType(), "")
+	dyntyp := fr.types.getMapDescriptorPointer(typ)
+	dyntyp = fr.builder.CreateBitCast(dyntyp, llvm.PointerType(llvm.Int8Type(), 0), "")
 	var cap llvm.Value
 	if cap_ != nil {
-		cap = fr.convert(cap_, types.Typ[types.Int]).LLVMValue()
+		cap = fr.convert(cap_, types.Typ[types.Uintptr]).LLVMValue()
 	} else {
 		cap = llvm.ConstNull(fr.types.inttype)
 	}
-	m := fr.builder.CreateCall(f, []llvm.Value{dyntyp, cap}, "")
-	return fr.NewValue(m, typ)
+	m := fr.runtime.newMap.call(fr, dyntyp, cap)
+	return fr.NewValue(m[0], typ)
 }
 
 // mapLookup implements v[, ok] = m[k]
-func (c *compiler) mapLookup(m, k *LLVMValue, commaOk bool) *LLVMValue {
-	dyntyp := c.types.ToRuntime(m.Type())
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-
-	stackptr := c.stacksave()
+func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
 	llk := k.LLVMValue()
-	pk := c.builder.CreateAlloca(llk.Type(), "")
-	c.builder.CreateStore(llk, pk)
-	elemtyp := m.Type().Underlying().(*types.Map).Elem()
-	pv := c.builder.CreateAlloca(c.types.ToLLVM(elemtyp), "")
-	ok := c.builder.CreateCall(
-		c.runtime.mapaccess.LLVMValue(),
-		[]llvm.Value{
-			dyntyp,
-			m.LLVMValue(),
-			c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), ""),
-			c.builder.CreatePtrToInt(pv, c.target.IntPtrType(), ""),
-		}, "",
-	)
-	v := c.builder.CreateLoad(pv, "")
-	c.stackrestore(stackptr)
-	if !commaOk {
-		return c.NewValue(v, elemtyp)
-	}
+	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
+	fr.builder.CreateStore(llk, pk)
+	valptr := fr.runtime.mapIndex.call(fr, m.LLVMValue(), pk, boolLLVMValue(false))[0]
 
-	typ := tupleType(elemtyp, types.Typ[types.Bool])
-	tuple := llvm.Undef(c.types.ToLLVM(typ))
-	tuple = c.builder.CreateInsertValue(tuple, v, 0, "")
-	tuple = c.builder.CreateInsertValue(tuple, ok, 1, "")
-	return c.NewValue(tuple, typ)
+	okbit := fr.builder.CreateIsNotNull(valptr, "")
+	ok = fr.NewValue(fr.builder.CreateZExt(okbit, llvm.Int8Type(), ""), types.Typ[types.Bool])
+	startbb := fr.builder.GetInsertBlock()
+	loadbb := llvm.AddBasicBlock(fr.function, "")
+	contbb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.CreateCondBr(okbit, loadbb, contbb)
+
+	fr.builder.SetInsertPointAtEnd(loadbb)
+	elemtyp := m.Type().Underlying().(*types.Map).Elem()
+	llelemtyp := fr.types.ToLLVM(elemtyp)
+	typedvalptr := fr.builder.CreateBitCast(valptr, llvm.PointerType(llelemtyp, 0), "")
+	loadedval := fr.builder.CreateLoad(typedvalptr, "")
+	fr.builder.CreateBr(contbb)
+
+	fr.builder.SetInsertPointAtEnd(contbb)
+	llv := fr.builder.CreatePHI(llelemtyp, "")
+	llv.AddIncoming([]llvm.Value{llvm.ConstNull(llelemtyp), loadedval},
+	                []llvm.BasicBlock{startbb, loadbb})
+	v = fr.NewValue(llv, elemtyp)
+	return
 }
 
 // mapUpdate implements m[k] = v
-func (c *compiler) mapUpdate(m_, k_, v_ *LLVMValue) {
-	f := c.runtime.maplookup.LLVMValue()
-	dyntyp := c.types.ToRuntime(m_.Type())
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-	m := m_.LLVMValue()
-	k := k_.LLVMValue()
+func (fr *frame) mapUpdate(m, k, v *LLVMValue) {
+	llk := k.LLVMValue()
+	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
+	fr.builder.CreateStore(llk, pk)
+	valptr := fr.runtime.mapIndex.call(fr, m.LLVMValue(), pk, boolLLVMValue(true))[0]
 
-	stackptr := c.stacksave()
-	pk := c.builder.CreateAlloca(k.Type(), "")
-	c.builder.CreateStore(k, pk)
-	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
-	insert := boolLLVMValue(true)
-	ptrv := c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk, insert}, "")
-	c.stackrestore(stackptr)
+	elemtyp := m.Type().Underlying().(*types.Map).Elem()
+	llelemtyp := fr.types.ToLLVM(elemtyp)
+	typedvalptr := fr.builder.CreateBitCast(valptr, llvm.PointerType(llelemtyp, 0), "")
+	fr.builder.CreateStore(v.LLVMValue(), typedvalptr)
+}
 
-	ptrvtyp := types.NewPointer(m_.Type().Underlying().(*types.Map).Elem())
-	ptrv = c.builder.CreateIntToPtr(ptrv, c.types.ToLLVM(ptrvtyp), "")
-	c.builder.CreateStore(v_.LLVMValue(), ptrv)
+// mapDelete implements delete(m, k)
+func (fr *frame) mapDelete(m, k *LLVMValue) {
+	llk := k.LLVMValue()
+	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
+	fr.builder.CreateStore(llk, pk)
+	fr.runtime.mapdelete.call(fr, m.LLVMValue(), pk)
 }
 
 // mapIterInit creates a map iterator

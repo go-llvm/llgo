@@ -26,28 +26,27 @@ func (c *compiler) callCap(arg *LLVMValue) *LLVMValue {
 	return c.NewValue(v, types.Typ[types.Int])
 }
 
-func (c *compiler) callLen(arg *LLVMValue) *LLVMValue {
+func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
 	var lenvalue llvm.Value
 	switch typ := arg.Type().Underlying().(type) {
 	case *types.Array:
-		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
+		lenvalue = llvm.ConstInt(fr.llvmtypes.inttype, uint64(typ.Len()), false)
 	case *types.Pointer:
 		atyp := typ.Elem().Underlying().(*types.Array)
-		lenvalue = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
+		lenvalue = llvm.ConstInt(fr.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
-		lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
+		lenvalue = fr.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 	case *types.Map:
-		f := c.runtime.maplen.LLVMValue()
-		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
+		lenvalue = fr.runtime.mapLen.call(fr, arg.LLVMValue())[0]
 	case *types.Basic:
 		if isString(typ) {
-			lenvalue = c.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
+			lenvalue = fr.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 		}
 	case *types.Chan:
-		f := c.runtime.chanlen.LLVMValue()
-		lenvalue = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
+		f := fr.runtime.chanlen.LLVMValue()
+		lenvalue = fr.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
 	}
-	return c.NewValue(lenvalue, types.Typ[types.Int])
+	return fr.NewValue(lenvalue, types.Typ[types.Int])
 }
 
 // callAppend takes two slices of the same type, and yields
@@ -81,19 +80,4 @@ func (c *compiler) callCopy(dest, source *LLVMValue) *LLVMValue {
 	}
 	result := c.builder.CreateCall(slicecopy, args, "")
 	return c.NewValue(result, types.Typ[types.Int])
-}
-
-// callDelete implements delete(m, k)
-func (c *compiler) callDelete(m_, k_ *LLVMValue) {
-	f := c.runtime.mapdelete.LLVMValue()
-	dyntyp := c.types.ToRuntime(m_.Type())
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-	m := m_.LLVMValue()
-	k := k_.LLVMValue()
-	stackptr := c.stacksave()
-	pk := c.builder.CreateAlloca(k.Type(), "")
-	c.builder.CreateStore(k, pk)
-	pk = c.builder.CreatePtrToInt(pk, c.target.IntPtrType(), "")
-	c.builder.CreateCall(f, []llvm.Value{dyntyp, m, pk}, "")
-	c.stackrestore(stackptr)
 }

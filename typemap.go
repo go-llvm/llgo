@@ -40,6 +40,7 @@ type llvmTypeMap struct {
 type typeDescInfo struct {
 	global        llvm.Value
 	commonTypePtr llvm.Value
+	mapDescPtr    llvm.Value
 }
 
 type TypeMap struct {
@@ -55,6 +56,7 @@ type TypeMap struct {
 	types.MethodSetCache
 
 	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
+	mapDescType llvm.Type
 
 	imethodType llvm.Type
 
@@ -206,6 +208,14 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	tm.interfaceTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		tm.imethodSliceType,
+	}, false)
+
+	tm.mapDescType = tm.ctx.StructCreateNamed("mapDesc")
+	tm.mapDescType.StructSetBody([]llvm.Type{
+		commonTypeTypePtr, // map_descriptor
+		tm.inttype,        // entry_size
+		tm.inttype,        // key_offset
+		tm.inttype,        // value_offset
 	}, false)
 
 	return tm
@@ -509,6 +519,11 @@ func (ctx *manglerContext) mangleTypeDescriptorName(t types.Type, b *bytes.Buffe
 	}
 }
 
+func (ctx *manglerContext) mangleMapDescriptorName(t types.Type, b *bytes.Buffer) {
+	b.WriteString("__go_map_")
+	ctx.mangleType(t, b)
+}
+
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	switch t.Underlying().(type) {
 	case *types.Basic:
@@ -646,9 +661,9 @@ func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal l
 	return
 }
 
-func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
+func (tm *TypeMap) getTypeDescInfo(t types.Type) *typeDescInfo {
 	if tdi, ok := tm.types.At(t).(*typeDescInfo); ok {
-		return tdi.commonTypePtr
+		return tdi
 	}
 
 	var b bytes.Buffer
@@ -656,9 +671,28 @@ func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
 
 	global := llvm.AddGlobal(tm.module, tm.getTypeDescType(t), b.String())
 	ptr := llvm.ConstBitCast(global, llvm.PointerType(tm.commonTypeType, 0))
-	tm.types.Set(t, &typeDescInfo{global: global, commonTypePtr: ptr})
 
-	return ptr
+	var mapDescPtr llvm.Value
+	if m, ok := t.Underlying().(*types.Map); ok {
+		var mapb bytes.Buffer
+		tm.mc.mangleMapDescriptorName(t, &mapb)
+
+		mapDescPtr = llvm.AddGlobal(tm.module, tm.mapDescType, mapb.String())
+		mapDescPtr.SetLinkage(llvm.LinkOnceODRLinkage)
+		mapDescPtr.SetInitializer(tm.makeMapDesc(ptr, m))
+	}
+
+	tdi := &typeDescInfo{global: global, commonTypePtr: ptr, mapDescPtr: mapDescPtr}
+	tm.types.Set(t, tdi)
+	return tdi
+}
+
+func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
+	return tm.getTypeDescInfo(t).commonTypePtr
+}
+
+func (tm *TypeMap) getMapDescriptorPointer(t types.Type) llvm.Value {
+	return tm.getTypeDescInfo(t).mapDescPtr
 }
 
 const (
@@ -797,7 +831,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	vals[1] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(tm.Alignof(t)), false)
 	vals[2] = vals[1]
 	vals[3] = llvm.ConstInt(tm.inttype, uint64(tm.Sizeof(t)), false)
-	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), 42, false)
+	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), 42, false) // FIXME
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
@@ -939,6 +973,26 @@ func (tm *TypeMap) makeMapType(t types.Type, m *types.Map) llvm.Value {
 	vals[2] = tm.getTypeDescriptorPointer(m.Elem())
 
 	return llvm.ConstNamedStruct(tm.mapTypeType, vals[:])
+}
+
+func (tm *TypeMap) makeMapDesc(ptr llvm.Value, m *types.Map) llvm.Value {
+	mapEntryType := structBType{[]backendType{
+		tm.getBackendType(types.Typ[types.UnsafePointer]),
+		tm.getBackendType(m.Key()),
+		tm.getBackendType(m.Elem()),
+	}}.ToLLVM(tm.ctx)
+
+	var vals [4]llvm.Value
+	// map_descriptor
+	vals[0] = ptr
+	// entry_size
+	vals[1] = llvm.ConstInt(tm.inttype, tm.target.TypeAllocSize(mapEntryType), false)
+	// key_offset
+	vals[2] = llvm.ConstInt(tm.inttype, tm.target.ElementOffset(mapEntryType, 1), false)
+	// value_offset
+	vals[3] = llvm.ConstInt(tm.inttype, tm.target.ElementOffset(mapEntryType, 2), false)
+
+	return llvm.ConstNamedStruct(tm.mapDescType, vals[:])
 }
 
 func (tm *TypeMap) makeChanType(t types.Type, c *types.Chan) llvm.Value {

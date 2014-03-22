@@ -542,7 +542,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if isString(x.Type().Underlying()) {
 			fr.env[instr] = fr.stringIndex(x, index)
 		} else {
-			fr.env[instr] = fr.mapLookup(x, index, instr.CommaOk)
+			v, ok := fr.mapLookup(x, index)
+			if instr.CommaOk {
+				fr.tuples[instr] = []*LLVMValue{v, ok}
+			} else {
+				fr.env[instr] = v
+			}
 		}
 
 	case *ssa.MakeChan:
@@ -744,7 +749,7 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		return []*LLVMValue { fr.callCopy(args[0], args[1]) }
 
 	case "delete":
-		fr.callDelete(args[0], args[1])
+		fr.mapDelete(args[0], args[1])
 		return nil
 
 	case "real":
