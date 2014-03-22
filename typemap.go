@@ -233,8 +233,6 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 		return tm.arrayLLVMType(t)
 	case *types.Struct:
 		return tm.structLLVMType(t, name)
-	case *types.Pointer:
-		return tm.pointerLLVMType(t)
 	case *types.Interface:
 		return tm.interfaceLLVMType(t, name)
 	case *types.Map:
@@ -269,10 +267,6 @@ func (tm *llvmTypeMap) structLLVMType(s *types.Struct, name string) llvm.Type {
 		typ.StructSetBody(elements, false)
 	}
 	return typ
-}
-
-func (tm *llvmTypeMap) pointerLLVMType(p *types.Pointer) llvm.Type {
-	return llvm.PointerType(tm.ToLLVM(p.Elem()), 0)
 }
 
 func (tm *llvmTypeMap) interfaceLLVMType(i *types.Interface, name string) llvm.Type {
