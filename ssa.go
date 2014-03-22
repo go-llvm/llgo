@@ -158,10 +158,11 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr := frame{
-		unit:   u,
-		blocks: make([]llvm.BasicBlock, len(f.Blocks)),
-		env:    make(map[ssa.Value]*LLVMValue),
-		tuples: make(map[ssa.Value][]*LLVMValue),
+		unit:       u,
+		blocks:     make([]llvm.BasicBlock, len(f.Blocks)),
+		lastBlocks: make([]llvm.BasicBlock, len(f.Blocks)),
+		env:        make(map[ssa.Value]*LLVMValue),
+		tuples:     make(map[ssa.Value][]*LLVMValue),
 	}
 
 	fr.logf("Define function: %s", f.String())
@@ -326,12 +327,13 @@ type pendingPhi struct {
 
 type frame struct {
 	*unit
-	function  llvm.Value
-	retInf    retInfo
-	blocks    []llvm.BasicBlock
-	env       map[ssa.Value]*LLVMValue
-	tuples    map[ssa.Value][]*LLVMValue
-	phis      []pendingPhi
+	function   llvm.Value
+	retInf     retInfo
+	blocks     []llvm.BasicBlock
+	lastBlocks []llvm.BasicBlock
+	env        map[ssa.Value]*LLVMValue
+	tuples     map[ssa.Value][]*LLVMValue
+	phis       []pendingPhi
 }
 
 func (fr *frame) fixupPhis() {
@@ -341,7 +343,7 @@ func (fr *frame) fixupPhis() {
 		block := phi.ssa.Block()
 		for i, edge := range phi.ssa.Edges {
 			values[i] = fr.value(edge).LLVMValue()
-			blocks[i] = fr.block(block.Preds[i])
+			blocks[i] = fr.lastBlock(block.Preds[i])
 		}
 		phi.llvm.AddIncoming(values, blocks)
 	}
@@ -356,10 +358,15 @@ func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
 	for _, instr := range b.Instrs {
 		fr.instruction(instr)
 	}
+	fr.lastBlocks[b.Index] = fr.builder.GetInsertBlock()
 }
 
 func (fr *frame) block(b *ssa.BasicBlock) llvm.BasicBlock {
 	return fr.blocks[b.Index]
+}
+
+func (fr *frame) lastBlock(b *ssa.BasicBlock) llvm.BasicBlock {
+	return fr.lastBlocks[b.Index]
 }
 
 func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
