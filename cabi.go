@@ -17,11 +17,10 @@ type backendType interface {
 }
 
 type ptrBType struct {
-	target llvm.Type
 }
 
 func (t ptrBType) ToLLVM(c llvm.Context) llvm.Type {
-	return llvm.PointerType(t.target, 0)
+	return llvm.PointerType(c.Int8Type(), 0)
 }
 
 type intBType struct {
@@ -95,7 +94,7 @@ func (tm *llvmTypeMap) classify(t ...types.Type) abiArgInfo {
 }
 
 func (tm *llvmTypeMap) sliceBackendType() backendType {
-	i8ptr := &ptrBType{llvm.Int8Type()}
+	i8ptr := &ptrBType{}
 	uintptr := &intBType{tm.target.PointerSize(), false}
 	return &structBType{[]backendType{i8ptr, uintptr, uintptr}}
 }
@@ -132,7 +131,7 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 		case types.Float64:
 			return &floatBType{true}
 		case types.UnsafePointer:
-			return &ptrBType{llvm.Int8Type()}
+			return &ptrBType{}
 		case types.Complex64:
 			f32 := &floatBType{false}
 			return &structBType{[]backendType{f32, f32}}
@@ -140,7 +139,7 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 			f64 := &floatBType{true}
 			return &structBType{[]backendType{f64, f64}}
 		case types.String:
-			return &structBType{[]backendType{&ptrBType{llvm.Int8Type()}, &intBType{tm.target.PointerSize(), false}}}
+			return &structBType{[]backendType{&ptrBType{}, &intBType{tm.target.PointerSize(), false}}}
 		}
 
 	case *types.Struct:
@@ -152,10 +151,10 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 		return &structBType{fields}
 
 	case *types.Pointer, *types.Signature, *types.Map, *types.Chan:
-		return &ptrBType{llvm.Int8Type()}
+		return &ptrBType{}
 
 	case *types.Interface:
-		i8ptr := &ptrBType{llvm.Int8Type()}
+		i8ptr := &ptrBType{}
 		return &structBType{[]backendType{i8ptr, i8ptr}}
 
 	case *types.Slice:
