@@ -534,6 +534,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(elemtyp), 0)
 		x = fr.builder.CreateBitCast(x, ptrtyp, "")
 		addr := fr.builder.CreateGEP(x, []llvm.Value{index}, "")
+		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp))
 
 	case *ssa.Jump:

@@ -528,17 +528,17 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
 	// Unsafe pointer conversions.
 	if dsttyp == types.Typ[types.UnsafePointer] { // X -> unsafe.Pointer
 		if _, isptr := srctyp.(*types.Pointer); isptr {
-			value := b.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewValue(value, origdsttyp)
-		} else if srctyp == types.Typ[types.Uintptr] {
 			return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
+		} else if srctyp == types.Typ[types.Uintptr] {
+			value := b.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewValue(value, origdsttyp)
 		}
 	} else if srctyp == types.Typ[types.UnsafePointer] { // unsafe.Pointer -> X
 		if _, isptr := dsttyp.(*types.Pointer); isptr {
-			value := b.CreateIntToPtr(v.LLVMValue(), llvm_type, "")
-			return v.compiler.NewValue(value, origdsttyp)
-		} else if dsttyp == types.Typ[types.Uintptr] {
 			return v.compiler.NewValue(v.LLVMValue(), origdsttyp)
+		} else if dsttyp == types.Typ[types.Uintptr] {
+			value := b.CreatePtrToInt(v.LLVMValue(), llvm_type, "")
+			return v.compiler.NewValue(value, origdsttyp)
 		}
 	}
 
