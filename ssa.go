@@ -487,7 +487,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// TODO: implement nil check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		ptr := fr.value(instr.X).LLVMValue()
+		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
+		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
+		ptr = fr.builder.CreateBitCast(ptr, ptrtyp, "")
 		fieldptr := fr.builder.CreateStructGEP(ptr, instr.Field, instr.Name())
+		fieldptr = fr.builder.CreateBitCast(fieldptr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		fieldptrtyp := instr.Type()
 		fr.env[instr] = fr.NewValue(fieldptr, fieldptrtyp)
 
