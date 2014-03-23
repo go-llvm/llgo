@@ -151,7 +151,7 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 		}
 		return &structBType{fields}
 
-	case *types.Pointer, *types.Signature, *types.Map:
+	case *types.Pointer, *types.Signature, *types.Map, *types.Chan:
 		return &ptrBType{llvm.Int8Type()}
 
 	case *types.Interface:
@@ -160,6 +160,9 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 
 	case *types.Slice:
 		return tm.sliceBackendType()
+
+	case *types.Array:
+		return &arrayBType{uint64(t.Len()), tm.getBackendType(t.Elem())}
 	}
 
 	panic("unhandled type: " + t.String())

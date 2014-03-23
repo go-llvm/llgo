@@ -29,11 +29,6 @@ type llvmTypeMap struct {
 	inttype    llvm.Type
 	stringType llvm.Type
 
-	// ptrstandin is a type used to represent the base of a
-	// recursive pointer. See llgo/builder.go for how it is used
-	// in CreateStore and CreateLoad.
-	ptrstandin llvm.Type
-
 	types typeutil.Map
 }
 
@@ -104,9 +99,6 @@ func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runt
 	voidPtrType := llvm.PointerType(tm.ctx.Int8Type(), 0)
 	boolType := llvm.Int8Type()
 	stringPtrType := llvm.PointerType(tm.stringType, 0)
-
-	// Create a unique type to represent recursive pointers.
-	tm.ptrstandin = llvm.GlobalContext().StructCreateNamed("")
 
 	// Create runtime algorithm function types.
 	params := []llvm.Type{voidPtrType, uintptrType}
@@ -238,70 +230,7 @@ func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 }
 
 func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
-	switch t := t.(type) {
-	case *types.Array:
-		return tm.arrayLLVMType(t)
-	case *types.Struct:
-		return tm.structLLVMType(t, name)
-	case *types.Interface:
-		return tm.interfaceLLVMType(t, name)
-	case *types.Chan:
-		return tm.chanLLVMType(t)
-	case *types.Named:
-		// First we set ptrstandin, in case we've got a recursive pointer.
-		if _, ok := t.Underlying().(*types.Pointer); ok {
-			tm.types.Set(t, tm.ptrstandin)
-		}
-		return tm.nameLLVMType(t)
-	}
 	return tm.getBackendType(t).ToLLVM(tm.ctx)
-}
-
-func (tm *llvmTypeMap) arrayLLVMType(a *types.Array) llvm.Type {
-	return llvm.ArrayType(tm.ToLLVM(a.Elem()), int(a.Len()))
-}
-
-func (tm *llvmTypeMap) structLLVMType(s *types.Struct, name string) llvm.Type {
-	typ, ok := tm.types.At(s).(llvm.Type)
-	if !ok {
-		typ = llvm.GlobalContext().StructCreateNamed(name)
-		tm.types.Set(s, typ)
-		elements := make([]llvm.Type, s.NumFields())
-		for i := range elements {
-			f := s.Field(i)
-			ft := f.Type()
-			elements[i] = tm.ToLLVM(ft)
-		}
-		typ.StructSetBody(elements, false)
-	}
-	return typ
-}
-
-func (tm *llvmTypeMap) interfaceLLVMType(i *types.Interface, name string) llvm.Type {
-	if typ, ok := tm.types.At(i).(llvm.Type); ok {
-		return typ
-	}
-	// interface{} is represented as {type, value},
-	// and non-empty interfaces are represented as {itab, value}.
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	rtypeType := i8ptr
-	valueType := i8ptr
-	if name == "" {
-		name = i.String()
-	}
-	typ := llvm.GlobalContext().StructCreateNamed(name)
-	typ.StructSetBody([]llvm.Type{rtypeType, valueType}, false)
-	return typ
-}
-
-func (tm *llvmTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
-	// All channel details are in the runtime. We represent it
-	// here as an opaque pointer.
-	return tm.target.IntPtrType()
-}
-
-func (tm *llvmTypeMap) nameLLVMType(n *types.Named) llvm.Type {
-	return tm.toLLVM(n.Underlying(), n.String())
 }
 
 ///////////////////////////////////////////////////////////////////////////////
