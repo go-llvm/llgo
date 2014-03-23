@@ -102,7 +102,6 @@ type runtimeInterface struct {
 	selectsize,
 	sliceappend,
 	slicecopy,
-	strcmp,
 	streqalg,
 	stringslice,
 	strnext,
@@ -136,6 +135,7 @@ type runtimeInterface struct {
 	printString,
 	printUint64,
 	runtimeError,
+	strcmp,
 	stringPlus runtimeFnInfo
 }
 
@@ -208,7 +208,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"sliceappend":       &ri.sliceappend,
 		"slicecopy":         &ri.slicecopy,
 		"stringslice":       &ri.stringslice,
-		"strcmp":            &ri.strcmp,
 		"strnext":           &ri.strnext,
 		"strrune":           &ri.strrune,
 		"strtorunes":        &ri.strtorunes,
@@ -254,6 +253,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_print_string", rfi: &ri.printString, args: []types.Type{types.Typ[types.String]}},
 		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
 		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
+		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)

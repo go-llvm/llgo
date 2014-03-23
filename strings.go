@@ -24,14 +24,9 @@ func (fr *frame) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
 	return fr.NewValue(result[0], types.Typ[types.String])
 }
 
-func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-	strcmp := c.runtime.strcmp.LLVMValue()
-	_string := strcmp.Type().ElementType().ParamTypes()[0]
-	lhsstr := c.coerceString(lhs.LLVMValue(), _string)
-	rhsstr := c.coerceString(rhs.LLVMValue(), _string)
-	args := []llvm.Value{lhsstr, rhsstr}
-	result := c.builder.CreateCall(strcmp, args, "")
-	zero := llvm.ConstNull(llvm.Int32Type())
+func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
+	result := fr.runtime.strcmp.call(fr, lhs.LLVMValue(), rhs.LLVMValue())[0]
+	zero := llvm.ConstNull(fr.types.inttype)
 	var pred llvm.IntPredicate
 	switch op {
 	case token.EQL:
@@ -49,9 +44,9 @@ func (c *compiler) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValu
 	default:
 		panic("unreachable")
 	}
-	result = c.builder.CreateICmp(pred, result, zero, "")
-	result = c.builder.CreateZExt(result, llvm.Int8Type(), "")
-	return c.NewValue(result, types.Typ[types.Bool])
+	result = fr.builder.CreateICmp(pred, result, zero, "")
+	result = fr.builder.CreateZExt(result, llvm.Int8Type(), "")
+	return fr.NewValue(result, types.Typ[types.Bool])
 }
 
 // stringIndex implements v = m[i]
