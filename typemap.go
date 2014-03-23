@@ -245,8 +245,6 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 		return tm.structLLVMType(t, name)
 	case *types.Interface:
 		return tm.interfaceLLVMType(t, name)
-	case *types.Map:
-		return tm.mapLLVMType(t)
 	case *types.Chan:
 		return tm.chanLLVMType(t)
 	case *types.Named:
@@ -294,12 +292,6 @@ func (tm *llvmTypeMap) interfaceLLVMType(i *types.Interface, name string) llvm.T
 	typ := llvm.GlobalContext().StructCreateNamed(name)
 	typ.StructSetBody([]llvm.Type{rtypeType, valueType}, false)
 	return typ
-}
-
-func (tm *llvmTypeMap) mapLLVMType(m *types.Map) llvm.Type {
-	// All map details are in the runtime. We represent it here as an
-	// opaque pointer.
-	return tm.target.IntPtrType()
 }
 
 func (tm *llvmTypeMap) chanLLVMType(c *types.Chan) llvm.Type {
