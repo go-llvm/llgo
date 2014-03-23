@@ -75,26 +75,11 @@ func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 
 func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	llv := v.LLVMValue()
-	lltyp := llv.Type()
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	if lltyp.TypeKind() == llvm.PointerTypeKind {
-		llv = fr.builder.CreateBitCast(llv, i8ptr, "")
-	} else {
-		// If the value fits exactly in a pointer, then we can just
-		// bitcast it. Otherwise we need to malloc.
-		if fr.target.TypeStoreSize(lltyp) <= uint64(fr.target.PointerSize()) {
-			bits := fr.target.TypeSizeInBits(lltyp)
-			if bits > 0 {
-				llv = coerce(fr.builder, llv, llvm.IntType(int(bits)))
-				llv = fr.builder.CreateIntToPtr(llv, i8ptr, "")
-			} else {
-				llv = llvm.ConstNull(i8ptr)
-			}
-		} else {
-			ptr := fr.createTypeMalloc(v.Type())
-			fr.builder.CreateStore(llv, ptr)
-			llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
-		}
+	if _, ok := v.Type().Underlying().(*types.Pointer); !ok {
+		ptr := fr.createTypeMalloc(v.Type())
+		fr.builder.CreateStore(llv, ptr)
+		llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
 	}
 	value := llvm.Undef(fr.types.ToLLVM(iface))
 	rtype := fr.types.ToRuntime(v.Type())
