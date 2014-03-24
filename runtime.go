@@ -68,7 +68,6 @@ type runtimeInterface struct {
 	chanclose,
 	chanrecv,
 	chansend,
-	compareE2E,
 	convertE2I,
 	convertE2V,
 	convertI2E,
@@ -115,7 +114,9 @@ type runtimeInterface struct {
 	// LLVM intrinsics
 	memset llvm.Value
 
+	emptyInterfaceCompare,
 	Go,
+	interfaceCompare,
 	makeSlice,
 	mapdelete,
 	mapIndex,
@@ -174,7 +175,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"chanclose":         &ri.chanclose,
 		"chanrecv":          &ri.chanrecv,
 		"chansend":          &ri.chansend,
-		"compareE2E":        &ri.compareE2E,
 		"convertE2I":        &ri.convertE2I,
 		"convertE2V":        &ri.convertE2V,
 		"mustConvertE2I":    &ri.mustConvertE2I,
@@ -233,7 +233,9 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		rfi           *runtimeFnInfo
 		args, results []types.Type
 	}{
+		{name: "__go_empty_interface_compare", rfi: &ri.emptyInterfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
+		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_new_map", rfi: &ri.newMap, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},
 		{name: "runtime.mapdelete", rfi: &ri.mapdelete, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},

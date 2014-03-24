@@ -41,31 +41,29 @@ func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv
 
 // compareInterfaces emits code to compare two interfaces for
 // equality.
-func (c *compiler) compareInterfaces(a, b *LLVMValue) *LLVMValue {
+func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	aNull := a.LLVMValue().IsNull()
 	bNull := b.LLVMValue().IsNull()
 	if aNull && bNull {
-		return c.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+		return fr.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
 	}
-	if !aNull && !bNull {
-		aI := a.Type().Underlying().(*types.Interface).NumMethods() > 0
-		bI := b.Type().Underlying().(*types.Interface).NumMethods() > 0
-		switch {
-		case aI && bI:
-			a = a.convertI2E()
-			b = b.convertI2E()
-		case aI:
-			a = a.convertI2E()
-		case bI:
-			b = b.convertI2E()
-		}
+
+	compare := fr.runtime.emptyInterfaceCompare
+	aI := a.Type().Underlying().(*types.Interface).NumMethods() > 0
+	bI := b.Type().Underlying().(*types.Interface).NumMethods() > 0
+	switch {
+	case aI && bI:
+		compare = fr.runtime.interfaceCompare
+	case aI:
+		a = a.convertI2E()
+	case bI:
+		b = b.convertI2E()
 	}
-	f := c.runtime.compareE2E.LLVMValue()
-	args := []llvm.Value{
-		coerce(c.builder, a.LLVMValue(), c.runtime.eface.llvm),
-		coerce(c.builder, b.LLVMValue(), c.runtime.eface.llvm),
-	}
-	return c.NewValue(c.builder.CreateCall(f, args, ""), types.Typ[types.Bool])
+
+	result := compare.call(fr, a.LLVMValue(), b.LLVMValue())[0]
+	result = fr.builder.CreateIsNull(result, "")
+	result = fr.builder.CreateZExt(result, llvm.Int8Type(), "")
+	return fr.NewValue(result, types.Typ[types.Bool])
 }
 
 func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
