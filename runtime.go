@@ -114,6 +114,7 @@ type runtimeInterface struct {
 	// LLVM intrinsics
 	memset llvm.Value
 
+	checkInterfaceType,
 	emptyInterfaceCompare,
 	Go,
 	interfaceCompare,
@@ -137,7 +138,8 @@ type runtimeInterface struct {
 	printUint64,
 	runtimeError,
 	strcmp,
-	stringPlus runtimeFnInfo
+	stringPlus,
+	typeDescriptorsEqual runtimeFnInfo
 }
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
@@ -233,6 +235,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		rfi           *runtimeFnInfo
 		args, results []types.Type
 	}{
+		{name: "__go_check_interface_type", rfi: &ri.checkInterfaceType, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "__go_empty_interface_compare", rfi: &ri.emptyInterfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
@@ -257,6 +260,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
 		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
+		{name: "__go_type_descriptors_equal", rfi: &ri.typeDescriptorsEqual, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Bool]}},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)
 	}

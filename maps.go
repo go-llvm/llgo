@@ -29,26 +29,11 @@ func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
 	valptr := fr.runtime.mapIndex.call(fr, m.LLVMValue(), pk, boolLLVMValue(false))[0]
-
 	okbit := fr.builder.CreateIsNotNull(valptr, "")
-	ok = fr.NewValue(fr.builder.CreateZExt(okbit, llvm.Int8Type(), ""), types.Typ[types.Bool])
-	startbb := fr.builder.GetInsertBlock()
-	loadbb := llvm.AddBasicBlock(fr.function, "")
-	contbb := llvm.AddBasicBlock(fr.function, "")
-	fr.builder.CreateCondBr(okbit, loadbb, contbb)
 
-	fr.builder.SetInsertPointAtEnd(loadbb)
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
-	llelemtyp := fr.types.ToLLVM(elemtyp)
-	typedvalptr := fr.builder.CreateBitCast(valptr, llvm.PointerType(llelemtyp, 0), "")
-	loadedval := fr.builder.CreateLoad(typedvalptr, "")
-	fr.builder.CreateBr(contbb)
-
-	fr.builder.SetInsertPointAtEnd(contbb)
-	llv := fr.builder.CreatePHI(llelemtyp, "")
-	llv.AddIncoming([]llvm.Value{llvm.ConstNull(llelemtyp), loadedval},
-	                []llvm.BasicBlock{startbb, loadbb})
-	v = fr.NewValue(llv, elemtyp)
+	ok = fr.NewValue(fr.builder.CreateZExt(okbit, llvm.Int8Type(), ""), types.Typ[types.Bool])
+	v = fr.loadOrNull(okbit, valptr, elemtyp)
 	return
 }
 

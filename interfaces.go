@@ -86,3 +86,58 @@ func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	}
 	return fr.NewValue(value, iface)
 }
+
+// Reads the type descriptor from the given interface type.
+func (fr *frame) getInterfaceTypeDescriptor(v *LLVMValue) llvm.Value {
+	isempty := v.Type().Underlying().(*types.Interface).NumMethods() == 0
+	itab := fr.builder.CreateExtractValue(v.LLVMValue(), 0, "")
+	if isempty {
+		return itab
+	} else {
+		itabnull := fr.builder.CreateIsNull(itab, "")
+		return fr.loadOrNull(itabnull, itab, types.Typ[types.UnsafePointer]).LLVMValue()
+	}
+}
+
+// Reads the value from the given interface type, assuming that the
+// interface holds a value of the correct type.
+func (fr *frame) getInterfaceValue(v *LLVMValue, ty types.Type) *LLVMValue {
+	val := fr.builder.CreateExtractValue(v.LLVMValue(), 1, "")
+	if _, ok := ty.Underlying().(*types.Pointer); !ok {
+		typedval := fr.builder.CreateBitCast(val, llvm.PointerType(fr.types.ToLLVM(ty), 0), "")
+		val = fr.builder.CreateLoad(typedval, "")
+	}
+	return fr.NewValue(val, ty)
+}
+
+// If cond is true, reads the value from the given interface type, otherwise
+// returns a nil value.
+func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *LLVMValue, ty types.Type) *LLVMValue {
+	val := fr.builder.CreateExtractValue(v.LLVMValue(), 1, "")
+	if _, ok := ty.Underlying().(*types.Pointer); ok {
+		val = fr.builder.CreateSelect(cond, val, llvm.ConstNull(val.Type()), "")
+	} else {
+		val = fr.loadOrNull(cond, val, ty).LLVMValue()
+	}
+	return fr.NewValue(val, ty)
+}
+
+func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue, ok *LLVMValue) {
+        valtd := fr.getInterfaceTypeDescriptor(val)
+	tytd := fr.types.ToRuntime(ty)
+	tyequal := fr.runtime.typeDescriptorsEqual.call(fr, valtd, tytd)[0]
+	ok = fr.NewValue(tyequal, types.Typ[types.Bool])
+	tyequal = fr.builder.CreateTrunc(tyequal, llvm.Int1Type(), "")
+
+	v = fr.getInterfaceValueOrNull(tyequal, val, ty)
+	return
+}
+
+func (fr *frame) interfaceTypeAssert(val *LLVMValue, ty types.Type) *LLVMValue {
+	valtytd := fr.types.ToRuntime(val.Type())
+        valtd := fr.getInterfaceTypeDescriptor(val)
+	tytd := fr.types.ToRuntime(ty)
+	fr.runtime.checkInterfaceType.call(fr, valtd, tytd, valtytd)
+
+	return fr.getInterfaceValue(val, ty)
+}

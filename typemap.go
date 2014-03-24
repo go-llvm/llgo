@@ -236,7 +236,7 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 ///////////////////////////////////////////////////////////////////////////////
 
 func (tm *TypeMap) ToRuntime(t types.Type) llvm.Value {
-	return tm.getTypeDescriptorPointer(t)
+	return llvm.ConstBitCast(tm.getTypeDescriptorPointer(t), llvm.PointerType(llvm.Int8Type(), 0))
 }
 
 type localNamedTypeInfo struct {

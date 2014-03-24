@@ -14,7 +14,7 @@ import (
 func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
 	length = fr.convert(length, types.Typ[types.Uintptr]).(*LLVMValue)
 	capacity = fr.convert(capacity, types.Typ[types.Uintptr]).(*LLVMValue)
-	runtimeType := fr.builder.CreateBitCast(fr.types.getTypeDescriptorPointer(sliceType), llvm.PointerType(llvm.Int8Type(), 0), "")
+	runtimeType := fr.types.ToRuntime(sliceType)
 	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.LLVMValue(), capacity.LLVMValue())
 	return fr.NewValue(llslice[0], sliceType)
 }

@@ -683,29 +683,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.TypeAssert:
 		x := fr.value(instr.X)
-		if iface, ok := x.Type().Underlying().(*types.Interface); ok && iface.NumMethods() > 0 {
-			x = x.convertI2E()
-		}
-		if !instr.CommaOk {
-			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
-				fr.env[instr] = x.mustConvertE2I(instr.AssertedType)
-			} else {
-				fr.env[instr] = x.mustConvertE2V(instr.AssertedType)
-			}
+		if instr.CommaOk {
+			v, ok := fr.interfaceTypeCheck(x, instr.AssertedType)
+			fr.tuples[instr] = []*LLVMValue{v, ok}
 		} else {
-			var result, success *LLVMValue
-			if _, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
-				result, success = x.convertE2I(instr.AssertedType)
-			} else {
-				result, success = x.convertE2V(instr.AssertedType)
-			}
-			resultval := result.LLVMValue()
-			okval := success.LLVMValue()
-			pairtyp := llvm.StructType([]llvm.Type{resultval.Type(), okval.Type()}, false)
-			pair := llvm.Undef(pairtyp)
-			pair = fr.builder.CreateInsertValue(pair, resultval, 0, "")
-			pair = fr.builder.CreateInsertValue(pair, okval, 1, "")
-			fr.env[instr] = fr.NewValue(pair, instr.Type())
+			fr.env[instr] = fr.interfaceTypeAssert(x, instr.AssertedType)
 		}
 
 	case *ssa.UnOp:
