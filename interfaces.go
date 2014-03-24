@@ -9,14 +9,14 @@ import (
 	"github.com/axw/gollvm/llvm"
 )
 
-// interfaceMethod returns a function pointer for the specified
+// interfaceMethod returns a function and receiver pointer for the specified
 // interface and method pair.
-func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMValue {
+func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv *LLVMValue) {
 	lliface := iface.LLVMValue()
-	llitab := c.builder.CreateExtractValue(lliface, 0, "")
-	llvalue := c.builder.CreateExtractValue(lliface, 1, "")
+	llitab := fr.builder.CreateExtractValue(lliface, 0, "")
+	recv = fr.NewValue(fr.builder.CreateExtractValue(lliface, 1, ""), types.Typ[types.UnsafePointer])
 	sig := method.Type().(*types.Signature)
-	methodset := c.types.MethodSet(sig.Recv().Type())
+	methodset := fr.types.MethodSet(sig.Recv().Type())
 	// TODO(axw) cache ordered method index
 	var index int
 	for i := 0; i < methodset.Len(); i++ {
@@ -25,23 +25,18 @@ func (c *compiler) interfaceMethod(iface *LLVMValue, method *types.Func) *LLVMVa
 			break
 		}
 	}
-	llitab = c.builder.CreateBitCast(llitab, llvm.PointerType(c.runtime.itab.llvm, 0), "")
-	llifn := c.builder.CreateGEP(llitab, []llvm.Value{
-		llvm.ConstInt(llvm.Int32Type(), 0, false),
-		llvm.ConstInt(llvm.Int32Type(), 5, false), // index of itab.fun
+	llitab = fr.builder.CreateBitCast(llitab, llvm.PointerType(llvm.PointerType(llvm.Int8Type(), 0), 0), "")
+	// Skip runtime type pointer.
+	llifnptr := fr.builder.CreateGEP(llitab, []llvm.Value{
+		llvm.ConstInt(llvm.Int32Type(), uint64(index+1), false),
 	}, "")
-	_ = index
-	llifn = c.builder.CreateGEP(llifn, []llvm.Value{
-		llvm.ConstInt(llvm.Int32Type(), uint64(index), false),
-	}, "")
-	llifn = c.builder.CreateLoad(llifn, "")
-	// Strip receiver.
-	sig = types.NewSignature(nil, nil, sig.Params(), sig.Results(), sig.Variadic())
-	llfn := llvm.Undef(c.types.ToLLVM(sig))
-	llifn = c.builder.CreateIntToPtr(llifn, llfn.Type().StructElementTypes()[0], "")
-	llfn = c.builder.CreateInsertValue(llfn, llifn, 0, "")
-	llfn = c.builder.CreateInsertValue(llfn, llvalue, 1, "")
-	return c.NewValue(llfn, sig)
+
+	llifn := fr.builder.CreateLoad(llifnptr, "")
+	// Replace receiver type with unsafe.Pointer.
+	recvparam := types.NewParam(0, nil, "", types.Typ[types.UnsafePointer])
+	sig = types.NewSignature(nil, recvparam, sig.Params(), sig.Results(), sig.Variadic())
+	fn = fr.NewValue(llifn, sig)
+	return
 }
 
 // compareInterfaces emits code to compare two interfaces for

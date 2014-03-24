@@ -794,7 +794,9 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
 
 	var fn *LLVMValue
 	if call.IsInvoke() {
-		fn = fr.interfaceMethod(fr.value(call.Value), call.Method)
+		var recv *LLVMValue
+		fn, recv = fr.interfaceMethod(fr.value(call.Value), call.Method)
+		args = append([]*LLVMValue{recv}, args...)
 	} else {
 		fn = fr.value(call.Value)
 	}
