@@ -435,8 +435,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if instr.Type().Underlying().(*types.Interface).NumMethods() > 0 {
 			// TODO(axw) optimisation for I2I case where we
 			// know statically the methods to carry over.
-			x = fr.convertI2E(x)
-			x, _ = x.convertE2I(instr.Type())
+			x = fr.changeInterface(x, instr.Type(), false)
 		} else {
 			x = fr.convertI2E(x)
 		}

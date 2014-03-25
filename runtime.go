@@ -113,9 +113,13 @@ type runtimeInterface struct {
 	memcpy,
 	memset llvm.Value
 
+	assertInterface,
 	checkInterfaceType,
+	convertInterface,
 	emptyInterfaceCompare,
 	Go,
+	ifaceE2I2,
+	ifaceI2I2,
 	interfaceCompare,
 	makeSlice,
 	mapdelete,
@@ -232,9 +236,13 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		rfi           *runtimeFnInfo
 		args, results []types.Type
 	}{
+		{name: "__go_assert_interface", rfi: &ri.assertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "__go_check_interface_type", rfi: &ri.checkInterfaceType, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
+		{name: "__go_convert_interface", rfi: &ri.convertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "__go_empty_interface_compare", rfi: &ri.emptyInterfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
+		{name: "runtime.ifaceE2I2", rfi: &ri.ifaceE2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
+		{name: "runtime.ifaceI2I2", rfi: &ri.ifaceI2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
 		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_new_map", rfi: &ri.newMap, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},

@@ -122,24 +122,39 @@ func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *LLVMValue, ty types
 	return fr.NewValue(val, ty)
 }
 
-func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue, ok *LLVMValue) {
-        valtd := fr.getInterfaceTypeDescriptor(val)
+func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue, okval *LLVMValue) {
 	tytd := fr.types.ToRuntime(ty)
-	tyequal := fr.runtime.typeDescriptorsEqual.call(fr, valtd, tytd)[0]
-	ok = fr.NewValue(tyequal, types.Typ[types.Bool])
-	tyequal = fr.builder.CreateTrunc(tyequal, llvm.Int1Type(), "")
+	if _, ok := ty.Underlying().(*types.Interface); ok {
+		var result []llvm.Value
+		if val.Type().Underlying().(*types.Interface).NumMethods() > 0 {
+			result = fr.runtime.ifaceI2I2.call(fr, tytd, val.LLVMValue())
+		} else {
+			result = fr.runtime.ifaceE2I2.call(fr, tytd, val.LLVMValue())
+		}
+		v = fr.NewValue(result[0], ty)
+		okval = fr.NewValue(result[1], types.Typ[types.Bool])
+	} else {
+		valtd := fr.getInterfaceTypeDescriptor(val)
+		tyequal := fr.runtime.typeDescriptorsEqual.call(fr, valtd, tytd)[0]
+		okval = fr.NewValue(tyequal, types.Typ[types.Bool])
+		tyequal = fr.builder.CreateTrunc(tyequal, llvm.Int1Type(), "")
 
-	v = fr.getInterfaceValueOrNull(tyequal, val, ty)
+		v = fr.getInterfaceValueOrNull(tyequal, val, ty)
+	}
 	return
 }
 
 func (fr *frame) interfaceTypeAssert(val *LLVMValue, ty types.Type) *LLVMValue {
-	valtytd := fr.types.ToRuntime(val.Type())
-        valtd := fr.getInterfaceTypeDescriptor(val)
-	tytd := fr.types.ToRuntime(ty)
-	fr.runtime.checkInterfaceType.call(fr, valtd, tytd, valtytd)
+	if _, ok := ty.Underlying().(*types.Interface); ok {
+		return fr.changeInterface(val, ty, true)
+	} else {
+		valtytd := fr.types.ToRuntime(val.Type())
+		valtd := fr.getInterfaceTypeDescriptor(val)
+		tytd := fr.types.ToRuntime(ty)
+		fr.runtime.checkInterfaceType.call(fr, valtd, tytd, valtytd)
 
-	return fr.getInterfaceValue(val, ty)
+		return fr.getInterfaceValue(val, ty)
+	}
 }
 
 // convertI2E converts a non-empty interface value to an empty interface.
@@ -152,4 +167,21 @@ func (fr *frame) convertI2E(v *LLVMValue) *LLVMValue {
 	intf = fr.builder.CreateInsertValue(intf, td, 0, "")
 	intf = fr.builder.CreateInsertValue(intf, val, 1, "")
 	return fr.NewValue(intf, typ)
+}
+
+func (fr *frame) changeInterface(v *LLVMValue, ty types.Type, assert bool) *LLVMValue {
+	td := fr.getInterfaceTypeDescriptor(v)
+	tytd := fr.types.ToRuntime(ty)
+	var itab llvm.Value
+	if assert {
+		itab = fr.runtime.assertInterface.call(fr, tytd, td)[0]
+	} else {
+		itab = fr.runtime.convertInterface.call(fr, tytd, td)[0]
+	}
+	val := fr.builder.CreateExtractValue(v.LLVMValue(), 1, "")
+
+	intf := llvm.Undef(fr.types.ToLLVM(ty))
+	intf = fr.builder.CreateInsertValue(intf, itab, 0, "")
+	intf = fr.builder.CreateInsertValue(intf, val, 1, "")
+	return fr.NewValue(intf, ty)
 }
