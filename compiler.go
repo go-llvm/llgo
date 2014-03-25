@@ -207,18 +207,14 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		return nil, err
 	}
 
-	var mc manglerContext
-	mc.init(program)
-
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
 	compiler.types = NewTypeMap(
-		importpath,
+		mainPkg,
 		compiler.llvmtypes,
 		compiler.module.Module,
 		compiler.runtime,
 		MethodResolver(unit),
-		&mc,
 	)
 
 	// Create a Builder, for building LLVM instructions.

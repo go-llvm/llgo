@@ -40,7 +40,7 @@ type typeDescInfo struct {
 
 type TypeMap struct {
 	*llvmTypeMap
-	mc *manglerContext
+	mc manglerContext
 
 	module         llvm.Module
 	pkgpath        string
@@ -84,16 +84,17 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 	}
 }
 
-func NewTypeMap(pkgpath string, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface, mr MethodResolver, mc *manglerContext) *TypeMap {
+func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface, mr MethodResolver) *TypeMap {
 	tm := &TypeMap{
 		llvmTypeMap: llvmtm,
-		mc:          mc,
 		module:      module,
-		pkgpath:     pkgpath,
+		pkgpath:     pkg.Object.Path(),
 		runtime:     r,
 		methodResolver: mr,
 		alg:            newAlgorithmMap(module, r, llvmtm.target),
 	}
+
+	tm.mc.init(pkg.Prog, &tm.MethodSetCache)
 
 	uintptrType := tm.inttype
 	voidPtrType := llvm.PointerType(tm.ctx.Int8Type(), 0)
@@ -251,10 +252,12 @@ type namedTypeInfo struct {
 }
 
 type manglerContext struct {
-	ti map[*types.Named]localNamedTypeInfo
+	ti  map[*types.Named]localNamedTypeInfo
+	msc *types.MethodSetCache
 }
 
-func (ctx *manglerContext) init(prog *ssa.Program) {
+func (ctx *manglerContext) init(prog *ssa.Program, msc *types.MethodSetCache) {
+	ctx.msc = msc
 	ctx.ti = make(map[*types.Named]localNamedTypeInfo)
 	for f, _ := range ssautil.AllFunctions(prog) {
 		scopeNum := 0
@@ -310,6 +313,33 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 	return
 }
 
+func (ctx *manglerContext) mangleSignature(s *types.Signature, recv *types.Var, b *bytes.Buffer) {
+	b.WriteRune('F')
+	if recv != nil {
+		b.WriteRune('m')
+		ctx.mangleType(recv.Type(), b)
+	}
+
+	if p := s.Params(); p.Len() != 0 {
+		b.WriteRune('p')
+		for i := 0; i != p.Len(); i++ {
+			ctx.mangleType(p.At(i).Type(), b)
+		}
+		if s.Variadic() {
+			b.WriteRune('V')
+		}
+		b.WriteRune('e')
+	}
+
+	if r := s.Results(); r.Len() != 0 {
+		b.WriteRune('r')
+		for i := 0; i != r.Len(); i++ {
+			ctx.mangleType(r.At(i).Type(), b)
+		}
+		b.WriteRune('e')
+	}
+}
+
 func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 	switch t := t.(type) {
 	case *types.Basic, *types.Named:
@@ -358,30 +388,7 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 		b.WriteRune('e')
 
 	case *types.Signature:
-		b.WriteRune('F')
-		if recv := t.Recv(); recv != nil {
-			b.WriteRune('m')
-			ctx.mangleType(recv.Type(), b)
-		}
-
-		if p := t.Params(); p.Len() != 0 {
-			b.WriteRune('p')
-			for i := 0; i != p.Len(); i++ {
-				ctx.mangleType(p.At(i).Type(), b)
-			}
-			if t.Variadic() {
-				b.WriteRune('V')
-			}
-			b.WriteRune('e')
-		}
-
-		if r := t.Results(); r.Len() != 0 {
-			b.WriteRune('r')
-			for i := 0; i != r.Len(); i++ {
-				ctx.mangleType(r.At(i).Type(), b)
-			}
-			b.WriteRune('e')
-		}
+		ctx.mangleSignature(t, t.Recv(), b)
 
 	case *types.Array:
 		b.WriteRune('A')
@@ -407,6 +414,27 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 			}
 			ctx.mangleType(f.Type(), b)
 			// TODO: tags are mangled here
+		}
+		b.WriteRune('e')
+
+	case *types.Interface:
+		b.WriteRune('I')
+		methodset := ctx.msc.MethodSet(t)
+		for index := 0; index < methodset.Len(); index++ {
+			method := methodset.At(index).Obj()
+			var nb bytes.Buffer
+			if !method.Exported() {
+				nb.WriteRune('.')
+				nb.WriteString(method.Pkg().Path())
+				nb.WriteRune('.')
+			}
+			nb.WriteString(method.Name())
+
+			b.WriteString(strconv.Itoa(nb.Len()))
+			b.WriteRune('_')
+			b.WriteString(nb.String())
+
+			ctx.mangleSignature(method.Type().(*types.Signature), nil, b)
 		}
 		b.WriteRune('e')
 
