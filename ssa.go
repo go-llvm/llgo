@@ -409,6 +409,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if instr.Heap {
 			value = fr.createTypeMalloc(typ)
 			value.SetName(instr.Comment)
+			value = fr.builder.CreateBitCast(value, llvm.PointerType(llvm.Int8Type(), 0), "")
 			fr.env[instr] = fr.NewValue(value, instr.Type())
 		} else {
 			value = fr.env[instr].LLVMValue()
