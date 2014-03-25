@@ -84,7 +84,6 @@ type runtimeInterface struct {
 	mapiterinit,
 	mapiternext,
 	maplookup,
-	memcpy,
 	memequal,
 	panic_,
 	pushdefer,
@@ -112,6 +111,7 @@ type runtimeInterface struct {
 	c128eqalg *LLVMValue
 
 	// LLVM intrinsics
+	memcpy,
 	memset llvm.Value
 
 	checkInterfaceType,
@@ -193,7 +193,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"mapiterinit":       &ri.mapiterinit,
 		"mapiternext":       &ri.mapiternext,
 		"maplookup":         &ri.maplookup,
-		"memcpy":            &ri.memcpy,
 		"memequal":          &ri.memequal,
 		"panic_":            &ri.panic_,
 		"pushdefer":         &ri.pushdefer,
@@ -269,6 +268,10 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	memsetType := llvm.FunctionType(llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0), llvm.Int8Type(), tm.target.IntPtrType(), llvm.Int32Type(), llvm.Int1Type()}, false)
 	ri.memset = llvm.AddFunction(module, memsetName, memsetType)
 
+	memcpyName := "llvm.memcpy.p0i8.p0i8.i" + strconv.Itoa(tm.target.IntPtrType().IntTypeWidth())
+	memcpyType := llvm.FunctionType(llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0), llvm.PointerType(llvm.Int8Type(), 0), tm.target.IntPtrType(), llvm.Int32Type(), llvm.Int1Type()}, false)
+	ri.memcpy = llvm.AddFunction(module, memcpyName, memcpyType)
+
 	return &ri, nil
 }
 
@@ -321,6 +324,16 @@ func (fr *frame) memsetZero(ptr llvm.Value, size llvm.Value) {
 	align := llvm.ConstInt(llvm.Int32Type(), 1, false)
 	isvolatile := llvm.ConstNull(llvm.Int1Type())
 	fr.builder.CreateCall(memset, []llvm.Value{ptr, fill, size, align, isvolatile}, "")
+}
+
+func (fr *frame) memcpy(dest llvm.Value, src llvm.Value, size llvm.Value) {
+	memcpy := fr.runtime.memcpy
+	dest = fr.builder.CreateBitCast(dest, llvm.PointerType(llvm.Int8Type(), 0), "")
+	src = fr.builder.CreateBitCast(src, llvm.PointerType(llvm.Int8Type(), 0), "")
+	size = fr.createZExtOrTrunc(size, fr.target.IntPtrType(), "")
+	align := llvm.ConstInt(llvm.Int32Type(), 1, false)
+	isvolatile := llvm.ConstNull(llvm.Int1Type())
+	fr.builder.CreateCall(memcpy, []llvm.Value{dest, src, size, align, isvolatile}, "")
 }
 
 func (c *compiler) stacksave() llvm.Value {
