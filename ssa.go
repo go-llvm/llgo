@@ -435,11 +435,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if instr.Type().Underlying().(*types.Interface).NumMethods() > 0 {
 			// TODO(axw) optimisation for I2I case where we
 			// know statically the methods to carry over.
-			x = x.convertI2E()
+			x = fr.convertI2E(x)
 			x, _ = x.convertE2I(instr.Type())
 		} else {
-			x = x.convertI2E()
-			x = fr.NewValue(x.LLVMValue(), instr.Type())
+			x = fr.convertI2E(x)
 		}
 		fr.env[instr] = x
 

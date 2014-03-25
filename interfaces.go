@@ -55,9 +55,9 @@ func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	case aI && bI:
 		compare = fr.runtime.interfaceCompare
 	case aI:
-		a = a.convertI2E()
+		a = fr.convertI2E(a)
 	case bI:
-		b = b.convertI2E()
+		b = fr.convertI2E(b)
 	}
 
 	result := compare.call(fr, a.LLVMValue(), b.LLVMValue())[0]
@@ -140,4 +140,16 @@ func (fr *frame) interfaceTypeAssert(val *LLVMValue, ty types.Type) *LLVMValue {
 	fr.runtime.checkInterfaceType.call(fr, valtd, tytd, valtytd)
 
 	return fr.getInterfaceValue(val, ty)
+}
+
+// convertI2E converts a non-empty interface value to an empty interface.
+func (fr *frame) convertI2E(v *LLVMValue) *LLVMValue {
+	td := fr.getInterfaceTypeDescriptor(v)
+	val := fr.builder.CreateExtractValue(v.LLVMValue(), 1, "")
+
+	typ := types.NewInterface(nil, nil)
+	intf := llvm.Undef(fr.types.ToLLVM(typ))
+	intf = fr.builder.CreateInsertValue(intf, td, 0, "")
+	intf = fr.builder.CreateInsertValue(intf, val, 1, "")
+	return fr.NewValue(intf, typ)
 }
