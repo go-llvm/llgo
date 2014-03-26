@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/axw/gollvm/llvm"
-	llgobuild "github.com/axw/llgo/build"
-	llgoimporter "github.com/axw/llgo/importer"
+	llgobuild "github.com/go-llvm/llgo/build"
+	llgoimporter "github.com/go-llvm/llgo/importer"
+	"github.com/go-llvm/llvm"
 
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"

@@ -7,13 +7,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	llgobuild "github.com/axw/llgo/build"
 	"go/build"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	llgobuild "github.com/go-llvm/llgo/build"
 )
 
 var (

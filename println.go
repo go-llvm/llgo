@@ -9,7 +9,7 @@ import (
 
 	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 func getPrintf(module llvm.Module) llvm.Value {

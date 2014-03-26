@@ -11,8 +11,8 @@ import (
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
 
-	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo/debug"
+	"github.com/go-llvm/llgo/debug"
+	"github.com/go-llvm/llvm"
 )
 
 const (

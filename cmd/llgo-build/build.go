@@ -17,10 +17,10 @@ import (
 	"regexp"
 	"strings"
 
-	llgobuild "github.com/axw/llgo/build"
+	llgobuild "github.com/go-llvm/llgo/build"
 )
 
-const llgoPkgPrefix = "github.com/axw/llgo/pkg/"
+const llgoPkgPrefix = "github.com/go-llvm/llgo/pkg/"
 
 type renamedFileInfo struct {
 	os.FileInfo

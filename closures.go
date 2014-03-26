@@ -5,7 +5,7 @@
 package llgo
 
 import (
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 // makeClosure creates a closure from a function pointer and
