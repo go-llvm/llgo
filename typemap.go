@@ -55,9 +55,9 @@ type TypeMap struct {
 	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
 	mapDescType llvm.Type
 
-	imethodType llvm.Type
+	methodType, imethodType llvm.Type
 
-	typeSliceType, imethodSliceType llvm.Type
+	typeSliceType, methodSliceType, imethodSliceType llvm.Type
 
 	hashFnType, equalFnType llvm.Type
 
@@ -123,14 +123,27 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.equalFnString = llvm.AddFunction(tm.module, "__go_type_equal_string", tm.equalFnType)
 	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
 
-	tm.uncommonTypeType = tm.ctx.StructCreateNamed("uncommonType")
-	tm.uncommonTypeType.StructSetBody([]llvm.Type{
-		stringPtrType, // name
-		stringPtrType, // pkgPath
-		// TODO: methods
+	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
+	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
+
+	tm.methodType = tm.ctx.StructCreateNamed("method")
+	tm.methodType.StructSetBody([]llvm.Type{
+		stringPtrType,     // name
+		stringPtrType,     // pkgPath
+		commonTypeTypePtr, // mtype (without receiver)
+		commonTypeTypePtr, // type (with receiver)
+		voidPtrType,       // function
 	}, false)
 
-	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
+	tm.methodSliceType = tm.makeNamedSliceType("methodSlice", tm.methodType)
+
+	tm.uncommonTypeType = tm.ctx.StructCreateNamed("uncommonType")
+	tm.uncommonTypeType.StructSetBody([]llvm.Type{
+		stringPtrType,      // name
+		stringPtrType,      // pkgPath
+		tm.methodSliceType, // methods
+	}, false)
+
 	tm.commonTypeType.StructSetBody([]llvm.Type{
 		tm.ctx.Int8Type(),                        // Kind
 		tm.ctx.Int8Type(),                        // align
@@ -141,10 +154,8 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 		llvm.PointerType(tm.equalFnType, 0),      // equalfn
 		stringPtrType,                            // string
 		llvm.PointerType(tm.uncommonTypeType, 0), // uncommonType
-		llvm.PointerType(tm.commonTypeType, 0),   // ptrToThis
+		commonTypeTypePtr,                        // ptrToThis
 	}, false)
-
-	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
 
 	tm.typeSliceType = tm.makeNamedSliceType("typeSlice", commonTypeTypePtr)
 
@@ -835,7 +846,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	vals[5] = hash
 	vals[6] = equal
 	vals[7] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
-	vals[8] = llvm.ConstPointerNull(llvm.PointerType(tm.uncommonTypeType, 0))
+	vals[8] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
 		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
 	} else {
@@ -955,7 +966,11 @@ func (tm *TypeMap) makeInterfaceType(t types.Type, i *types.Interface) llvm.Valu
 		method := methodset.At(index).Obj()
 		var imvals [3]llvm.Value
 		imvals[0] = tm.globalStringPtr(method.Name())
-		imvals[1] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+		if !method.Exported() && method.Pkg() != nil {
+			imvals[1] = tm.globalStringPtr(method.Pkg().Path())
+		} else {
+			imvals[1] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+		}
 		imvals[2] = tm.getTypeDescriptorPointer(method.Type())
 
 		imethods[index] = llvm.ConstNamedStruct(tm.imethodType, imvals[:])
@@ -1015,86 +1030,74 @@ func (tm *TypeMap) makeChanType(t types.Type, c *types.Chan) llvm.Value {
 	return llvm.ConstNamedStruct(tm.chanTypeType, vals[:])
 }
 
-// p != nil iff we're generatig the uncommonType for a pointer type.
-func (tm *TypeMap) uncommonType(n *types.Named, p *types.Pointer) llvm.Value {
-	uncommonTypeInit := llvm.ConstNull(tm.runtime.uncommonType.llvm)
-	namePtr := tm.globalStringPtr(n.Obj().Name())
-	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, namePtr, []uint32{0})
-	var path string
-	if pkg := n.Obj().Pkg(); pkg != nil {
-		path = pkg.Path()
-	}
-	pkgpathPtr := tm.globalStringPtr(path)
-	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, pkgpathPtr, []uint32{1})
-
-	// If we're dealing with an interface, stop now;
-	// we store interface methods on the interface
-	// type.
-	if _, ok := n.Underlying().(*types.Interface); ok {
-		return uncommonTypeInit
+func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
+	nt, _ := t.(*types.Named)
+	var mset types.MethodSet
+	// We store interface methods on the interface type.
+	if _, ok := t.Underlying().(*types.Interface); !ok {
+		mset = *tm.MethodSet(t)
 	}
 
-	var methodset, pmethodset *types.MethodSet
-	if p != nil {
-		methodset = tm.MethodSet(p)
-	} else {
-		methodset = tm.MethodSet(n)
+	if nt == nil && mset.Len() == 0 {
+		return llvm.ConstPointerNull(llvm.PointerType(tm.uncommonTypeType, 0))
+	}
+
+	var vals [3]llvm.Value
+
+	nullStringPtr := llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+	vals[0] = nullStringPtr
+	vals[1] = nullStringPtr
+
+	if nt != nil {
+		vals[0] = tm.globalStringPtr(nt.Obj().Name())
+		if pkg := nt.Obj().Pkg(); pkg != nil {
+			vals[1] = tm.globalStringPtr(pkg.Path())
+		}
 	}
 
 	// Store methods. All methods must be stored, not only exported ones;
 	// this is to allow satisfying of interfaces with non-exported methods.
-	methods := make([]llvm.Value, methodset.Len())
+	methods := make([]llvm.Value, mset.Len())
 	for i := range methods {
-		sel := methodset.At(i)
+		var mvals [5]llvm.Value
+
+		sel := mset.At(i)
 		mname := sel.Obj().Name()
 		mfunc := tm.methodResolver.ResolveMethod(sel)
 		ftyp := mfunc.Type().(*types.Signature)
 
-		method := llvm.ConstNull(tm.runtime.method.llvm)
-		name := tm.globalStringPtr(mname)
-		name = llvm.ConstBitCast(name, tm.runtime.method.llvm.StructElementTypes()[0])
 		// name
-		method = llvm.ConstInsertValue(method, name, []uint32{0})
+		mvals[0] = tm.globalStringPtr(mname)
+
 		// pkgPath
-		method = llvm.ConstInsertValue(method, pkgpathPtr, []uint32{1})
+		mvals[1] = nullStringPtr
+		if pkg := sel.Obj().Pkg(); pkg != nil && !sel.Obj().Exported() {
+			mvals[1] = tm.globalStringPtr(pkg.Path())
+		}
+
 		// mtyp (method type, no receiver)
-		{
-			ftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
-			mtyp := tm.ToRuntime(ftyp)
-			method = llvm.ConstInsertValue(method, mtyp, []uint32{2})
-		}
+		mftyp := types.NewSignature(nil, nil, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
+		mvals[2] = tm.getTypeDescriptorPointer(mftyp)
+
 		// typ (function type, with receiver)
-		typ := tm.ToRuntime(ftyp)
-		method = llvm.ConstInsertValue(method, typ, []uint32{3})
+		recvparam := types.NewParam(0, nil, "", t)
+		rftyp := types.NewSignature(nil, recvparam, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
+		mvals[3] = tm.getTypeDescriptorPointer(rftyp)
 
-		// tfn (standard method/function pointer for plain method calls)
-		tfn := llvm.ConstPtrToInt(mfunc.LLVMValue(), tm.target.IntPtrType())
+		// function
+		mvals[4] = mfunc.LLVMValue()
 
-		// ifn (single-word receiver function pointer for interface calls)
-		ifn := tfn
-		if p == nil {
-			if tm.Sizeof(n) > int64(tm.target.PointerSize()) {
-				if pmethodset == nil {
-					pmethodset = tm.MethodSet(types.NewPointer(n))
-				}
-				pmfunc := tm.methodResolver.ResolveMethod(pmethodset.Lookup(sel.Obj().Pkg(), mname))
-				ifn = llvm.ConstPtrToInt(pmfunc.LLVMValue(), tm.target.IntPtrType())
-			} else if _, ok := n.Underlying().(*types.Pointer); !ok {
-				// Create a wrapper function that takes an *int8,
-				// and coerces to the receiver type.
-				ifn = tm.interfaceFuncWrapper(mfunc.LLVMValue())
-				ifn = llvm.ConstPtrToInt(ifn, tm.target.IntPtrType())
-			}
-		}
-
-		method = llvm.ConstInsertValue(method, ifn, []uint32{4})
-		method = llvm.ConstInsertValue(method, tfn, []uint32{5})
-		methods[i] = method
+		methods[i] = llvm.ConstNamedStruct(tm.methodType, mvals[:])
 	}
-	methodsSliceType := tm.runtime.uncommonType.llvm.StructElementTypes()[2]
-	methodsSlice := tm.makeSlice(methods, methodsSliceType)
-	uncommonTypeInit = llvm.ConstInsertValue(uncommonTypeInit, methodsSlice, []uint32{2})
-	return uncommonTypeInit
+
+	vals[2] = tm.makeSlice(methods, tm.methodSliceType)
+
+	uncommonType := llvm.ConstNamedStruct(tm.uncommonTypeType, vals[:])
+
+	uncommonTypePtr := llvm.AddGlobal(tm.module, tm.uncommonTypeType, "")
+	uncommonTypePtr.SetInitializer(uncommonType)
+	uncommonTypePtr.SetLinkage(llvm.InternalLinkage)
+	return uncommonTypePtr
 }
 
 /*
