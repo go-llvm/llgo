@@ -206,8 +206,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
 
-	obj := f.Object()
-	isMethod := obj != nil && obj.Type().(*types.Signature).Recv() != nil
+	isMethod := f.Signature.Recv() != nil
 
 	// Map parameter positions to indices. We use this
 	// when processing locals to map back to parameters
