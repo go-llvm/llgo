@@ -88,8 +88,8 @@ func (fr *frame) getInterfaceTypeDescriptor(v *LLVMValue) llvm.Value {
 	if isempty {
 		return itab
 	} else {
-		itabnull := fr.builder.CreateIsNull(itab, "")
-		return fr.loadOrNull(itabnull, itab, types.Typ[types.UnsafePointer]).LLVMValue()
+		itabnonnull := fr.builder.CreateIsNotNull(itab, "")
+		return fr.loadOrNull(itabnonnull, itab, types.Typ[types.UnsafePointer]).LLVMValue()
 	}
 }
 
