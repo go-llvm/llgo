@@ -581,7 +581,11 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 func (tm *llvmTypeMap) getSignatureInfo(sig *types.Signature) functionTypeInfo {
 	var args, results []types.Type
 	if sig.Recv() != nil {
-		args = []types.Type { sig.Recv().Type() }
+		recvtype := sig.Recv().Type()
+		if _, ok := recvtype.Underlying().(*types.Pointer); !ok && recvtype != types.Typ[types.UnsafePointer] {
+			recvtype = types.NewPointer(recvtype)
+		}
+		args = []types.Type { recvtype }
 	}
 
 	for i := 0; i != sig.Params().Len(); i++ {

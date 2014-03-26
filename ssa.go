@@ -206,6 +206,9 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
 
+	obj := f.Object()
+	isMethod := obj != nil && obj.Type().(*types.Signature).Recv() != nil
+
 	// Map parameter positions to indices. We use this
 	// when processing locals to map back to parameters
 	// when generating debug metadata.
@@ -213,6 +216,12 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	for i, param := range f.Params {
 		paramPos[param.Pos()] = i + paramOffset
 		llparam := fti.argInfos[i].decode(llvm.GlobalContext(), fr.builder, fr.builder)
+		if isMethod && i == 0 {
+			if _, ok := param.Type().Underlying().(*types.Pointer); !ok {
+				llparam = fr.builder.CreateBitCast(llparam, llvm.PointerType(fr.types.ToLLVM(param.Type()), 0), "")
+				llparam = fr.builder.CreateLoad(llparam, "")
+			}
+		}
 		fr.env[param] = fr.NewValue(llparam, param.Type())
 	}
 
@@ -780,6 +789,13 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
 		args = append([]*LLVMValue{recv}, args...)
 	} else {
 		fn = fr.value(call.Value)
+		if recv := call.Signature().Recv(); recv != nil {
+			if _, ok := recv.Type().Underlying().(*types.Pointer); !ok {
+				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].LLVMValue().Type(), "")
+				fr.builder.CreateStore(args[0].LLVMValue(), recvalloca)
+				args[0] = fr.NewValue(recvalloca, types.NewPointer(args[0].Type()))
+			}
+		}
 	}
 	return fr.createCall(fn, args)
 }
