@@ -75,15 +75,9 @@ func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 		llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
 	}
 	value := llvm.Undef(fr.types.ToLLVM(iface))
-	rtype := fr.types.ToRuntime(v.Type())
-	rtype = fr.builder.CreateBitCast(rtype, llvm.PointerType(llvm.Int8Type(), 0), "")
-	value = fr.builder.CreateInsertValue(value, rtype, 0, "")
+	itab := fr.types.getItabPointer(v.Type(), iface.Underlying().(*types.Interface))
+	value = fr.builder.CreateInsertValue(value, itab, 0, "")
 	value = fr.builder.CreateInsertValue(value, llv, 1, "")
-	if iface.Underlying().(*types.Interface).NumMethods() > 0 {
-		result := fr.NewValue(value, types.NewInterface(nil, nil))
-		result, _ = result.convertE2I(iface)
-		return result
-	}
 	return fr.NewValue(value, iface)
 }
 

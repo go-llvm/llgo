@@ -36,6 +36,8 @@ type typeDescInfo struct {
 	global        llvm.Value
 	commonTypePtr llvm.Value
 	mapDescPtr    llvm.Value
+
+	interfaceMethodTables typeutil.Map
 }
 
 type TypeMap struct {
@@ -473,6 +475,13 @@ func (ctx *manglerContext) mangleMapDescriptorName(t types.Type, b *bytes.Buffer
 	ctx.mangleType(t, b)
 }
 
+func (ctx *manglerContext) mangleImtName(srctype types.Type, targettype *types.Interface, b *bytes.Buffer) {
+	b.WriteString("__go_imt_")
+	ctx.mangleType(targettype, b)
+	b.WriteString("__")
+	ctx.mangleType(srctype, b)
+}
+
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	switch t.Underlying().(type) {
 	case *types.Basic:
@@ -642,6 +651,47 @@ func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
 
 func (tm *TypeMap) getMapDescriptorPointer(t types.Type) llvm.Value {
 	return tm.getTypeDescInfo(t).mapDescPtr
+}
+
+func (tm *TypeMap) getItabPointer(srctype types.Type, targettype *types.Interface) llvm.Value {
+	if targettype.NumMethods() == 0 {
+		return tm.ToRuntime(srctype)
+	} else {
+		return tm.getImtPointer(srctype, targettype)
+	}
+}
+
+func (tm *TypeMap) getImtPointer(srctype types.Type, targettype *types.Interface) llvm.Value {
+	tdi := tm.getTypeDescInfo(srctype)
+
+	if ptr, ok := tdi.interfaceMethodTables.At(targettype).(llvm.Value); ok {
+		return ptr
+	}
+
+	srcms := tm.MethodSet(srctype)
+	targetms := tm.MethodSet(targettype)
+
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+
+	elems := make([]llvm.Value, targetms.Len()+1)
+	elems[0] = tm.ToRuntime(srctype)
+	for i := 0; i != targetms.Len(); i++ {
+		targetm := targetms.At(i)
+		srcm := srcms.Lookup(targetm.Obj().Pkg(), targetm.Obj().Name())
+
+		elems[i+1] = tm.methodResolver.ResolveMethod(srcm).LLVMValue()
+	}
+	imtinit := llvm.ConstArray(i8ptr, elems)
+
+	var b bytes.Buffer
+	tm.mc.mangleImtName(srctype, targettype, &b)
+	imt := llvm.AddGlobal(tm.module, imtinit.Type(), b.String())
+	imt.SetInitializer(imtinit)
+	imt.SetLinkage(llvm.LinkOnceODRLinkage)
+
+	imtptr := llvm.ConstBitCast(imt, i8ptr)
+	tdi.interfaceMethodTables.Set(targettype, imtptr)
+	return imtptr
 }
 
 const (
