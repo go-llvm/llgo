@@ -59,34 +59,76 @@ func (fr *frame) mapDelete(m, k *LLVMValue) {
 }
 
 // mapIterInit creates a map iterator
-func (c *compiler) mapIterInit(m *LLVMValue) *LLVMValue {
-	// TODO allocate iterator on stack at usage site
-	f := c.runtime.mapiterinit.LLVMValue()
-	dyntyp := c.types.ToRuntime(m.Type())
-	iter := c.builder.CreateCall(f, []llvm.Value{
-		c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), ""),
-		c.builder.CreatePtrToInt(m.LLVMValue(), c.target.IntPtrType(), ""),
-	}, "")
-	return c.NewValue(iter, m.Type())
+func (fr *frame) mapIterInit(m *LLVMValue) []*LLVMValue {
+	// We represent an iterator as a tuple (map, *bool). The second element
+	// controls whether the code we generate for "next" (below) calls the
+	// runtime function for the first or the next element. We let the
+	// optimizer reorganize this into something more sensible.
+	isinit := fr.allocaBuilder.CreateAlloca(llvm.Int1Type(), "")
+	fr.builder.CreateStore(llvm.ConstNull(llvm.Int1Type()), isinit)
+
+	return []*LLVMValue{m, fr.NewValue(isinit, types.NewPointer(types.Typ[types.Bool]))}
 }
 
 // mapIterNext advances the iterator, and returns the tuple (ok, k, v).
-func (c *compiler) mapIterNext(iter *LLVMValue) *LLVMValue {
-	maptyp := iter.Type().Underlying().(*types.Map)
+func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
+	maptyp := iter[0].Type().Underlying().(*types.Map)
 	ktyp := maptyp.Key()
+	klltyp := fr.types.ToLLVM(ktyp)
 	vtyp := maptyp.Elem()
-	lliter := iter.LLVMValue()
-	mapiternext := c.runtime.mapiternext.LLVMValue()
-	typ := tupleType(types.Typ[types.Bool], ktyp, vtyp)
-	// allocate space for the key and value on the stack, and pass
-	// pointers into maliternext.
-	stackptr := c.stacksave()
-	tuple := c.builder.CreateAlloca(c.types.ToLLVM(typ), "")
-	pk := c.builder.CreatePtrToInt(c.builder.CreateStructGEP(tuple, 1, ""), c.target.IntPtrType(), "")
-	pv := c.builder.CreatePtrToInt(c.builder.CreateStructGEP(tuple, 2, ""), c.target.IntPtrType(), "")
-	ok := c.builder.CreateCall(mapiternext, []llvm.Value{lliter, pk, pv}, "")
-	c.builder.CreateStore(ok, c.builder.CreateStructGEP(tuple, 0, ""))
-	tuple = c.builder.CreateLoad(tuple, "")
-	c.stackrestore(stackptr)
-	return c.NewValue(tuple, typ)
+	vlltyp := fr.types.ToLLVM(vtyp)
+
+	m, isinitptr := iter[0], iter[1]
+
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	mapiterbufty := llvm.ArrayType(i8ptr, 4)
+	mapiterbuf := fr.allocaBuilder.CreateAlloca(mapiterbufty, "")
+	mapiterbufelem0ptr := fr.builder.CreateStructGEP(mapiterbuf, 0, "")
+
+	keybuf := fr.allocaBuilder.CreateAlloca(klltyp, "")
+	keyptr := fr.builder.CreateBitCast(keybuf, i8ptr, "")
+	valbuf := fr.allocaBuilder.CreateAlloca(vlltyp, "")
+	valptr := fr.builder.CreateBitCast(valbuf, i8ptr, "")
+
+	isinit := fr.builder.CreateLoad(isinitptr.LLVMValue(), "")
+
+	initbb := llvm.AddBasicBlock(fr.function, "")
+	nextbb := llvm.AddBasicBlock(fr.function, "")
+	contbb := llvm.AddBasicBlock(fr.function, "")
+
+	fr.builder.CreateCondBr(isinit, nextbb, initbb)
+
+	fr.builder.SetInsertPointAtEnd(initbb)
+	fr.builder.CreateStore(llvm.ConstAllOnes(llvm.Int1Type()), isinitptr.LLVMValue())
+	fr.runtime.mapiterinit.call(fr, m.LLVMValue(), mapiterbufelem0ptr)
+	fr.builder.CreateBr(contbb)
+
+	fr.builder.SetInsertPointAtEnd(nextbb)
+	fr.runtime.mapiternext.call(fr, mapiterbufelem0ptr)
+	fr.builder.CreateBr(contbb)
+
+	fr.builder.SetInsertPointAtEnd(contbb)
+	mapiterbufelem0 := fr.builder.CreateLoad(mapiterbufelem0ptr, "")
+	okbit := fr.builder.CreateIsNotNull(mapiterbufelem0, "")
+	ok := fr.builder.CreateZExt(okbit, llvm.Int8Type(), "")
+
+	loadbb := llvm.AddBasicBlock(fr.function, "")
+	cont2bb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.CreateCondBr(okbit, loadbb, cont2bb)
+
+	fr.builder.SetInsertPointAtEnd(loadbb)
+	fr.runtime.mapiter2.call(fr, mapiterbufelem0ptr, keyptr, valptr)
+	loadedkey := fr.builder.CreateLoad(keybuf, "")
+	loadedval := fr.builder.CreateLoad(valbuf, "")
+	fr.builder.CreateBr(cont2bb)
+
+	fr.builder.SetInsertPointAtEnd(cont2bb)
+	k := fr.builder.CreatePHI(klltyp, "")
+	k.AddIncoming([]llvm.Value{llvm.ConstNull(klltyp), loadedkey},
+	              []llvm.BasicBlock{contbb, loadbb})
+	v := fr.builder.CreatePHI(vlltyp, "")
+	v.AddIncoming([]llvm.Value{llvm.ConstNull(vlltyp), loadedval},
+	              []llvm.BasicBlock{contbb, loadbb})
+
+	return []*LLVMValue{fr.NewValue(ok, types.Typ[types.Bool]), fr.NewValue(k, ktyp), fr.NewValue(v, vtyp)}
 }
