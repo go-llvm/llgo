@@ -44,48 +44,11 @@ func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
 // runtimeInterface is a struct containing references to
 // runtime types and intrinsic function declarations.
 type runtimeInterface struct {
-	// runtime types
-	eface,
-	rtype,
-	uncommonType,
-	arrayType,
-	chanType,
-	funcType,
-	iface,
-	imethod,
-	interfaceType,
-	itab,
-	mapiter,
-	mapType,
-	method,
-	ptrType,
-	sliceType,
-	structField,
-	structType,
-	defers runtimeType
-
 	// intrinsics
-	chanclose,
 	chanrecv,
 	chansend,
-	convertE2I,
-	convertE2V,
-	mustConvertE2I,
-	mustConvertE2V,
-	eqtyp,
-	initdefers,
-	main,
-	printfloat,
-	makemap,
 	makechan,
-	malloc,
-	mapaccess,
-	maplookup,
-	memequal,
-	panic_,
-	pushdefer,
 	recover_,
-	rundefers,
 	chancap,
 	chanlen,
 	runestostr,
@@ -97,15 +60,10 @@ type runtimeInterface struct {
 	selectsize,
 	sliceappend,
 	slicecopy,
-	streqalg,
 	stringslice,
 	strnext,
 	strrune,
-	strtorunes,
-	f32eqalg,
-	f64eqalg,
-	c64eqalg,
-	c128eqalg *LLVMValue
+	strtorunes *LLVMValue
 
 	// LLVM intrinsics
 	memcpy,
@@ -149,77 +107,25 @@ type runtimeInterface struct {
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
 	var ri runtimeInterface
-	runtimeTypes := map[string]*runtimeType{
-		"eface":         &ri.eface,
-		"rtype":         &ri.rtype,
-		"uncommonType":  &ri.uncommonType,
-		"arrayType":     &ri.arrayType,
-		"chanType":      &ri.chanType,
-		"funcType":      &ri.funcType,
-		"iface":         &ri.iface,
-		"imethod":       &ri.imethod,
-		"interfaceType": &ri.interfaceType,
-		"itab":          &ri.itab,
-		"mapiter":       &ri.mapiter,
-		"mapType":       &ri.mapType,
-		"method":        &ri.method,
-		"ptrType":       &ri.ptrType,
-		"sliceType":     &ri.sliceType,
-		"structField":   &ri.structField,
-		"structType":    &ri.structType,
-		"defers":        &ri.defers,
-	}
-	for name, field := range runtimeTypes {
-		obj := pkg.Scope().Lookup(name)
-		if obj == nil {
-			return nil, fmt.Errorf("no runtime type with name %s", name)
-		}
-		field.Type = obj.Type()
-		field.llvm = tm.ToLLVM(field.Type)
-	}
-
 	intrinsics := map[string]**LLVMValue{
-		"chanclose":         &ri.chanclose,
-		"chanrecv":          &ri.chanrecv,
-		"chansend":          &ri.chansend,
-		"convertE2I":        &ri.convertE2I,
-		"convertE2V":        &ri.convertE2V,
-		"mustConvertE2I":    &ri.mustConvertE2I,
-		"mustConvertE2V":    &ri.mustConvertE2V,
-		"eqtyp":             &ri.eqtyp,
-		"initdefers":        &ri.initdefers,
-		"main":              &ri.main,
-		"printfloat":        &ri.printfloat,
-		"makechan":          &ri.makechan,
-		"makemap":           &ri.makemap,
-		"malloc":            &ri.malloc,
-		"mapaccess":         &ri.mapaccess,
-		"maplookup":         &ri.maplookup,
-		"memequal":          &ri.memequal,
-		"panic_":            &ri.panic_,
-		"pushdefer":         &ri.pushdefer,
-		"recover_":          &ri.recover_,
-		"rundefers":         &ri.rundefers,
-		"chancap":           &ri.chancap,
-		"chanlen":           &ri.chanlen,
-		"selectdefault":     &ri.selectdefault,
-		"selectgo":          &ri.selectgo,
-		"selectinit":        &ri.selectinit,
-		"selectrecv":        &ri.selectrecv,
-		"selectsend":        &ri.selectsend,
-		"selectsize":        &ri.selectsize,
-		"sliceappend":       &ri.sliceappend,
-		"slicecopy":         &ri.slicecopy,
-		"stringslice":       &ri.stringslice,
-		"strnext":           &ri.strnext,
-		"strrune":           &ri.strrune,
-		"strtorunes":        &ri.strtorunes,
-		"runestostr":        &ri.runestostr,
-		"streqalg":          &ri.streqalg,
-		"f32eqalg":          &ri.f32eqalg,
-		"f64eqalg":          &ri.f64eqalg,
-		"c64eqalg":          &ri.c64eqalg,
-		"c128eqalg":         &ri.c128eqalg,
+		"chanrecv":      &ri.chanrecv,
+		"chansend":      &ri.chansend,
+		"makechan":      &ri.makechan,
+		"chancap":       &ri.chancap,
+		"chanlen":       &ri.chanlen,
+		"selectdefault": &ri.selectdefault,
+		"selectgo":      &ri.selectgo,
+		"selectinit":    &ri.selectinit,
+		"selectrecv":    &ri.selectrecv,
+		"selectsend":    &ri.selectsend,
+		"selectsize":    &ri.selectsize,
+		"sliceappend":   &ri.sliceappend,
+		"slicecopy":     &ri.slicecopy,
+		"stringslice":   &ri.stringslice,
+		"strnext":       &ri.strnext,
+		"strrune":       &ri.strrune,
+		"strtorunes":    &ri.strtorunes,
+		"runestostr":    &ri.runestostr,
 	}
 	for name, field := range intrinsics {
 		obj := pkg.Scope().Lookup(name)

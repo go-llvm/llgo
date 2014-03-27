@@ -24,7 +24,7 @@ type MethodResolver interface {
 // to llgo's corresponding LLVM type representation.
 type llvmTypeMap struct {
 	*types.StdSizes
-	ctx     llvm.Context
+	ctx        llvm.Context
 	target     llvm.TargetData
 	inttype    llvm.Type
 	stringType llvm.Type
@@ -49,11 +49,10 @@ type TypeMap struct {
 	types          typeutil.Map
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
-	alg            *algorithmMap
 	types.MethodSetCache
 
 	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
-	mapDescType llvm.Type
+	mapDescType                                                                                                                             llvm.Type
 
 	methodType, imethodType llvm.Type
 
@@ -61,7 +60,7 @@ type TypeMap struct {
 
 	hashFnType, equalFnType llvm.Type
 
-	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity llvm.Value
+	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity       llvm.Value
 	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity llvm.Value
 }
 
@@ -75,7 +74,7 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 	stringType := llvm.StructType(elements, false)
 
 	return &llvmTypeMap{
-		ctx:        ctx,
+		ctx: ctx,
 		StdSizes: &types.StdSizes{
 			WordSize: int64(target.PointerSize()),
 			MaxAlign: 8,
@@ -88,12 +87,11 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 
 func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *runtimeInterface, mr MethodResolver) *TypeMap {
 	tm := &TypeMap{
-		llvmTypeMap: llvmtm,
-		module:      module,
-		pkgpath:     pkg.Object.Path(),
-		runtime:     r,
+		llvmTypeMap:    llvmtm,
+		module:         module,
+		pkgpath:        pkg.Object.Path(),
+		runtime:        r,
 		methodResolver: mr,
-		alg:            newAlgorithmMap(module, r, llvmtm.target),
 	}
 
 	tm.mc.init(pkg.Prog, &tm.MethodSetCache)
