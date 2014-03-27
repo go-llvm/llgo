@@ -8,7 +8,7 @@ import (
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 	"go/ast"
 	"go/token"
 )

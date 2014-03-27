@@ -1,7 +1,7 @@
 package llgo
 
 import (
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 	"code.google.com/p/go.tools/go/types"
 )
 
