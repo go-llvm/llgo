@@ -59,8 +59,7 @@ type runtimeInterface struct {
 	sliceappend,
 	slicecopy,
 	stringslice,
-	strnext,
-	strrune *LLVMValue
+	strnext *LLVMValue
 
 	// LLVM intrinsics
 	memcpy,
@@ -101,6 +100,7 @@ type runtimeInterface struct {
 	stringPlus,
 	stringToIntArray,
 	intArrayToString,
+	intToString,
 	typeDescriptorsEqual runtimeFnInfo
 }
 
@@ -122,7 +122,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"slicecopy":     &ri.slicecopy,
 		"stringslice":   &ri.stringslice,
 		"strnext":       &ri.strnext,
-		"strrune":       &ri.strrune,
 	}
 	for name, field := range intrinsics {
 		obj := pkg.Scope().Lookup(name)
@@ -151,6 +150,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "runtime.ifaceE2I2", rfi: &ri.ifaceE2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
 		{name: "runtime.ifaceI2I2", rfi: &ri.ifaceI2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
 		{name: "__go_int_array_to_string", rfi: &ri.intArrayToString, args: []types.Type{UnsafePointer, Int}, results: []types.Type{String}},
+		{name: "__go_int_to_string", rfi: &ri.intToString, args: []types.Type{Int}, results: []types.Type{String}},
 		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_new_map", rfi: &ri.newMap, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},

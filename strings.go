@@ -77,12 +77,9 @@ func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
 }
 
 func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
-	c := v.compiler
-	strrune := c.runtime.strrune.LLVMValue()
-	args := []llvm.Value{fr.convert(v, types.Typ[types.Int64]).LLVMValue()}
-	result := c.builder.CreateCall(strrune, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
-	return c.NewValue(result, types.Typ[types.String])
+	v = fr.convert(v, types.Typ[types.Int]).(*LLVMValue)
+	result := fr.runtime.intToString.call(fr, v.LLVMValue())
+	return fr.NewValue(result[0], types.Typ[types.String])
 }
 
 func (fr *frame) stringToRuneSlice(v *LLVMValue) *LLVMValue {
