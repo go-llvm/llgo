@@ -56,37 +56,24 @@ func (c *compiler) stringIndex(s, i *LLVMValue) *LLVMValue {
 	return c.NewValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
 }
 
-// stringIterNext advances the iterator, and returns the tuple (ok, k, v).
-func (c *compiler) stringIterNext(str *LLVMValue, preds []llvm.BasicBlock) *LLVMValue {
-	// While Range/Next expresses a mutating operation, we represent them using
-	// a Phi node where the first incoming branch (before the loop), and all
-	// others take the previous value plus one.
-	//
-	// See ssa.go for comments on (and assertions of) our assumptions.
-	index := c.builder.CreatePHI(c.types.inttype, "index")
-	strnext := c.runtime.strnext.LLVMValue()
-	args := []llvm.Value{
-		c.coerceString(str.LLVMValue(), strnext.Type().ElementType().ParamTypes()[0]),
-		index,
-	}
-	result := c.builder.CreateCall(strnext, args, "")
-	nextindex := c.builder.CreateExtractValue(result, 0, "")
-	runeval := c.builder.CreateExtractValue(result, 1, "")
-	values := make([]llvm.Value, len(preds))
-	values[0] = llvm.ConstNull(index.Type())
-	for i, _ := range preds[1:] {
-		values[i+1] = nextindex
-	}
-	index.AddIncoming(values, preds)
+func (fr *frame) stringIterInit(str *LLVMValue) []*LLVMValue {
+	indexptr := fr.allocaBuilder.CreateAlloca(fr.types.inttype, "")
+	fr.builder.CreateStore(llvm.ConstNull(fr.types.inttype), indexptr)
+	return []*LLVMValue{str, fr.NewValue(indexptr, types.Typ[types.Int])}
+}
 
-	// Create an (ok, index, rune) tuple.
-	ok := c.builder.CreateIsNotNull(nextindex, "")
-	typ := tupleType(types.Typ[types.Bool], types.Typ[types.Int], types.Typ[types.Rune])
-	tuple := llvm.Undef(c.types.ToLLVM(typ))
-	tuple = c.builder.CreateInsertValue(tuple, ok, 0, "")
-	tuple = c.builder.CreateInsertValue(tuple, index, 1, "")
-	tuple = c.builder.CreateInsertValue(tuple, runeval, 2, "")
-	return c.NewValue(tuple, typ)
+// stringIterNext advances the iterator, and returns the tuple (ok, k, v).
+func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
+	str, indexptr := iter[0], iter[1]
+	k := fr.builder.CreateLoad(indexptr.LLVMValue(), "")
+
+	result := fr.runtime.stringiter2.call(fr, str.LLVMValue(), k)
+	fr.builder.CreateStore(result[0], indexptr.LLVMValue())
+	ok := fr.builder.CreateIsNotNull(result[0], "")
+	ok = fr.builder.CreateZExt(ok, llvm.Int8Type(), "")
+	v := result[1]
+
+	return []*LLVMValue{fr.NewValue(ok, types.Typ[types.Bool]), fr.NewValue(k, types.Typ[types.Int]), fr.NewValue(v, types.Typ[types.Rune])}
 }
 
 func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {

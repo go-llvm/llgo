@@ -597,7 +597,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Next:
 		iter := fr.tuples[instr.Iter]
 		if instr.IsString {
-//			fr.tuples[instr] = fr.stringIterNext(iter)
+			fr.tuples[instr] = fr.stringIterNext(iter)
 		} else {
 			fr.tuples[instr] = fr.mapIterNext(iter)
 		}
@@ -619,7 +619,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		case *types.Map:
 			fr.tuples[instr] = fr.mapIterInit(x)
 		case *types.Basic: // string
-//			fr.tuples[instr] = fr.stringIterInit(x)
+			fr.tuples[instr] = fr.stringIterInit(x)
 		default:
 			panic(fmt.Sprintf("unhandled range for type %T", x.Type()))
 		}

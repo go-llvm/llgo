@@ -142,6 +142,7 @@ type runtimeInterface struct {
 	printUint64,
 	runtimeError,
 	strcmp,
+	stringiter2,
 	stringPlus,
 	typeDescriptorsEqual runtimeFnInfo
 }
@@ -266,6 +267,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
 		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
 		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
+		{name: "runtime.stringiter2", rfi: &ri.stringiter2, args: []types.Type{types.Typ[types.String], types.Typ[types.Int]}, results: []types.Type{types.Typ[types.Int], types.Typ[types.Rune]}},
 		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
 		{name: "__go_type_descriptors_equal", rfi: &ri.typeDescriptorsEqual, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Bool]}},
 	} {
