@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 // convertE2V converts (type asserts) an interface value to a concrete type.

@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"fmt"
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 	"go/ast"
 	"strings"
 )

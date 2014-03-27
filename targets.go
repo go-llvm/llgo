@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 // PNaClTriple is the LLVM target triple that should be used to compile

@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const llgoPkgRuntime = "github.com/axw/llgo/pkg/runtime"
+const llgoPkgRuntime = "github.com/go-llvm/llgo/pkg/runtime"
 
 func buildRuntimeCgo() error {
 	log.Println(" - generating platform-specific code")

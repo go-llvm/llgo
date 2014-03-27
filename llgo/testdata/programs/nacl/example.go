@@ -5,7 +5,7 @@
 package main
 
 import (
-	"github.com/axw/llgo/pkg/nacl/ppapi"
+	"github.com/go-llvm/llgo/pkg/nacl/ppapi"
 )
 
 var module *ppapi.Module

@@ -1,4 +1,4 @@
-[![Build Status](https://drone.io/github.com/axw/llgo/status.png)](https://drone.io/github.com/axw/llgo/latest)
+[![Build Status](https://drone.io/github.com/go-llvm/llgo/status.png)](https://drone.io/github.com/go-llvm/llgo/latest)
 # llgo
 
 llgo is a [Go](http://golang.org) frontend for [LLVM](http://llvm.org), written in Go.
@@ -9,7 +9,7 @@ llgo is under active development, but is still considered experimental. It is no
 
 To install llgo, use llgo-dist:
 
-    go get github.com/axw/llgo/cmd/llgo-dist
+    go get github.com/go-llvm/llgo/cmd/llgo-dist
     llgo-dist
 
 You should have the latest version of LLVM in your $PATH (3.3 has been confirmed to be compatible). If LLVM is not in $PATH, llgo-dist also has a flag that can specified to point at the LLVM installation: `-llvm-config=<path/to/llvm-config>`.
@@ -30,8 +30,8 @@ The `llgo-build` tool accepts either Go filenames, or package names, just like `
 
 First install llgo using `llgo-dist`, as described above. Then you can run the functional tests like so:
 
-	go test -v github.com/axw/llgo/llgo
+	go test -v github.com/go-llvm/llgo/llgo
 
 You can also run the compiler tests from gc's source tree ($GOROOT/test) by specifying the build tag `go_test`:
 
-	go test -v -tags go_test github.com/axw/llgo/llgo -run StandardTests
+	go test -v -tags go_test github.com/go-llvm/llgo/llgo -run StandardTests

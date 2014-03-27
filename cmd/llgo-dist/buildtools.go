@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const llgoBuildPath = "github.com/axw/llgo/cmd/llgo-build"
+const llgoBuildPath = "github.com/go-llvm/llgo/cmd/llgo-build"
 
 var llgobuildbin string
 

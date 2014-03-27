@@ -2,11 +2,12 @@ package build_test
 
 import (
 	"bytes"
-	"github.com/axw/llgo/build"
 	"io/ioutil"
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"github.com/go-llvm/llgo/build"
 )
 
 func TestLLVMIRReadCloser(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const llgoPkgSyscall = "github.com/axw/llgo/pkg/syscall"
+const llgoPkgSyscall = "github.com/go-llvm/llgo/pkg/syscall"
 
 // pnaclClang is the path to the pnacl-clang script.
 var pnaclClang string

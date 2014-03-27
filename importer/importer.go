@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/axw/llgo/build"
+	"github.com/go-llvm/llgo/build"
 
 	"code.google.com/p/go.tools/go/gcimporter"
 	"code.google.com/p/go.tools/go/importer"

@@ -6,15 +6,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/axw/llgo/build"
 	gobuild "go/build"
 	"log"
 	"os"
 	"strings"
+
+	"github.com/go-llvm/llgo/build"
 )
 
-const gollvmpkgpath = "github.com/axw/gollvm/llvm"
-const llgopkgpath = "github.com/axw/llgo/llgo"
+const llvmpkgpath = "github.com/go-llvm/llvm"
+const llgopkgpath = "github.com/go-llvm/llgo/llgo"
 
 var (
 	// llgobin is the path to the llgo command.
@@ -24,19 +25,19 @@ var (
 func buildLlgo() error {
 	log.Println("Building llgo")
 
-	cmd := command("go", "get", "-d", gollvmpkgpath)
+	cmd := command("go", "get", "-d", llvmpkgpath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", string(output))
 		return err
 	}
-	pkg, err := gobuild.Import(gollvmpkgpath, "", gobuild.FindOnly)
+	pkg, err := gobuild.Import(llvmpkgpath, "", gobuild.FindOnly)
 	if err != nil {
 		return err
 	}
 	if alwaysbuild {
 		if _, err := os.Stat(pkg.PkgObj); err == nil {
-			log.Println("- Rebuilding gollvm")
+			log.Println("- Rebuilding go-llvm/llvm")
 			os.Remove(pkg.PkgObj)
 		}
 	}

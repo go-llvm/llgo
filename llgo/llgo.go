@@ -13,13 +13,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo"
 	"go/scanner"
 	"log"
 	"os"
 	"runtime"
 	"sort"
+
+	"github.com/go-llvm/llgo"
+	"github.com/go-llvm/llvm"
 )
 
 var dump = flag.Bool(

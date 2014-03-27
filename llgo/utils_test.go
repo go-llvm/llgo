@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/axw/gollvm/llvm"
-	"github.com/axw/llgo"
 	"go/build"
 	"io/ioutil"
 	"os"
@@ -15,6 +13,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/go-llvm/llgo"
+	"github.com/go-llvm/llvm"
 )
 
 var (
@@ -68,7 +69,7 @@ func init() {
 
 func getRuntimeFiles() (gofiles []string, llfiles []string, cfiles []string, err error) {
 	var pkg *build.Package
-	pkgpath := "github.com/axw/llgo/pkg/runtime"
+	pkgpath := "github.com/go-llvm/llgo/pkg/runtime"
 	pkg, err = build.Import(pkgpath, "", 0)
 	if err != nil {
 		return

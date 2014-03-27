@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"code.google.com/p/go.tools/go/types"
+	"github.com/go-llvm/llvm"
 )
 
 func (fr *frame) printValues(println_ bool, values ...*LLVMValue) {

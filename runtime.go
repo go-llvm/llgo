@@ -14,7 +14,7 @@ import (
 
 	"code.google.com/p/go.tools/go/types"
 
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 type FuncResolver interface {
@@ -288,7 +288,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 // importRuntime locates the the runtime package and parses its files
 // to *ast.Files. This is used to generate runtime type structures.
 func parseRuntime(buildctx *build.Context, fset *token.FileSet) ([]*ast.File, error) {
-	buildpkg, err := buildctx.Import("github.com/axw/llgo/pkg/runtime", "", 0)
+	buildpkg, err := buildctx.Import("github.com/go-llvm/llgo/pkg/runtime", "", 0)
 	if err != nil {
 		return nil, err
 	}

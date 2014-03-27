@@ -6,7 +6,7 @@ package llgo
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 // interfaceMethod returns a function and receiver pointer for the specified

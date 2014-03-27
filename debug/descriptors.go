@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/axw/gollvm/llvm"
+	"github.com/go-llvm/llvm"
 )
 
 type DebugInfo struct {
