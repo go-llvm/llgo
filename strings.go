@@ -85,23 +85,16 @@ func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
 	return c.NewValue(result, types.Typ[types.String])
 }
 
-func (v *LLVMValue) stringToRuneSlice() *LLVMValue {
-	c := v.compiler
-	strtorunes := c.runtime.strtorunes.LLVMValue()
-	_string := strtorunes.Type().ElementType().ParamTypes()[0]
-	args := []llvm.Value{c.coerceString(v.LLVMValue(), _string)}
-	result := c.builder.CreateCall(strtorunes, args, "")
+func (fr *frame) stringToRuneSlice(v *LLVMValue) *LLVMValue {
+	result := fr.runtime.stringToIntArray.call(fr, v.LLVMValue())
 	runeslice := types.NewSlice(types.Typ[types.Rune])
-	result = c.coerceSlice(result, c.types.ToLLVM(runeslice))
-	return c.NewValue(result, runeslice)
+	return fr.NewValue(result[0], runeslice)
 }
 
-func (v *LLVMValue) runeSliceToString() *LLVMValue {
-	c := v.compiler
-	runestostr := c.runtime.runestostr.LLVMValue()
-	i8slice := runestostr.Type().ElementType().ParamTypes()[0]
-	args := []llvm.Value{c.coerceSlice(v.LLVMValue(), i8slice)}
-	result := c.builder.CreateCall(runestostr, args, "")
-	result = c.coerceString(result, c.types.ToLLVM(types.Typ[types.String]))
-	return c.NewValue(result, types.Typ[types.String])
+func (fr *frame) runeSliceToString(v *LLVMValue) *LLVMValue {
+	llv := v.LLVMValue()
+	ptr := fr.builder.CreateExtractValue(llv, 0, "")
+	len := fr.builder.CreateExtractValue(llv, 1, "")
+	result := fr.runtime.intArrayToString.call(fr, ptr, len)
+	return fr.NewValue(result[0], types.Typ[types.String])
 }

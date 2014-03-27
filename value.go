@@ -479,7 +479,7 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
 
 		// string -> []rune
 		if types.Identical(dsttyp, runeslice) {
-			return v.stringToRuneSlice()
+			return fr.stringToRuneSlice(v)
 		}
 	}
 
@@ -502,7 +502,7 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
 
 	// []rune -> string
 	if types.Identical(srctyp, runeslice) && isString(dsttyp) {
-		return v.runeSliceToString()
+		return fr.runeSliceToString(v)
 	}
 
 	// rune -> string
