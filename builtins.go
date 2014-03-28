@@ -9,21 +9,20 @@ import (
 	"github.com/go-llvm/llvm"
 )
 
-func (c *compiler) callCap(arg *LLVMValue) *LLVMValue {
+func (fr *frame) callCap(arg *LLVMValue) *LLVMValue {
 	var v llvm.Value
 	switch typ := arg.Type().Underlying().(type) {
 	case *types.Array:
-		v = llvm.ConstInt(c.llvmtypes.inttype, uint64(typ.Len()), false)
+		v = llvm.ConstInt(fr.llvmtypes.inttype, uint64(typ.Len()), false)
 	case *types.Pointer:
 		atyp := typ.Elem().Underlying().(*types.Array)
-		v = llvm.ConstInt(c.llvmtypes.inttype, uint64(atyp.Len()), false)
+		v = llvm.ConstInt(fr.llvmtypes.inttype, uint64(atyp.Len()), false)
 	case *types.Slice:
-		v = c.builder.CreateExtractValue(arg.LLVMValue(), 2, "")
+		v = fr.builder.CreateExtractValue(arg.LLVMValue(), 2, "")
 	case *types.Chan:
-		f := c.runtime.chancap.LLVMValue()
-		v = c.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
+		v = fr.runtime.chanCap.call(fr, arg.LLVMValue())[0]
 	}
-	return c.NewValue(v, types.Typ[types.Int])
+	return fr.NewValue(v, types.Typ[types.Int])
 }
 
 func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
@@ -43,8 +42,7 @@ func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
 			lenvalue = fr.builder.CreateExtractValue(arg.LLVMValue(), 1, "")
 		}
 	case *types.Chan:
-		f := fr.runtime.chanlen.LLVMValue()
-		lenvalue = fr.builder.CreateCall(f, []llvm.Value{arg.LLVMValue()}, "")
+		lenvalue = fr.runtime.chanLen.call(fr, arg.LLVMValue())[0]
 	}
 	return fr.NewValue(lenvalue, types.Typ[types.Int])
 }
