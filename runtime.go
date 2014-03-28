@@ -47,8 +47,6 @@ type runtimeInterface struct {
 	// intrinsics
 	chanrecv,
 	chansend,
-	chancap,
-	chanlen,
 	selectdefault,
 	selectgo,
 	selectinit,
@@ -62,6 +60,8 @@ type runtimeInterface struct {
 
 	append,
 	assertInterface,
+	chanCap,
+	chanLen,
 	checkInterfaceType,
 	convertInterface,
 	copy,
@@ -108,8 +108,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	intrinsics := map[string]**LLVMValue{
 		"chanrecv":      &ri.chanrecv,
 		"chansend":      &ri.chansend,
-		"chancap":       &ri.chancap,
-		"chanlen":       &ri.chanlen,
 		"selectdefault": &ri.selectdefault,
 		"selectgo":      &ri.selectgo,
 		"selectinit":    &ri.selectinit,
@@ -154,6 +152,18 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 			rfi:  &ri.assertInterface,
 			args: []types.Type{UnsafePointer, UnsafePointer},
 			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_chan_cap",
+			rfi:  &ri.chanCap,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_chan_len",
+			rfi:  &ri.chanLen,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Int},
 		},
 		{
 			name: "__go_check_interface_type",
