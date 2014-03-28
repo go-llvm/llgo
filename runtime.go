@@ -47,7 +47,6 @@ type runtimeInterface struct {
 	// intrinsics
 	chanrecv,
 	chansend,
-	makechan,
 	chancap,
 	chanlen,
 	selectdefault,
@@ -81,6 +80,7 @@ type runtimeInterface struct {
 	mapIndex,
 	mapLen,
 	New,
+	newChannel,
 	newMap,
 	NewNopointers,
 	printBool,
@@ -108,7 +108,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	intrinsics := map[string]**LLVMValue{
 		"chanrecv":      &ri.chanrecv,
 		"chansend":      &ri.chansend,
-		"makechan":      &ri.makechan,
 		"chancap":       &ri.chancap,
 		"chanlen":       &ri.chanlen,
 		"selectdefault": &ri.selectdefault,
@@ -214,12 +213,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 			res:  []types.Type{Int},
 		},
 		{
-			name: "__go_new_map",
-			rfi:  &ri.newMap,
-			args: []types.Type{UnsafePointer, Uintptr},
-			res:  []types.Type{UnsafePointer},
-		},
-		{
 			name: "__go_make_slice2",
 			rfi:  &ri.makeSlice,
 			args: []types.Type{UnsafePointer, Uintptr, Uintptr},
@@ -261,6 +254,18 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 			name: "__go_new",
 			rfi:  &ri.New,
 			args: []types.Type{Uintptr},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_new_channel",
+			rfi:  &ri.newChannel,
+			args: []types.Type{UnsafePointer, Uintptr},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_new_map",
+			rfi:  &ri.newMap,
+			args: []types.Type{UnsafePointer, Uintptr},
 			res:  []types.Type{UnsafePointer},
 		},
 		{
