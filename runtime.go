@@ -57,9 +57,7 @@ type runtimeInterface struct {
 	selectsend,
 	selectsize,
 	sliceappend,
-	slicecopy,
-	stringslice,
-	strnext *LLVMValue
+	slicecopy *LLVMValue
 
 	// LLVM intrinsics
 	memcpy,
@@ -72,7 +70,9 @@ type runtimeInterface struct {
 	Go,
 	ifaceE2I2,
 	ifaceI2I2,
+	intArrayToString,
 	interfaceCompare,
+	intToString,
 	makeSlice,
 	mapdelete,
 	mapiter2,
@@ -98,9 +98,8 @@ type runtimeInterface struct {
 	strcmp,
 	stringiter2,
 	stringPlus,
+	stringSlice,
 	stringToIntArray,
-	intArrayToString,
-	intToString,
 	typeDescriptorsEqual runtimeFnInfo
 }
 
@@ -120,8 +119,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"selectsize":    &ri.selectsize,
 		"sliceappend":   &ri.sliceappend,
 		"slicecopy":     &ri.slicecopy,
-		"stringslice":   &ri.stringslice,
-		"strnext":       &ri.strnext,
 	}
 	for name, field := range intrinsics {
 		obj := pkg.Scope().Lookup(name)
@@ -176,6 +173,7 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
 		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
+		{name: "__go_string_slice", rfi: &ri.stringSlice, args: []types.Type{String, Int, Int}, results: []types.Type{String}},
 		{name: "__go_string_to_int_array", rfi: &ri.stringToIntArray, args: []types.Type{types.Typ[types.String]}, results: []types.Type{intSlice}},
 		{name: "runtime.stringiter2", rfi: &ri.stringiter2, args: []types.Type{types.Typ[types.String], types.Typ[types.Int]}, results: []types.Type{types.Typ[types.Int], types.Typ[types.Rune]}},
 		{name: "__go_type_descriptors_equal", rfi: &ri.typeDescriptorsEqual, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Bool]}},
