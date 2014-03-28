@@ -51,33 +51,27 @@ func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
 
 // callAppend takes two slices of the same type, and yields
 // the result of appending the second to the first.
-func (c *compiler) callAppend(a, b *LLVMValue) *LLVMValue {
-	f := c.runtime.sliceappend.LLVMValue()
-	i8slice := f.Type().ElementType().ReturnType()
-	lla := a.LLVMValue()
-	llaType := lla.Type()
-	runtimeType := c.types.ToRuntime(a.Type())
-	args := []llvm.Value{
-		c.builder.CreatePtrToInt(runtimeType, c.target.IntPtrType(), ""),
-		c.coerceSlice(lla, i8slice),
-		c.coerceSlice(b.LLVMValue(), i8slice),
-	}
-	result := c.builder.CreateCall(f, args, "")
-	return c.NewValue(c.coerceSlice(result, llaType), a.Type())
+func (fr *frame) callAppend(a, b *LLVMValue) *LLVMValue {
+	bptr := fr.builder.CreateExtractValue(b.LLVMValue(), 0, "")
+	blen := fr.builder.CreateExtractValue(b.LLVMValue(), 1, "")
+	elemsizeInt64 := fr.types.Sizeof(a.Type().Underlying().(*types.Slice).Elem())
+	elemsize := llvm.ConstInt(fr.target.IntPtrType(), uint64(elemsizeInt64), false)
+	result := fr.runtime.append.call(fr, a.LLVMValue(), bptr, blen, elemsize)[0]
+	return fr.NewValue(result, a.Type())
 }
 
 // callCopy takes two slices a and b of the same type, and
 // yields the result of calling "copy(a, b)".
-func (c *compiler) callCopy(dest, source *LLVMValue) *LLVMValue {
-	runtimeTyp := c.types.ToRuntime(dest.Type())
-	runtimeTyp = c.builder.CreatePtrToInt(runtimeTyp, c.target.IntPtrType(), "")
-	slicecopy := c.runtime.slicecopy.value
-	i8slice := slicecopy.Type().ElementType().ParamTypes()[1]
-	args := []llvm.Value{
-		runtimeTyp,
-		c.coerceSlice(dest.LLVMValue(), i8slice),
-		c.coerceSlice(source.LLVMValue(), i8slice),
-	}
-	result := c.builder.CreateCall(slicecopy, args, "")
-	return c.NewValue(result, types.Typ[types.Int])
+func (fr *frame) callCopy(dest, source *LLVMValue) *LLVMValue {
+	aptr := fr.builder.CreateExtractValue(dest.LLVMValue(), 0, "")
+	alen := fr.builder.CreateExtractValue(dest.LLVMValue(), 1, "")
+	bptr := fr.builder.CreateExtractValue(source.LLVMValue(), 0, "")
+	blen := fr.builder.CreateExtractValue(source.LLVMValue(), 1, "")
+	aless := fr.builder.CreateICmp(llvm.IntULT, alen, blen, "")
+	minlen := fr.builder.CreateSelect(aless, alen, blen, "")
+	elemsizeInt64 := fr.types.Sizeof(dest.Type().Underlying().(*types.Slice).Elem())
+	elemsize := llvm.ConstInt(fr.types.inttype, uint64(elemsizeInt64), false)
+	bytes := fr.builder.CreateMul(minlen, elemsize, "")
+	fr.runtime.copy.call(fr, aptr, bptr, bytes)
+	return fr.NewValue(minlen, types.Typ[types.Int])
 }
