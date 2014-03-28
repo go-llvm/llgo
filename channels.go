@@ -10,12 +10,10 @@ import (
 )
 
 // makeChan implements make(chantype[, size])
-func (c *compiler) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
-	f := c.runtime.makechan.LLVMValue()
-	dyntyp := c.types.ToRuntime(chantyp)
-	dyntyp = c.builder.CreatePtrToInt(dyntyp, c.target.IntPtrType(), "")
-	ch := c.builder.CreateCall(f, []llvm.Value{dyntyp, size.LLVMValue()}, "")
-	return c.NewValue(ch, chantyp)
+func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
+	dyntyp := fr.types.ToRuntime(chantyp)
+	ch := fr.runtime.newChannel.call(fr, dyntyp, size.LLVMValue())[0]
+	return fr.NewValue(ch, chantyp)
 }
 
 // chanSend implements ch<- x
