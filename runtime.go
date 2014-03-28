@@ -58,8 +58,6 @@ type runtimeInterface struct {
 	selectrecv,
 	selectsend,
 	selectsize,
-	sliceappend,
-	slicecopy,
 	stringslice,
 	strnext,
 	strrune,
@@ -69,9 +67,11 @@ type runtimeInterface struct {
 	memcpy,
 	memset llvm.Value
 
+	append,
 	assertInterface,
 	checkInterfaceType,
 	convertInterface,
+	copy,
 	emptyInterfaceCompare,
 	Go,
 	ifaceE2I2,
@@ -119,8 +119,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"selectrecv":    &ri.selectrecv,
 		"selectsend":    &ri.selectsend,
 		"selectsize":    &ri.selectsize,
-		"sliceappend":   &ri.sliceappend,
-		"slicecopy":     &ri.slicecopy,
 		"stringslice":   &ri.stringslice,
 		"strnext":       &ri.strnext,
 		"strrune":       &ri.strrune,
@@ -137,14 +135,19 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 
 	emptyInterface := types.NewInterface(nil, nil)
 	intSlice := types.NewSlice(types.Typ[types.Int])
+	UnsafePointer := types.Typ[types.UnsafePointer]
+	Uintptr := types.Typ[types.Uintptr]
+
 	for _, rt := range [...]struct {
 		name          string
 		rfi           *runtimeFnInfo
 		args, results []types.Type
 	}{
+		{name: "__go_append", rfi: &ri.append, args: []types.Type{intSlice, UnsafePointer, Uintptr, Uintptr}, results: []types.Type{intSlice}},
 		{name: "__go_assert_interface", rfi: &ri.assertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_check_interface_type", rfi: &ri.checkInterfaceType, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "__go_convert_interface", rfi: &ri.convertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
+		{name: "__go_copy", rfi: &ri.copy, args: []types.Type{UnsafePointer, UnsafePointer, Uintptr}},
 		{name: "__go_empty_interface_compare", rfi: &ri.emptyInterfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "runtime.ifaceE2I2", rfi: &ri.ifaceE2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
