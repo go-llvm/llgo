@@ -108,26 +108,26 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 		fti := u.llvmtypes.getSignatureInfo(f.Signature)
 		llvmFunction = fti.declare(u.module.Module, name)
 		/*
-		llvmType := u.llvmtypes.ToLLVM(f.Signature)
-		llvmType = llvmType.StructElementTypes()[0].ElementType()
-		if len(f.FreeVars) > 0 {
-			// Add an implicit first argument.
-			returnType := llvmType.ReturnType()
-			paramTypes := llvmType.ParamTypes()
-			vararg := llvmType.IsFunctionVarArg()
-			blockElementTypes := make([]llvm.Type, len(f.FreeVars))
-			for i, fv := range f.FreeVars {
-				blockElementTypes[i] = u.llvmtypes.ToLLVM(fv.Type())
+			llvmType := u.llvmtypes.ToLLVM(f.Signature)
+			llvmType = llvmType.StructElementTypes()[0].ElementType()
+			if len(f.FreeVars) > 0 {
+				// Add an implicit first argument.
+				returnType := llvmType.ReturnType()
+				paramTypes := llvmType.ParamTypes()
+				vararg := llvmType.IsFunctionVarArg()
+				blockElementTypes := make([]llvm.Type, len(f.FreeVars))
+				for i, fv := range f.FreeVars {
+					blockElementTypes[i] = u.llvmtypes.ToLLVM(fv.Type())
+				}
+				blockType := llvm.StructType(blockElementTypes, false)
+				blockPtrType := llvm.PointerType(blockType, 0)
+				paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
+				llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
 			}
-			blockType := llvm.StructType(blockElementTypes, false)
-			blockPtrType := llvm.PointerType(blockType, 0)
-			paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
-			llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
-		}
-		llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
-		if f.Enclosing != nil {
-			llvmFunction.SetLinkage(llvm.PrivateLinkage)
-		}
+			llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
+			if f.Enclosing != nil {
+				llvmFunction.SetLinkage(llvm.PrivateLinkage)
+			}
 		*/
 		u.undefinedFuncs[f] = true
 	}
@@ -275,46 +275,46 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if f.Recover != nil || hasDefer(f) {
 		panic("setjmp unsupported")
 		/*
-		rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
-		defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
-		fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
-		jb := fr.builder.CreateStructGEP(defers, 0, "")
-		jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-		result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
-		result = fr.builder.CreateIsNotNull(result, "")
-		fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
-		// We'll only get here via a panic, which must either be
-		// recovered or continue panicking up the stack without
-		// returning from "rundefers". The recover block may be
-		// nil even if we can recover, in which case we just need
-		// to return the zero value for each result (if any).
-		var recoverBlock llvm.BasicBlock
-		if f.Recover != nil {
-			recoverBlock = fr.block(f.Recover)
-		} else {
-			recoverBlock = llvm.AddBasicBlock(llvmFunction, "recover")
-			fr.builder.SetInsertPointAtEnd(recoverBlock)
-			var nresults int
-			results := f.Signature.Results()
-			if results != nil {
-				nresults = results.Len()
-			}
-			switch nresults {
-			case 0:
-				fr.builder.CreateRetVoid()
-			case 1:
-				fr.builder.CreateRet(llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(0).Type())))
-			default:
-				values := make([]llvm.Value, nresults)
-				for i := range values {
-					values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
+			rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
+			defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
+			fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
+			jb := fr.builder.CreateStructGEP(defers, 0, "")
+			jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
+			result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
+			result = fr.builder.CreateIsNotNull(result, "")
+			fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
+			// We'll only get here via a panic, which must either be
+			// recovered or continue panicking up the stack without
+			// returning from "rundefers". The recover block may be
+			// nil even if we can recover, in which case we just need
+			// to return the zero value for each result (if any).
+			var recoverBlock llvm.BasicBlock
+			if f.Recover != nil {
+				recoverBlock = fr.block(f.Recover)
+			} else {
+				recoverBlock = llvm.AddBasicBlock(llvmFunction, "recover")
+				fr.builder.SetInsertPointAtEnd(recoverBlock)
+				var nresults int
+				results := f.Signature.Results()
+				if results != nil {
+					nresults = results.Len()
 				}
-				fr.builder.CreateAggregateRet(values)
+				switch nresults {
+				case 0:
+					fr.builder.CreateRetVoid()
+				case 1:
+					fr.builder.CreateRet(llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(0).Type())))
+				default:
+					values := make([]llvm.Value, nresults)
+					for i := range values {
+						values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
+					}
+					fr.builder.CreateAggregateRet(values)
+				}
 			}
-		}
-		fr.builder.SetInsertPointAtEnd(rdblock)
-		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
-		term = fr.builder.CreateBr(recoverBlock)
+			fr.builder.SetInsertPointAtEnd(rdblock)
+			fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+			term = fr.builder.CreateBr(recoverBlock)
 		*/
 	} else {
 		term = fr.builder.CreateBr(fr.blocks[0])
@@ -471,7 +471,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 		fn = fr.indirectFunction(fn, args)
 		fr.createCall(fr.runtime.pushdefer, []*LLVMValue{fn})
-		*/
+	*/
 
 	case *ssa.Extract:
 		var elem llvm.Value
@@ -568,12 +568,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.MakeClosure:
 		panic("closures not supported yet")
 		/*
-		fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
-		bindings := make([]*LLVMValue, len(instr.Bindings))
-		for i, binding := range instr.Bindings {
-			bindings[i] = fr.value(binding)
-		}
-		fr.env[instr] = fr.makeClosure(fn, bindings)
+			fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
+			bindings := make([]*LLVMValue, len(instr.Bindings))
+			for i, binding := range instr.Bindings {
+				bindings[i] = fr.value(binding)
+			}
+			fr.env[instr] = fr.makeClosure(fn, bindings)
 		*/
 
 	case *ssa.MakeInterface:
@@ -603,8 +603,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.Panic:
-		arg := fr.value(instr.X).LLVMValue()
-		fr.builder.CreateCall(fr.runtime.panic_.LLVMValue(), []llvm.Value{arg}, "")
+		// TODO(axw)
+		//arg := fr.value(instr.X).LLVMValue()
+		//fr.builder.CreateCall(fr.runtime.panic_.LLVMValue(), []llvm.Value{arg}, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
@@ -632,7 +633,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
 	case *ssa.RunDefers:
-		fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+		// TODO(axw)
+		//fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+		fr.builder.CreateUnreachable()
 
 	case *ssa.Select:
 		states := make([]selectState, len(instr.States))
@@ -701,29 +704,29 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		panic("TODO: recover")
 
 	case "append":
-		return []*LLVMValue { fr.callAppend(args[0], args[1]) }
+		return []*LLVMValue{fr.callAppend(args[0], args[1])}
 
 	case "close":
 		panic("TODO: close")
 
 	case "cap":
-		return []*LLVMValue { fr.callCap(args[0]) }
+		return []*LLVMValue{fr.callCap(args[0])}
 
 	case "len":
-		return []*LLVMValue { fr.callLen(args[0]) }
+		return []*LLVMValue{fr.callLen(args[0])}
 
 	case "copy":
-		return []*LLVMValue { fr.callCopy(args[0], args[1]) }
+		return []*LLVMValue{fr.callCopy(args[0], args[1])}
 
 	case "delete":
 		fr.mapDelete(args[0], args[1])
 		return nil
 
 	case "real":
-		return []*LLVMValue { args[0].extractComplexComponent(0) }
+		return []*LLVMValue{args[0].extractComplexComponent(0)}
 
 	case "imag":
-		return []*LLVMValue { args[0].extractComplexComponent(1) }
+		return []*LLVMValue{args[0].extractComplexComponent(1)}
 
 	case "complex":
 		r := args[0].LLVMValue()
@@ -731,7 +734,7 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
-		return []*LLVMValue { fr.NewValue(cmplx, typ) }
+		return []*LLVMValue{fr.NewValue(cmplx, typ)}
 
 	default:
 		panic("unimplemented: " + builtin.Name())
