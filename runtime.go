@@ -48,10 +48,8 @@ type runtimeInterface struct {
 	chanrecv,
 	chansend,
 	makechan,
-	recover_,
 	chancap,
 	chanlen,
-	runestostr,
 	selectdefault,
 	selectgo,
 	selectinit,
@@ -59,11 +57,7 @@ type runtimeInterface struct {
 	selectsend,
 	selectsize,
 	sliceappend,
-	slicecopy,
-	stringslice,
-	strnext,
-	strrune,
-	strtorunes *LLVMValue
+	slicecopy *LLVMValue
 
 	// LLVM intrinsics
 	memcpy,
@@ -76,7 +70,9 @@ type runtimeInterface struct {
 	Go,
 	ifaceE2I2,
 	ifaceI2I2,
+	intArrayToString,
 	interfaceCompare,
+	intToString,
 	makeSlice,
 	mapdelete,
 	mapiter2,
@@ -102,6 +98,8 @@ type runtimeInterface struct {
 	strcmp,
 	stringiter2,
 	stringPlus,
+	stringSlice,
+	stringToIntArray,
 	typeDescriptorsEqual runtimeFnInfo
 }
 
@@ -121,11 +119,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		"selectsize":    &ri.selectsize,
 		"sliceappend":   &ri.sliceappend,
 		"slicecopy":     &ri.slicecopy,
-		"stringslice":   &ri.stringslice,
-		"strnext":       &ri.strnext,
-		"strrune":       &ri.strrune,
-		"strtorunes":    &ri.strtorunes,
-		"runestostr":    &ri.runestostr,
 	}
 	for name, field := range intrinsics {
 		obj := pkg.Scope().Lookup(name)
@@ -137,6 +130,10 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 
 	emptyInterface := types.NewInterface(nil, nil)
 	intSlice := types.NewSlice(types.Typ[types.Int])
+	UnsafePointer := types.Typ[types.UnsafePointer]
+	Int := types.Typ[types.Int]
+	String := types.Typ[types.String]
+
 	for _, rt := range [...]struct {
 		name          string
 		rfi           *runtimeFnInfo
@@ -149,6 +146,8 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
 		{name: "runtime.ifaceE2I2", rfi: &ri.ifaceE2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
 		{name: "runtime.ifaceI2I2", rfi: &ri.ifaceI2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
+		{name: "__go_int_array_to_string", rfi: &ri.intArrayToString, args: []types.Type{UnsafePointer, Int}, results: []types.Type{String}},
+		{name: "__go_int_to_string", rfi: &ri.intToString, args: []types.Type{Int}, results: []types.Type{String}},
 		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
 		{name: "__go_new_map", rfi: &ri.newMap, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
 		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},
@@ -173,8 +172,10 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
 		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
 		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
-		{name: "runtime.stringiter2", rfi: &ri.stringiter2, args: []types.Type{types.Typ[types.String], types.Typ[types.Int]}, results: []types.Type{types.Typ[types.Int], types.Typ[types.Rune]}},
 		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
+		{name: "__go_string_slice", rfi: &ri.stringSlice, args: []types.Type{String, Int, Int}, results: []types.Type{String}},
+		{name: "__go_string_to_int_array", rfi: &ri.stringToIntArray, args: []types.Type{types.Typ[types.String]}, results: []types.Type{intSlice}},
+		{name: "runtime.stringiter2", rfi: &ri.stringiter2, args: []types.Type{types.Typ[types.String], types.Typ[types.Int]}, results: []types.Type{types.Typ[types.Int], types.Typ[types.Rune]}},
 		{name: "__go_type_descriptors_equal", rfi: &ri.typeDescriptorsEqual, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Bool]}},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)

@@ -35,6 +35,16 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 }
 
 func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
+	var lowval, highval llvm.Value
+	if low != nil {
+		lowval = fr.convert(low, types.Typ[types.Int]).LLVMValue()
+	} else {
+		lowval = llvm.ConstNull(fr.types.inttype)
+	}
+	if high != nil {
+		highval = fr.convert(high, types.Typ[types.Int]).LLVMValue()
+	}
+
 	var arrayptr, arraylen, arraycap llvm.Value
 	var elemtyp types.Type
 	var errcode uint64
@@ -55,29 +65,15 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		arraylen = fr.builder.CreateExtractValue(sliceValue, 1, "")
 		arraycap = fr.builder.CreateExtractValue(sliceValue, 2, "")
 	case *types.Basic:
-		stringslice := fr.runtime.stringslice.LLVMValue()
-		llv := x.LLVMValue()
-		args := []llvm.Value{
-			fr.coerceString(llv, stringslice.Type().ElementType().ParamTypes()[0]),
-			low.LLVMValue(),
-			high.LLVMValue(),
+		if high == nil {
+			highval = llvm.ConstAllOnes(fr.types.inttype) // -1
 		}
-		result := fr.builder.CreateCall(stringslice, args, "")
-		return fr.NewValue(fr.coerceString(result, llv.Type()), x.Type())
+		result := fr.runtime.stringSlice.call(fr, x.LLVMValue(), lowval, highval)
+		return fr.NewValue(result[0], x.Type())
 	default:
 		panic("unimplemented")
 	}
-
-	var lowval, highval llvm.Value
-	if low != nil {
-		lowval = fr.convert(low, types.Typ[types.Int]).LLVMValue()
-	} else {
-		lowval = llvm.ConstNull(fr.types.inttype)
-	}
-
-	if high != nil {
-		highval = fr.convert(high, types.Typ[types.Int]).LLVMValue()
-	} else {
+	if high == nil {
 		highval = arraylen
 	}
 
