@@ -126,60 +126,245 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 		*field = fr.ResolveFunc(obj.(*types.Func))
 	}
 
-	emptyInterface := types.NewInterface(nil, nil)
-	intSlice := types.NewSlice(types.Typ[types.Int])
-	UnsafePointer := types.Typ[types.UnsafePointer]
+	Bool := types.Typ[types.Bool]
+	Float64 := types.Typ[types.Float64]
+	Int32 := types.Typ[types.Int32]
+	Int64 := types.Typ[types.Int64]
 	Int := types.Typ[types.Int]
+	Rune := types.Typ[types.Rune]
 	String := types.Typ[types.String]
 	Uintptr := types.Typ[types.Uintptr]
+	UnsafePointer := types.Typ[types.UnsafePointer]
+
+	EmptyInterface := types.NewInterface(nil, nil)
+	IntSlice := types.NewSlice(types.Typ[types.Int])
 
 	for _, rt := range [...]struct {
-		name          string
-		rfi           *runtimeFnInfo
-		args, results []types.Type
+		name      string
+		rfi       *runtimeFnInfo
+		args, res []types.Type
 	}{
-		{name: "__go_append", rfi: &ri.append, args: []types.Type{intSlice, UnsafePointer, Uintptr, Uintptr}, results: []types.Type{intSlice}},
-		{name: "__go_assert_interface", rfi: &ri.assertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_check_interface_type", rfi: &ri.checkInterfaceType, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
-		{name: "__go_convert_interface", rfi: &ri.convertInterface, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_copy", rfi: &ri.copy, args: []types.Type{UnsafePointer, UnsafePointer, Uintptr}},
-		{name: "__go_empty_interface_compare", rfi: &ri.emptyInterfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
-		{name: "__go_go", rfi: &ri.Go, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
-		{name: "runtime.ifaceE2I2", rfi: &ri.ifaceE2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
-		{name: "runtime.ifaceI2I2", rfi: &ri.ifaceI2I2, args: []types.Type{types.Typ[types.UnsafePointer], emptyInterface}, results: []types.Type{emptyInterface, types.Typ[types.Bool]}},
-		{name: "__go_int_array_to_string", rfi: &ri.intArrayToString, args: []types.Type{UnsafePointer, Int}, results: []types.Type{String}},
-		{name: "__go_int_to_string", rfi: &ri.intToString, args: []types.Type{Int}, results: []types.Type{String}},
-		{name: "__go_interface_compare", rfi: &ri.interfaceCompare, args: []types.Type{emptyInterface, emptyInterface}, results: []types.Type{types.Typ[types.Int]}},
-		{name: "__go_new_map", rfi: &ri.newMap, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_make_slice2", rfi: &ri.makeSlice, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.Uintptr], types.Typ[types.Uintptr]}, results: []types.Type{intSlice}},
-		{name: "runtime.mapdelete", rfi: &ri.mapdelete, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
-		{name: "runtime.mapiter2", rfi: &ri.mapiter2, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
-		{name: "runtime.mapiterinit", rfi: &ri.mapiterinit, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}},
-		{name: "runtime.mapiternext", rfi: &ri.mapiternext, args: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_map_index", rfi: &ri.mapIndex, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer], types.Typ[types.Bool]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_map_len", rfi: &ri.mapLen, args: []types.Type{types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Int]}},
-		{name: "__go_new", rfi: &ri.New, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_new_nopointers", rfi: &ri.NewNopointers, args: []types.Type{types.Typ[types.Uintptr]}, results: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_print_bool", rfi: &ri.printBool, args: []types.Type{types.Typ[types.Bool]}},
-		{name: "__go_print_double", rfi: &ri.printDouble, args: []types.Type{types.Typ[types.Float64]}},
-		{name: "__go_print_empty_interface", rfi: &ri.printEmptyInterface, args: []types.Type{emptyInterface}},
-		{name: "__go_print_interface", rfi: &ri.printInterface, args: []types.Type{emptyInterface}},
-		{name: "__go_print_int64", rfi: &ri.printInt64, args: []types.Type{types.Typ[types.Int64]}},
-		{name: "__go_print_nl", rfi: &ri.printNl},
-		{name: "__go_print_pointer", rfi: &ri.printPointer, args: []types.Type{types.Typ[types.UnsafePointer]}},
-		{name: "__go_print_slice", rfi: &ri.printSlice, args: []types.Type{intSlice}},
-		{name: "__go_print_space", rfi: &ri.printSpace},
-		{name: "__go_print_string", rfi: &ri.printString, args: []types.Type{types.Typ[types.String]}},
-		{name: "__go_print_uint64", rfi: &ri.printUint64, args: []types.Type{types.Typ[types.Int64]}},
-		{name: "__go_runtime_error", rfi: &ri.runtimeError, args: []types.Type{types.Typ[types.Int32]}},
-		{name: "__go_strcmp", rfi: &ri.strcmp, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.Int]}},
-		{name: "__go_string_plus", rfi: &ri.stringPlus, args: []types.Type{types.Typ[types.String], types.Typ[types.String]}, results: []types.Type{types.Typ[types.String]}},
-		{name: "__go_string_slice", rfi: &ri.stringSlice, args: []types.Type{String, Int, Int}, results: []types.Type{String}},
-		{name: "__go_string_to_int_array", rfi: &ri.stringToIntArray, args: []types.Type{types.Typ[types.String]}, results: []types.Type{intSlice}},
-		{name: "runtime.stringiter2", rfi: &ri.stringiter2, args: []types.Type{types.Typ[types.String], types.Typ[types.Int]}, results: []types.Type{types.Typ[types.Int], types.Typ[types.Rune]}},
-		{name: "__go_type_descriptors_equal", rfi: &ri.typeDescriptorsEqual, args: []types.Type{types.Typ[types.UnsafePointer], types.Typ[types.UnsafePointer]}, results: []types.Type{types.Typ[types.Bool]}},
+		{
+			name: "__go_append",
+			rfi:  &ri.append,
+			args: []types.Type{IntSlice, UnsafePointer, Uintptr, Uintptr},
+			res:  []types.Type{IntSlice},
+		},
+		{
+			name: "__go_assert_interface",
+			rfi:  &ri.assertInterface,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_check_interface_type",
+			rfi:  &ri.checkInterfaceType,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "__go_convert_interface",
+			rfi:  &ri.convertInterface,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_copy",
+			rfi:  &ri.copy,
+			args: []types.Type{UnsafePointer, UnsafePointer, Uintptr},
+		},
+		{
+			name: "__go_empty_interface_compare",
+			rfi:  &ri.emptyInterfaceCompare,
+			args: []types.Type{EmptyInterface, EmptyInterface},
+			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_go",
+			rfi:  &ri.Go,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "runtime.ifaceE2I2",
+			rfi:  &ri.ifaceE2I2,
+			args: []types.Type{UnsafePointer, EmptyInterface},
+			res:  []types.Type{EmptyInterface, Bool},
+		},
+		{
+			name: "runtime.ifaceI2I2",
+			rfi:  &ri.ifaceI2I2,
+			args: []types.Type{UnsafePointer, EmptyInterface},
+			res:  []types.Type{EmptyInterface, Bool},
+		},
+		{
+			name: "__go_int_array_to_string",
+			rfi:  &ri.intArrayToString,
+			args: []types.Type{UnsafePointer, Int},
+			res:  []types.Type{String},
+		},
+		{
+			name: "__go_int_to_string",
+			rfi:  &ri.intToString,
+			args: []types.Type{Int},
+			res:  []types.Type{String},
+		},
+		{
+			name: "__go_interface_compare",
+			rfi:  &ri.interfaceCompare,
+			args: []types.Type{EmptyInterface, EmptyInterface},
+			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_new_map",
+			rfi:  &ri.newMap,
+			args: []types.Type{UnsafePointer, Uintptr},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_make_slice2",
+			rfi:  &ri.makeSlice,
+			args: []types.Type{UnsafePointer, Uintptr, Uintptr},
+			res:  []types.Type{IntSlice},
+		},
+		{
+			name: "runtime.mapdelete",
+			rfi:  &ri.mapdelete,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "runtime.mapiter2",
+			rfi:  &ri.mapiter2,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "runtime.mapiterinit",
+			rfi:  &ri.mapiterinit,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "runtime.mapiternext",
+			rfi:  &ri.mapiternext,
+			args: []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_map_index",
+			rfi:  &ri.mapIndex,
+			args: []types.Type{UnsafePointer, UnsafePointer, Bool},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_map_len",
+			rfi:  &ri.mapLen,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_new",
+			rfi:  &ri.New,
+			args: []types.Type{Uintptr},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_new_nopointers",
+			rfi:  &ri.NewNopointers,
+			args: []types.Type{Uintptr},
+			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_print_bool",
+			rfi:  &ri.printBool,
+			args: []types.Type{Bool},
+		},
+		{
+			name: "__go_print_double",
+			rfi:  &ri.printDouble,
+			args: []types.Type{Float64},
+		},
+		{
+			name: "__go_print_empty_interface",
+			rfi:  &ri.printEmptyInterface,
+			args: []types.Type{EmptyInterface},
+		},
+		{
+			name: "__go_print_interface",
+			rfi:  &ri.printInterface,
+			args: []types.Type{EmptyInterface},
+		},
+		{
+			name: "__go_print_int64",
+			rfi:  &ri.printInt64,
+			args: []types.Type{Int64},
+		},
+		{
+			name: "__go_print_nl",
+			rfi:  &ri.printNl,
+		},
+		{
+			name: "__go_print_pointer",
+			rfi:  &ri.printPointer,
+			args: []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_print_slice",
+			rfi:  &ri.printSlice,
+			args: []types.Type{IntSlice},
+		},
+		{
+			name: "__go_print_space",
+			rfi:  &ri.printSpace,
+		},
+		{
+			name: "__go_print_string",
+			rfi:  &ri.printString,
+			args: []types.Type{String},
+		},
+		{
+			name: "__go_print_uint64",
+			rfi:  &ri.printUint64,
+			args: []types.Type{Int64},
+		},
+		{
+			name: "__go_runtime_error",
+			rfi:  &ri.runtimeError,
+			args: []types.Type{Int32},
+		},
+		{
+			name: "__go_strcmp",
+			rfi:  &ri.strcmp,
+			args: []types.Type{String, String},
+			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_string_plus",
+			rfi:  &ri.stringPlus,
+			args: []types.Type{String, String},
+			res:  []types.Type{String},
+		},
+		{
+			name: "__go_string_slice",
+			rfi:  &ri.stringSlice,
+			args: []types.Type{String, Int, Int},
+			res:  []types.Type{String},
+		},
+		{
+			name: "__go_string_to_int_array",
+			rfi:  &ri.stringToIntArray,
+			args: []types.Type{String},
+			res:  []types.Type{IntSlice},
+		},
+		{
+			name: "runtime.stringiter2",
+			rfi:  &ri.stringiter2,
+			args: []types.Type{String, Int},
+			res:  []types.Type{Int, Rune},
+		},
+		{
+			name: "__go_type_descriptors_equal",
+			rfi:  &ri.typeDescriptorsEqual,
+			args: []types.Type{UnsafePointer, UnsafePointer},
+			res:  []types.Type{Bool},
+		},
 	} {
-		rt.rfi.init(tm, module, rt.name, rt.args, rt.results)
+		rt.rfi.init(tm, module, rt.name, rt.args, rt.res)
 	}
 
 	memsetName := "llvm.memset.p0i8.i" + strconv.Itoa(tm.target.IntPtrType().IntTypeWidth())
