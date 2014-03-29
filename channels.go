@@ -14,7 +14,7 @@ func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
 	// TODO(pcc): call __go_new_channel_big here if needed
 	dyntyp := fr.types.ToRuntime(chantyp)
 	ch := fr.runtime.newChannel.call(fr, dyntyp, size.LLVMValue())[0]
-	return fr.NewValue(ch, chantyp)
+	return newValue(ch, chantyp)
 }
 
 // chanSend implements ch<- x
@@ -37,11 +37,11 @@ func (fr *frame) chanRecv(ch *LLVMValue, commaOk bool) (x, ok *LLVMValue) {
 
 	if commaOk {
 		okval := fr.runtime.chanrecv2.call(fr, chantyp, ch.LLVMValue(), ptri8)[0]
-		ok = fr.NewValue(okval, types.Typ[types.Bool])
+		ok = newValue(okval, types.Typ[types.Bool])
 	} else {
 		fr.runtime.receiveBig.call(fr, chantyp, ch.LLVMValue(), ptri8)
 	}
-	x = fr.NewValue(fr.builder.CreateLoad(ptr, ""), elemtyp)
+	x = newValue(fr.builder.CreateLoad(ptr, ""), elemtyp)
 	return
 }
 
@@ -123,5 +123,5 @@ func (fr *frame) chanSelect(states []selectState, blocking bool) *LLVMValue {
 	index := fr.builder.CreateCall(fr.runtime.selectgo.LLVMValue(), []llvm.Value{selectp}, "")
 	tuple := fr.builder.CreateLoad(tupleptr, "")
 	tuple = fr.builder.CreateInsertValue(tuple, index, 0, "")
-	return fr.NewValue(tuple, resType)
+	return newValue(tuple, resType)
 }

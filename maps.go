@@ -21,7 +21,7 @@ func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
 		cap = llvm.ConstNull(fr.types.inttype)
 	}
 	m := fr.runtime.newMap.call(fr, dyntyp, cap)
-	return fr.NewValue(m[0], typ)
+	return newValue(m[0], typ)
 }
 
 // mapLookup implements v[, ok] = m[k]
@@ -33,7 +33,7 @@ func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
 	okbit := fr.builder.CreateIsNotNull(valptr, "")
 
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
-	ok = fr.NewValue(fr.builder.CreateZExt(okbit, llvm.Int8Type(), ""), types.Typ[types.Bool])
+	ok = newValue(fr.builder.CreateZExt(okbit, llvm.Int8Type(), ""), types.Typ[types.Bool])
 	v = fr.loadOrNull(okbit, valptr, elemtyp)
 	return
 }
@@ -68,7 +68,7 @@ func (fr *frame) mapIterInit(m *LLVMValue) []*LLVMValue {
 	isinit := fr.allocaBuilder.CreateAlloca(llvm.Int1Type(), "")
 	fr.builder.CreateStore(llvm.ConstNull(llvm.Int1Type()), isinit)
 
-	return []*LLVMValue{m, fr.NewValue(isinit, types.NewPointer(types.Typ[types.Bool]))}
+	return []*LLVMValue{m, newValue(isinit, types.NewPointer(types.Typ[types.Bool]))}
 }
 
 // mapIterNext advances the iterator, and returns the tuple (ok, k, v).
@@ -125,11 +125,15 @@ func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
 
 	fr.builder.SetInsertPointAtEnd(cont2bb)
 	k := fr.builder.CreatePHI(klltyp, "")
-	k.AddIncoming([]llvm.Value{llvm.ConstNull(klltyp), loadedkey},
-	              []llvm.BasicBlock{contbb, loadbb})
+	k.AddIncoming(
+		[]llvm.Value{llvm.ConstNull(klltyp), loadedkey},
+		[]llvm.BasicBlock{contbb, loadbb},
+	)
 	v := fr.builder.CreatePHI(vlltyp, "")
-	v.AddIncoming([]llvm.Value{llvm.ConstNull(vlltyp), loadedval},
-	              []llvm.BasicBlock{contbb, loadbb})
+	v.AddIncoming(
+		[]llvm.Value{llvm.ConstNull(vlltyp), loadedval},
+		[]llvm.BasicBlock{contbb, loadbb},
+	)
 
-	return []*LLVMValue{fr.NewValue(ok, types.Typ[types.Bool]), fr.NewValue(k, ktyp), fr.NewValue(v, vtyp)}
+	return []*LLVMValue{newValue(ok, types.Typ[types.Bool]), newValue(k, ktyp), newValue(v, vtyp)}
 }

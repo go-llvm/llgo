@@ -14,7 +14,7 @@ import (
 func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv *LLVMValue) {
 	lliface := iface.LLVMValue()
 	llitab := fr.builder.CreateExtractValue(lliface, 0, "")
-	recv = fr.NewValue(fr.builder.CreateExtractValue(lliface, 1, ""), types.Typ[types.UnsafePointer])
+	recv = newValue(fr.builder.CreateExtractValue(lliface, 1, ""), types.Typ[types.UnsafePointer])
 	sig := method.Type().(*types.Signature)
 	methodset := fr.types.MethodSet(sig.Recv().Type())
 	// TODO(axw) cache ordered method index
@@ -35,7 +35,7 @@ func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv
 	// Replace receiver type with unsafe.Pointer.
 	recvparam := types.NewParam(0, nil, "", types.Typ[types.UnsafePointer])
 	sig = types.NewSignature(nil, recvparam, sig.Params(), sig.Results(), sig.Variadic())
-	fn = fr.NewValue(llifn, sig)
+	fn = newValue(llifn, sig)
 	return
 }
 
@@ -45,7 +45,7 @@ func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	aNull := a.LLVMValue().IsNull()
 	bNull := b.LLVMValue().IsNull()
 	if aNull && bNull {
-		return fr.NewValue(boolLLVMValue(true), types.Typ[types.Bool])
+		return newValue(boolLLVMValue(true), types.Typ[types.Bool])
 	}
 
 	compare := fr.runtime.emptyInterfaceCompare
@@ -63,7 +63,7 @@ func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	result := compare.call(fr, a.LLVMValue(), b.LLVMValue())[0]
 	result = fr.builder.CreateIsNull(result, "")
 	result = fr.builder.CreateZExt(result, llvm.Int8Type(), "")
-	return fr.NewValue(result, types.Typ[types.Bool])
+	return newValue(result, types.Typ[types.Bool])
 }
 
 func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
@@ -78,7 +78,7 @@ func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 	itab := fr.types.getItabPointer(v.Type(), iface.Underlying().(*types.Interface))
 	value = fr.builder.CreateInsertValue(value, itab, 0, "")
 	value = fr.builder.CreateInsertValue(value, llv, 1, "")
-	return fr.NewValue(value, iface)
+	return newValue(value, iface)
 }
 
 // Reads the type descriptor from the given interface type.
@@ -101,7 +101,7 @@ func (fr *frame) getInterfaceValue(v *LLVMValue, ty types.Type) *LLVMValue {
 		typedval := fr.builder.CreateBitCast(val, llvm.PointerType(fr.types.ToLLVM(ty), 0), "")
 		val = fr.builder.CreateLoad(typedval, "")
 	}
-	return fr.NewValue(val, ty)
+	return newValue(val, ty)
 }
 
 // If cond is true, reads the value from the given interface type, otherwise
@@ -113,7 +113,7 @@ func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *LLVMValue, ty types
 	} else {
 		val = fr.loadOrNull(cond, val, ty).LLVMValue()
 	}
-	return fr.NewValue(val, ty)
+	return newValue(val, ty)
 }
 
 func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue, okval *LLVMValue) {
@@ -125,12 +125,12 @@ func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue
 		} else {
 			result = fr.runtime.ifaceE2I2.call(fr, tytd, val.LLVMValue())
 		}
-		v = fr.NewValue(result[0], ty)
-		okval = fr.NewValue(result[1], types.Typ[types.Bool])
+		v = newValue(result[0], ty)
+		okval = newValue(result[1], types.Typ[types.Bool])
 	} else {
 		valtd := fr.getInterfaceTypeDescriptor(val)
 		tyequal := fr.runtime.typeDescriptorsEqual.call(fr, valtd, tytd)[0]
-		okval = fr.NewValue(tyequal, types.Typ[types.Bool])
+		okval = newValue(tyequal, types.Typ[types.Bool])
 		tyequal = fr.builder.CreateTrunc(tyequal, llvm.Int1Type(), "")
 
 		v = fr.getInterfaceValueOrNull(tyequal, val, ty)
@@ -160,7 +160,7 @@ func (fr *frame) convertI2E(v *LLVMValue) *LLVMValue {
 	intf := llvm.Undef(fr.types.ToLLVM(typ))
 	intf = fr.builder.CreateInsertValue(intf, td, 0, "")
 	intf = fr.builder.CreateInsertValue(intf, val, 1, "")
-	return fr.NewValue(intf, typ)
+	return newValue(intf, typ)
 }
 
 func (fr *frame) changeInterface(v *LLVMValue, ty types.Type, assert bool) *LLVMValue {
@@ -177,5 +177,5 @@ func (fr *frame) changeInterface(v *LLVMValue, ty types.Type, assert bool) *LLVM
 	intf := llvm.Undef(fr.types.ToLLVM(ty))
 	intf = fr.builder.CreateInsertValue(intf, itab, 0, "")
 	intf = fr.builder.CreateInsertValue(intf, val, 1, "")
-	return fr.NewValue(intf, ty)
+	return newValue(intf, ty)
 }

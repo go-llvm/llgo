@@ -30,7 +30,7 @@ func (c *compiler) makeClosure(fn *LLVMValue, bindings []*LLVMValue) *LLVMValue 
 	fnptr := c.builder.CreateBitCast(fn.LLVMValue(), closure.Type().StructElementTypes()[0], "")
 	closure = c.builder.CreateInsertValue(closure, fnptr, 0, "")
 	closure = c.builder.CreateInsertValue(closure, block, 1, "")
-	return c.NewValue(closure, fn.Type())
+	return newValue(closure, fn.Type())
 	*/
 	return nil
 }

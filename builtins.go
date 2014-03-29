@@ -22,7 +22,7 @@ func (fr *frame) callCap(arg *LLVMValue) *LLVMValue {
 	case *types.Chan:
 		v = fr.runtime.chanCap.call(fr, arg.LLVMValue())[0]
 	}
-	return fr.NewValue(v, types.Typ[types.Int])
+	return newValue(v, types.Typ[types.Int])
 }
 
 func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
@@ -44,7 +44,7 @@ func (fr *frame) callLen(arg *LLVMValue) *LLVMValue {
 	case *types.Chan:
 		lenvalue = fr.runtime.chanLen.call(fr, arg.LLVMValue())[0]
 	}
-	return fr.NewValue(lenvalue, types.Typ[types.Int])
+	return newValue(lenvalue, types.Typ[types.Int])
 }
 
 // callAppend takes two slices of the same type, and yields
@@ -55,7 +55,7 @@ func (fr *frame) callAppend(a, b *LLVMValue) *LLVMValue {
 	elemsizeInt64 := fr.types.Sizeof(a.Type().Underlying().(*types.Slice).Elem())
 	elemsize := llvm.ConstInt(fr.target.IntPtrType(), uint64(elemsizeInt64), false)
 	result := fr.runtime.append.call(fr, a.LLVMValue(), bptr, blen, elemsize)[0]
-	return fr.NewValue(result, a.Type())
+	return newValue(result, a.Type())
 }
 
 // callCopy takes two slices a and b of the same type, and
@@ -71,5 +71,5 @@ func (fr *frame) callCopy(dest, source *LLVMValue) *LLVMValue {
 	elemsize := llvm.ConstInt(fr.types.inttype, uint64(elemsizeInt64), false)
 	bytes := fr.builder.CreateMul(minlen, elemsize, "")
 	fr.runtime.copy.call(fr, aptr, bptr, bytes)
-	return fr.NewValue(minlen, types.Typ[types.Int])
+	return newValue(minlen, types.Typ[types.Int])
 }

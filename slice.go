@@ -16,7 +16,7 @@ func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *L
 	capacity = fr.convert(capacity, types.Typ[types.Uintptr])
 	runtimeType := fr.types.ToRuntime(sliceType)
 	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.LLVMValue(), capacity.LLVMValue())
-	return fr.NewValue(llslice[0], sliceType)
+	return newValue(llslice[0], sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a
@@ -69,7 +69,7 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 			highval = llvm.ConstAllOnes(fr.types.inttype) // -1
 		}
 		result := fr.runtime.stringSlice.call(fr, x.LLVMValue(), lowval, highval)
-		return fr.NewValue(result[0], x.Type())
+		return newValue(result[0], x.Type())
 	default:
 		panic("unimplemented")
 	}
@@ -110,5 +110,5 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicelen, 1, "")
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicecap, 2, "")
 
-	return fr.NewValue(sliceValue, types.NewSlice(elemtyp))
+	return newValue(sliceValue, types.NewSlice(elemtyp))
 }

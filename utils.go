@@ -30,7 +30,9 @@ func (fr *frame) loadOrNull(cond, ptr llvm.Value, ty types.Type) *LLVMValue {
 
 	fr.builder.SetInsertPointAtEnd(contbb)
 	llv := fr.builder.CreatePHI(llty, "")
-	llv.AddIncoming([]llvm.Value{llvm.ConstNull(llty), loadedval},
-	                []llvm.BasicBlock{startbb, loadbb})
-	return fr.NewValue(llv, ty)
+	llv.AddIncoming(
+		[]llvm.Value{llvm.ConstNull(llty), loadedval},
+		[]llvm.BasicBlock{startbb, loadbb},
+	)
+	return newValue(llv, ty)
 }

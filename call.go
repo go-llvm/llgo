@@ -23,7 +23,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue) []*LLVMValu
 
 	resultValues := make([]*LLVMValue, len(results))
 	for i, res := range results {
-		resultValues[i] = c.NewValue(res, fntyp.Results().At(i).Type())
+		resultValues[i] = newValue(res, fntyp.Results().At(i).Type())
 	}
 	return resultValues
 }
