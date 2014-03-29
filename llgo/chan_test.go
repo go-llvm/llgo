@@ -12,6 +12,10 @@ func TestChanSelect(t *testing.T) {
 	checkOutputEqual(t, "chan/select.go")
 }
 
+func TestChanSelf(t *testing.T) {
+	checkOutputEqual(t, "chan/self.go")
+}
+
 func TestChanRange(t *testing.T) {
 	checkOutputEqual(t, "chan/range.go")
 }

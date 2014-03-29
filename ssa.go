@@ -677,7 +677,12 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		operand := fr.value(instr.X)
 		switch instr.Op {
 		case token.ARROW:
-			fr.env[instr] = fr.chanRecv(operand, instr.CommaOk)
+			x, ok := fr.chanRecv(operand, instr.CommaOk)
+			if instr.CommaOk {
+				fr.tuples[instr] = []*LLVMValue{x, ok}
+			} else {
+				fr.env[instr] = x
+			}
 		case token.MUL:
 			// The bitcast is necessary to handle recursive pointer loads.
 			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
