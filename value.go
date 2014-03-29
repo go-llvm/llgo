@@ -471,7 +471,7 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
 			fr.memcpy(newdata, strdata, strlen)
 
 			struct_ := llvm.Undef(fr.types.ToLLVM(byteslice))
-			struct_ = fr.builder.CreateInsertValue(struct_, strdata, 0, "")
+			struct_ = fr.builder.CreateInsertValue(struct_, newdata, 0, "")
 			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 1, "")
 			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 2, "")
 			return fr.NewValue(struct_, byteslice)
@@ -495,7 +495,7 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) Value {
 		fr.memcpy(newdata, data, len)
 
 		struct_ := llvm.Undef(fr.types.ToLLVM(types.Typ[types.String]))
-		struct_ = fr.builder.CreateInsertValue(struct_, data, 0, "")
+		struct_ = fr.builder.CreateInsertValue(struct_, newdata, 0, "")
 		struct_ = fr.builder.CreateInsertValue(struct_, len, 1, "")
 		return fr.NewValue(struct_, types.Typ[types.String])
 	}
