@@ -20,43 +20,28 @@ func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
 func (fr *frame) chanSend(ch *LLVMValue, elem *LLVMValue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
 	elem = fr.convert(elem, elemtyp).(*LLVMValue)
-	stackptr := fr.stacksave()
-	elemptr := fr.builder.CreateAlloca(elem.LLVMValue().Type(), "")
+	elemptr := fr.allocaBuilder.CreateAlloca(elem.LLVMValue().Type(), "")
 	fr.builder.CreateStore(elem.LLVMValue(), elemptr)
-	elemptr = fr.builder.CreatePtrToInt(elemptr, fr.target.IntPtrType(), "")
-	nb := boolLLVMValue(false)
-	chansend := fr.runtime.chansend.LLVMValue()
-	chantyp := fr.types.ToRuntime(ch.typ.Underlying())
-	chantyp = fr.builder.CreateBitCast(chantyp, chansend.Type().ElementType().ParamTypes()[0], "")
-	fr.builder.CreateCall(chansend, []llvm.Value{chantyp, ch.LLVMValue(), elemptr, nb}, "")
-	// Ignore result; only used in runtime.
-	fr.stackrestore(stackptr)
+	elemptr = fr.builder.CreateBitCast(elemptr, llvm.PointerType(llvm.Int8Type(), 0), "")
+	chantyp := fr.types.ToRuntime(ch.Type())
+	fr.runtime.sendBig.call(fr, chantyp, ch.LLVMValue(), elemptr)
 }
 
 // chanRecv implements x[, ok] = <-ch
-func (c *compiler) chanRecv(ch *LLVMValue, commaOk bool) *LLVMValue {
+func (fr *frame) chanRecv(ch *LLVMValue, commaOk bool) (x, ok *LLVMValue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
-	stackptr := c.stacksave()
-	ptr := c.builder.CreateAlloca(c.types.ToLLVM(elemtyp), "")
-	chanrecv := c.runtime.chanrecv.LLVMValue()
-	chantyp := c.types.ToRuntime(ch.Type().Underlying())
-	chantyp = c.builder.CreateBitCast(chantyp, chanrecv.Type().ElementType().ParamTypes()[0], "")
-	ok := c.builder.CreateCall(chanrecv, []llvm.Value{
-		chantyp,
-		ch.LLVMValue(),
-		c.builder.CreatePtrToInt(ptr, c.target.IntPtrType(), ""),
-		boolLLVMValue(false), // nb
-	}, "")
-	elem := c.builder.CreateLoad(ptr, "")
-	c.stackrestore(stackptr)
-	if !commaOk {
-		return c.NewValue(elem, elemtyp)
+	ptr := fr.allocaBuilder.CreateAlloca(fr.types.ToLLVM(elemtyp), "")
+	ptri8 := fr.builder.CreateBitCast(ptr, llvm.PointerType(llvm.Int8Type(), 0), "")
+	chantyp := fr.types.ToRuntime(ch.Type())
+
+	if commaOk {
+		okval := fr.runtime.chanrecv2.call(fr, chantyp, ch.LLVMValue(), ptri8)[0]
+		ok = fr.NewValue(okval, types.Typ[types.Bool])
+	} else {
+		fr.runtime.receiveBig.call(fr, chantyp, ch.LLVMValue(), ptri8)
 	}
-	typ := tupleType(elemtyp, types.Typ[types.Bool])
-	tuple := llvm.Undef(c.types.ToLLVM(typ))
-	tuple = c.builder.CreateInsertValue(tuple, elem, 0, "")
-	tuple = c.builder.CreateInsertValue(tuple, ok, 1, "")
-	return c.NewValue(tuple, typ)
+	x = fr.NewValue(fr.builder.CreateLoad(ptr, ""), elemtyp)
+	return
 }
 
 // selectState is equivalent to ssa.SelectState
