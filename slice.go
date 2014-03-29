@@ -15,7 +15,7 @@ func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *L
 	length = fr.convert(length, types.Typ[types.Uintptr])
 	capacity = fr.convert(capacity, types.Typ[types.Uintptr])
 	runtimeType := fr.types.ToRuntime(sliceType)
-	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.LLVMValue(), capacity.LLVMValue())
+	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.value, capacity.value)
 	return newValue(llslice[0], sliceType)
 }
 
@@ -37,12 +37,12 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 	var lowval, highval llvm.Value
 	if low != nil {
-		lowval = fr.convert(low, types.Typ[types.Int]).LLVMValue()
+		lowval = fr.convert(low, types.Typ[types.Int]).value
 	} else {
 		lowval = llvm.ConstNull(fr.types.inttype)
 	}
 	if high != nil {
-		highval = fr.convert(high, types.Typ[types.Int]).LLVMValue()
+		highval = fr.convert(high, types.Typ[types.Int]).value
 	}
 
 	var arrayptr, arraylen, arraycap llvm.Value
@@ -53,14 +53,14 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		errcode = 3 // TODO(pcc): symbolic
 		arraytyp := typ.Elem().Underlying().(*types.Array)
 		elemtyp = arraytyp.Elem()
-		arrayptr = x.LLVMValue()
+		arrayptr = x.value
 		arrayptr = fr.builder.CreateBitCast(arrayptr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
 		arraycap = arraylen
 	case *types.Slice:
 		errcode = 4 // TODO(pcc): symbolic
 		elemtyp = typ.Elem()
-		sliceValue := x.LLVMValue()
+		sliceValue := x.value
 		arrayptr = fr.builder.CreateExtractValue(sliceValue, 0, "")
 		arraylen = fr.builder.CreateExtractValue(sliceValue, 1, "")
 		arraycap = fr.builder.CreateExtractValue(sliceValue, 2, "")
@@ -68,7 +68,7 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		if high == nil {
 			highval = llvm.ConstAllOnes(fr.types.inttype) // -1
 		}
-		result := fr.runtime.stringSlice.call(fr, x.LLVMValue(), lowval, highval)
+		result := fr.runtime.stringSlice.call(fr, x.value, lowval, highval)
 		return newValue(result[0], x.Type())
 	default:
 		panic("unimplemented")

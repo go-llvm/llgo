@@ -20,12 +20,12 @@ func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
 }
 
 func (fr *frame) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
-	result := fr.runtime.stringPlus.call(fr, lhs.LLVMValue(), rhs.LLVMValue())
+	result := fr.runtime.stringPlus.call(fr, lhs.value, rhs.value)
 	return newValue(result[0], types.Typ[types.String])
 }
 
 func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
-	result := fr.runtime.strcmp.call(fr, lhs.LLVMValue(), rhs.LLVMValue())[0]
+	result := fr.runtime.strcmp.call(fr, lhs.value, rhs.value)[0]
 	zero := llvm.ConstNull(fr.types.inttype)
 	var pred llvm.IntPredicate
 	switch op {
@@ -51,8 +51,8 @@ func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue 
 
 // stringIndex implements v = m[i]
 func (c *compiler) stringIndex(s, i *LLVMValue) *LLVMValue {
-	ptr := c.builder.CreateExtractValue(s.LLVMValue(), 0, "")
-	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.LLVMValue()}, "")
+	ptr := c.builder.CreateExtractValue(s.value, 0, "")
+	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
 	return newValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
 }
 
@@ -65,10 +65,10 @@ func (fr *frame) stringIterInit(str *LLVMValue) []*LLVMValue {
 // stringIterNext advances the iterator, and returns the tuple (ok, k, v).
 func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
 	str, indexptr := iter[0], iter[1]
-	k := fr.builder.CreateLoad(indexptr.LLVMValue(), "")
+	k := fr.builder.CreateLoad(indexptr.value, "")
 
-	result := fr.runtime.stringiter2.call(fr, str.LLVMValue(), k)
-	fr.builder.CreateStore(result[0], indexptr.LLVMValue())
+	result := fr.runtime.stringiter2.call(fr, str.value, k)
+	fr.builder.CreateStore(result[0], indexptr.value)
 	ok := fr.builder.CreateIsNotNull(result[0], "")
 	ok = fr.builder.CreateZExt(ok, llvm.Int8Type(), "")
 	v := result[1]
@@ -78,18 +78,18 @@ func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
 
 func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
 	v = fr.convert(v, types.Typ[types.Int])
-	result := fr.runtime.intToString.call(fr, v.LLVMValue())
+	result := fr.runtime.intToString.call(fr, v.value)
 	return newValue(result[0], types.Typ[types.String])
 }
 
 func (fr *frame) stringToRuneSlice(v *LLVMValue) *LLVMValue {
-	result := fr.runtime.stringToIntArray.call(fr, v.LLVMValue())
+	result := fr.runtime.stringToIntArray.call(fr, v.value)
 	runeslice := types.NewSlice(types.Typ[types.Rune])
 	return newValue(result[0], runeslice)
 }
 
 func (fr *frame) runeSliceToString(v *LLVMValue) *LLVMValue {
-	llv := v.LLVMValue()
+	llv := v.value
 	ptr := fr.builder.CreateExtractValue(llv, 0, "")
 	len := fr.builder.CreateExtractValue(llv, 1, "")
 	result := fr.runtime.intArrayToString.call(fr, ptr, len)

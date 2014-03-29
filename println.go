@@ -12,7 +12,7 @@ import (
 
 func (fr *frame) printValues(println_ bool, values ...*LLVMValue) {
 	for i, value := range values {
-		llvm_value := value.LLVMValue()
+		llvm_value := value.value
 
 		typ := value.Type().Underlying()
 		if name, isname := typ.(*types.Named); isname {

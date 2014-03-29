@@ -16,7 +16,7 @@ func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
 	dyntyp = fr.builder.CreateBitCast(dyntyp, llvm.PointerType(llvm.Int8Type(), 0), "")
 	var cap llvm.Value
 	if cap_ != nil {
-		cap = fr.convert(cap_, types.Typ[types.Uintptr]).LLVMValue()
+		cap = fr.convert(cap_, types.Typ[types.Uintptr]).value
 	} else {
 		cap = llvm.ConstNull(fr.types.inttype)
 	}
@@ -26,10 +26,10 @@ func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
 
 // mapLookup implements v[, ok] = m[k]
 func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
-	llk := k.LLVMValue()
+	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
-	valptr := fr.runtime.mapIndex.call(fr, m.LLVMValue(), pk, boolLLVMValue(false))[0]
+	valptr := fr.runtime.mapIndex.call(fr, m.value, pk, boolLLVMValue(false))[0]
 	okbit := fr.builder.CreateIsNotNull(valptr, "")
 
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
@@ -40,23 +40,23 @@ func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
 
 // mapUpdate implements m[k] = v
 func (fr *frame) mapUpdate(m, k, v *LLVMValue) {
-	llk := k.LLVMValue()
+	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
-	valptr := fr.runtime.mapIndex.call(fr, m.LLVMValue(), pk, boolLLVMValue(true))[0]
+	valptr := fr.runtime.mapIndex.call(fr, m.value, pk, boolLLVMValue(true))[0]
 
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
 	llelemtyp := fr.types.ToLLVM(elemtyp)
 	typedvalptr := fr.builder.CreateBitCast(valptr, llvm.PointerType(llelemtyp, 0), "")
-	fr.builder.CreateStore(v.LLVMValue(), typedvalptr)
+	fr.builder.CreateStore(v.value, typedvalptr)
 }
 
 // mapDelete implements delete(m, k)
 func (fr *frame) mapDelete(m, k *LLVMValue) {
-	llk := k.LLVMValue()
+	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
-	fr.runtime.mapdelete.call(fr, m.LLVMValue(), pk)
+	fr.runtime.mapdelete.call(fr, m.value, pk)
 }
 
 // mapIterInit creates a map iterator
@@ -91,7 +91,7 @@ func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
 	valbuf := fr.allocaBuilder.CreateAlloca(vlltyp, "")
 	valptr := fr.builder.CreateBitCast(valbuf, i8ptr, "")
 
-	isinit := fr.builder.CreateLoad(isinitptr.LLVMValue(), "")
+	isinit := fr.builder.CreateLoad(isinitptr.value, "")
 
 	initbb := llvm.AddBasicBlock(fr.function, "")
 	nextbb := llvm.AddBasicBlock(fr.function, "")
@@ -100,8 +100,8 @@ func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
 	fr.builder.CreateCondBr(isinit, nextbb, initbb)
 
 	fr.builder.SetInsertPointAtEnd(initbb)
-	fr.builder.CreateStore(llvm.ConstAllOnes(llvm.Int1Type()), isinitptr.LLVMValue())
-	fr.runtime.mapiterinit.call(fr, m.LLVMValue(), mapiterbufelem0ptr)
+	fr.builder.CreateStore(llvm.ConstAllOnes(llvm.Int1Type()), isinitptr.value)
+	fr.runtime.mapiterinit.call(fr, m.value, mapiterbufelem0ptr)
 	fr.builder.CreateBr(contbb)
 
 	fr.builder.SetInsertPointAtEnd(nextbb)

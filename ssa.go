@@ -277,10 +277,10 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		/*
 			rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
 			defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
-			fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
+			fr.builder.CreateCall(fr.runtime.initdefers.value, []llvm.Value{defers}, "")
 			jb := fr.builder.CreateStructGEP(defers, 0, "")
 			jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-			result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
+			result := fr.builder.CreateCall(fr.runtime.setjmp.value, []llvm.Value{jb}, "")
 			result = fr.builder.CreateIsNotNull(result, "")
 			fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
 			// We'll only get here via a panic, which must either be
@@ -313,7 +313,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 				}
 			}
 			fr.builder.SetInsertPointAtEnd(rdblock)
-			fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+			fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
 			term = fr.builder.CreateBr(recoverBlock)
 		*/
 	} else {
@@ -350,7 +350,7 @@ func (fr *frame) fixupPhis() {
 		blocks := make([]llvm.BasicBlock, len(phi.ssa.Edges))
 		block := phi.ssa.Block()
 		for i, edge := range phi.ssa.Edges {
-			values[i] = fr.value(edge).LLVMValue()
+			values[i] = fr.value(edge).value
 			blocks[i] = fr.lastBlock(block.Preds[i])
 		}
 		phi.llvm.AddIncoming(values, blocks)
@@ -420,7 +420,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			value = fr.builder.CreateBitCast(value, llvm.PointerType(llvm.Int8Type(), 0), "")
 			fr.env[instr] = newValue(value, instr.Type())
 		} else {
-			value = fr.env[instr].LLVMValue()
+			value = fr.env[instr].value
 		}
 		fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 
@@ -450,7 +450,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = x
 
 	case *ssa.ChangeType:
-		value := fr.value(instr.X).LLVMValue()
+		value := fr.value(instr.X).value
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
@@ -476,16 +476,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Extract:
 		var elem llvm.Value
 		if t, ok := fr.tuples[instr.Tuple]; ok {
-			elem = t[instr.Index].LLVMValue()
+			elem = t[instr.Index].value
 		} else {
-			tuple := fr.value(instr.Tuple).LLVMValue()
+			tuple := fr.value(instr.Tuple).value
 			elem = fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
 		}
 		elemtyp := instr.Type()
 		fr.env[instr] = newValue(elem, elemtyp)
 
 	case *ssa.Field:
-		value := fr.value(instr.X).LLVMValue()
+		value := fr.value(instr.X).value
 		field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
 		fieldtyp := instr.Type()
 		fr.env[instr] = newValue(field, fieldtyp)
@@ -493,7 +493,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.FieldAddr:
 		// TODO: implement nil check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
-		ptr := fr.value(instr.X).LLVMValue()
+		ptr := fr.value(instr.X).value
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
 		ptr = fr.builder.CreateBitCast(ptr, ptrtyp, "")
@@ -507,7 +507,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
-		cond := fr.value(instr.Cond).LLVMValue()
+		cond := fr.value(instr.Cond).value
 		block := instr.Block()
 		trueBlock := fr.block(block.Succs[0])
 		falseBlock := fr.block(block.Succs[1])
@@ -517,10 +517,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Index:
 		// FIXME Surely we should be dealing with an
 		// *array, so we can do a GEP?
-		array := fr.value(instr.X).LLVMValue()
+		array := fr.value(instr.X).value
 		arrayptr := fr.builder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
-		index := fr.value(instr.Index).LLVMValue()
+		index := fr.value(instr.Index).value
 		zero := llvm.ConstNull(index.Type())
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
@@ -528,8 +528,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.IndexAddr:
 		// TODO: implement nil-check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
-		x := fr.value(instr.X).LLVMValue()
-		index := fr.value(instr.Index).LLVMValue()
+		x := fr.value(instr.X).value
+		index := fr.value(instr.Index).value
 		var elemtyp types.Type
 		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
@@ -604,8 +604,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO(axw)
-		//arg := fr.value(instr.X).LLVMValue()
-		//fr.builder.CreateCall(fr.runtime.panic_.LLVMValue(), []llvm.Value{arg}, "")
+		//arg := fr.value(instr.X).value
+		//fr.builder.CreateCall(fr.runtime.panic_.value, []llvm.Value{arg}, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
@@ -628,13 +628,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		vals := make([]llvm.Value, len(instr.Results))
 		for i, res := range instr.Results {
-			vals[i] = fr.value(res).LLVMValue()
+			vals[i] = fr.value(res).value
 		}
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
 	case *ssa.RunDefers:
 		// TODO(axw)
-		//fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+		//fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Select:
@@ -658,8 +658,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.slice(x, low, high)
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr).LLVMValue()
-		value := fr.value(instr.Val).LLVMValue()
+		addr := fr.value(instr.Addr).value
+		value := fr.value(instr.Val).value
 		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
 		fr.builder.CreateStore(value, addr)
@@ -685,7 +685,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			}
 		case token.MUL:
 			// The bitcast is necessary to handle recursive pointer loads.
-			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
+			llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
 			fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
 		default:
 			fr.env[instr] = fr.unaryOp(operand, instr.Op)
@@ -734,8 +734,8 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		return []*LLVMValue{fr.extractImagValue(args[0])}
 
 	case "complex":
-		r := args[0].LLVMValue()
-		i := args[1].LLVMValue()
+		r := args[0].value
+		i := args[1].value
 		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
@@ -771,8 +771,8 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
 		fn = fr.value(call.Value)
 		if recv := call.Signature().Recv(); recv != nil {
 			if _, ok := recv.Type().Underlying().(*types.Pointer); !ok {
-				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].LLVMValue().Type(), "")
-				fr.builder.CreateStore(args[0].LLVMValue(), recvalloca)
+				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].value.Type(), "")
+				fr.builder.CreateStore(args[0].value, recvalloca)
 				args[0] = newValue(recvalloca, types.NewPointer(args[0].Type()))
 			}
 		}
@@ -801,7 +801,7 @@ func hasDefer(f *ssa.Function) bool {
 func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 	resultType := c.llvmtypes.ToLLVM(f.Type())
-	fnptr := f.LLVMValue()
+	fnptr := f.value
 	contextType := resultType.StructElementTypes()[1]
 	llfntyp := fnptr.Type().ElementType()
 	llfntyp = llvm.FunctionType(

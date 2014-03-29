@@ -17,9 +17,9 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue) []*LLVMValu
 
 	args := make([]llvm.Value, len(argValues))
 	for i, arg := range argValues {
-		args[i] = arg.LLVMValue()
+		args[i] = arg.value
 	}
-	results := typinfo.call(c.types.ctx, c.allocaBuilder, c.builder, fn.LLVMValue(), args)
+	results := typinfo.call(c.types.ctx, c.allocaBuilder, c.builder, fn.value, args)
 
 	resultValues := make([]*LLVMValue, len(results))
 	for i, res := range results {

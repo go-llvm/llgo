@@ -688,7 +688,7 @@ func (tm *TypeMap) getImtPointer(srctype types.Type, targettype *types.Interface
 		targetm := targetms.At(i)
 		srcm := srcms.Lookup(targetm.Obj().Pkg(), targetm.Obj().Name())
 
-		elems[i+1] = tm.methodResolver.ResolveMethod(srcm).LLVMValue()
+		elems[i+1] = tm.methodResolver.ResolveMethod(srcm).value
 	}
 	imtinit := llvm.ConstArray(i8ptr, elems)
 
@@ -1083,7 +1083,7 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 		mvals[3] = tm.getTypeDescriptorPointer(rftyp)
 
 		// function
-		mvals[4] = mfunc.LLVMValue()
+		mvals[4] = mfunc.value
 
 		methods[i] = llvm.ConstNamedStruct(tm.methodType, mvals[:])
 	}
