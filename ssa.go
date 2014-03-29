@@ -512,7 +512,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(fieldptr, fieldptrtyp)
 
 	case *ssa.Go:
-		fn, arg := fr.createThunk(&instr.Call)
+		fn, arg := fr.createThunk(instr)
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
@@ -768,7 +768,11 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	}
 
 	if builtin, ok := call.Value.(*ssa.Builtin); ok {
-		return fr.callBuiltin(instr.Value().Type(), builtin, args)
+		var typ types.Type
+		if v := instr.Value(); v != nil {
+			typ = v.Type()
+		}
+		return fr.callBuiltin(typ, builtin, args)
 	}
 
 	var fn *govalue

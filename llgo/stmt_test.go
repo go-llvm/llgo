@@ -20,5 +20,6 @@ func TestGoto(t *testing.T)                     { checkOutputEqual(t, "branching
 func TestRecover(t *testing.T)                  { checkOutputEqual(t, "errors/recover.go") }
 func TestLabeledBranching(t *testing.T)         { checkOutputEqual(t, "branching/labeled.go") }
 func TestDefer(t *testing.T)                    { checkOutputEqual(t, "defer.go") }
+func TestGo(t *testing.T)                       { checkOutputEqual(t, "go.go") }
 
 // vim: set ft=go:
