@@ -384,7 +384,7 @@ func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
 	case *ssa.Function:
 		return fr.resolveFunction(v)
 	case *ssa.Const:
-		return fr.NewConstValue(v.Value, v.Type())
+		return fr.newValueFromConst(v.Value, v.Type())
 	case *ssa.Global:
 		if g, ok := fr.globals[v]; ok {
 			return fr.NewValue(g, v.Type())
@@ -426,7 +426,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.BinOp:
 		lhs, rhs := fr.value(instr.X), fr.value(instr.Y)
-		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs).(*LLVMValue)
+		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs)
 
 	case *ssa.Call:
 		tuple := fr.callInstruction(instr)
@@ -458,7 +458,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Convert:
 		v := fr.value(instr.X)
-		fr.env[instr] = fr.convert(v, instr.Type()).(*LLVMValue)
+		fr.env[instr] = fr.convert(v, instr.Type())
 
 	//case *ssa.DebugRef:
 
@@ -688,7 +688,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
 			fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
 		default:
-			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
+			fr.env[instr] = fr.unaryOp(operand, instr.Op)
 		}
 
 	default:
@@ -728,10 +728,10 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		return nil
 
 	case "real":
-		return []*LLVMValue{args[0].extractComplexComponent(0)}
+		return []*LLVMValue{fr.extractRealValue(args[0])}
 
 	case "imag":
-		return []*LLVMValue{args[0].extractComplexComponent(1)}
+		return []*LLVMValue{fr.extractImagValue(args[0])}
 
 	case "complex":
 		r := args[0].LLVMValue()

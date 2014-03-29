@@ -20,7 +20,7 @@ func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
 // chanSend implements ch<- x
 func (fr *frame) chanSend(ch *LLVMValue, elem *LLVMValue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
-	elem = fr.convert(elem, elemtyp).(*LLVMValue)
+	elem = fr.convert(elem, elemtyp)
 	elemptr := fr.allocaBuilder.CreateAlloca(elem.LLVMValue().Type(), "")
 	fr.builder.CreateStore(elem.LLVMValue(), elemptr)
 	elemptr = fr.builder.CreateBitCast(elemptr, llvm.PointerType(llvm.Int8Type(), 0), "")

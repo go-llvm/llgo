@@ -77,7 +77,7 @@ func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
 }
 
 func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
-	v = fr.convert(v, types.Typ[types.Int]).(*LLVMValue)
+	v = fr.convert(v, types.Typ[types.Int])
 	result := fr.runtime.intToString.call(fr, v.LLVMValue())
 	return fr.NewValue(result[0], types.Typ[types.String])
 }
