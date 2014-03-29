@@ -45,8 +45,6 @@ func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
 // runtime types and intrinsic function declarations.
 type runtimeInterface struct {
 	// intrinsics
-	chanrecv,
-	chansend,
 	selectdefault,
 	selectgo,
 	selectinit,
@@ -62,6 +60,7 @@ type runtimeInterface struct {
 	assertInterface,
 	chanCap,
 	chanLen,
+	chanrecv2,
 	checkInterfaceType,
 	convertInterface,
 	copy,
@@ -94,7 +93,9 @@ type runtimeInterface struct {
 	printSpace,
 	printString,
 	printUint64,
+	receiveBig,
 	runtimeError,
+	sendBig,
 	strcmp,
 	stringiter2,
 	stringPlus,
@@ -106,8 +107,6 @@ type runtimeInterface struct {
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
 	var ri runtimeInterface
 	intrinsics := map[string]**LLVMValue{
-		"chanrecv":      &ri.chanrecv,
-		"chansend":      &ri.chansend,
 		"selectdefault": &ri.selectdefault,
 		"selectgo":      &ri.selectgo,
 		"selectinit":    &ri.selectinit,
@@ -164,6 +163,12 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 			rfi:  &ri.chanLen,
 			args: []types.Type{UnsafePointer},
 			res:  []types.Type{Int},
+		},
+		{
+			name: "runtime.chanrecv2",
+			rfi:  &ri.chanrecv2,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+			res:  []types.Type{Bool},
 		},
 		{
 			name: "__go_check_interface_type",
@@ -338,9 +343,19 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 			args: []types.Type{Int64},
 		},
 		{
+			name: "__go_receive_big",
+			rfi:  &ri.receiveBig,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
 			name: "__go_runtime_error",
 			rfi:  &ri.runtimeError,
 			args: []types.Type{Int32},
+		},
+		{
+			name: "__go_send_big",
+			rfi:  &ri.sendBig,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
 		},
 		{
 			name: "__go_strcmp",
