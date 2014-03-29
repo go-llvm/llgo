@@ -152,19 +152,16 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	fr := frame{
-		unit:       u,
-		blocks:     make([]llvm.BasicBlock, len(f.Blocks)),
-		lastBlocks: make([]llvm.BasicBlock, len(f.Blocks)),
-		env:        make(map[ssa.Value]*govalue),
-		tuples:     make(map[ssa.Value][]*govalue),
-	}
+	llvmFunction := u.resolveFunctionGlobal(f)
+	fr := newFrame(u, llvmFunction)
+	defer fr.dispose()
+
+	fr.blocks = make([]llvm.BasicBlock, len(f.Blocks))
+	fr.lastBlocks = make([]llvm.BasicBlock, len(f.Blocks))
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := fr.resolveFunctionGlobal(f)
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
 	delete(u.undefinedFuncs, f)
-	fr.function = llvmFunction
 	fr.retInf = fti.retInf
 
 	// Push the function onto the debug context.
@@ -172,7 +169,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if u.GenerateDebug && f.Synthetic == "" {
 		u.debug.pushFunctionContext(llvmFunction, f.Signature, f.Pos())
 		defer u.debug.popFunctionContext()
-		u.debug.setLocation(u.builder, f.Pos())
+		u.debug.setLocation(fr.builder, f.Pos())
 	}
 
 	// Functions that call recover must not be inlined, or we
@@ -330,13 +327,30 @@ type pendingPhi struct {
 
 type frame struct {
 	*unit
-	function   llvm.Value
-	retInf     retInfo
-	blocks     []llvm.BasicBlock
-	lastBlocks []llvm.BasicBlock
-	env        map[ssa.Value]*govalue
-	tuples     map[ssa.Value][]*govalue
-	phis       []pendingPhi
+	function               llvm.Value
+	builder, allocaBuilder llvm.Builder
+	retInf                 retInfo
+	blocks                 []llvm.BasicBlock
+	lastBlocks             []llvm.BasicBlock
+	env                    map[ssa.Value]*govalue
+	tuples                 map[ssa.Value][]*govalue
+	phis                   []pendingPhi
+}
+
+func newFrame(u *unit, fn llvm.Value) *frame {
+	return &frame{
+		unit:          u,
+		function:      fn,
+		builder:       llvm.GlobalContext().NewBuilder(),
+		allocaBuilder: llvm.GlobalContext().NewBuilder(),
+		env:           make(map[ssa.Value]*govalue),
+		tuples:        make(map[ssa.Value][]*govalue),
+	}
+}
+
+func (fr *frame) dispose() {
+	fr.builder.Dispose()
+	fr.allocaBuilder.Dispose()
 }
 
 func (fr *frame) fixupPhis() {

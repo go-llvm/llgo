@@ -104,11 +104,10 @@ func (c *Compiler) Compile(filenames []string, importpath string) (m *Module, er
 type compiler struct {
 	CompilerOptions
 
-	builder, allocaBuilder llvm.Builder
-	module                 *Module
-	dataLayout             string
-	target                 llvm.TargetData
-	fileset                *token.FileSet
+	module     *Module
+	dataLayout string
+	target     llvm.TargetData
+	fileset    *token.FileSet
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -196,13 +195,6 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		compiler.runtime,
 		MethodResolver(unit),
 	)
-
-	// Create a Builder, for building LLVM instructions.
-	compiler.builder = llvm.GlobalContext().NewBuilder()
-	defer compiler.builder.Dispose()
-
-	compiler.allocaBuilder = llvm.GlobalContext().NewBuilder()
-	defer compiler.allocaBuilder.Dispose()
 
 	// Initialise debugging.
 	compiler.debug.module = compiler.module.Module
