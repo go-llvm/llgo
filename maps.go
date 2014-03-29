@@ -11,6 +11,7 @@ import (
 
 // makeMap implements make(maptype[, initial space])
 func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
+	// TODO(pcc): call __go_new_map_big here if needed
 	dyntyp := fr.types.getMapDescriptorPointer(typ)
 	dyntyp = fr.builder.CreateBitCast(dyntyp, llvm.PointerType(llvm.Int8Type(), 0), "")
 	var cap llvm.Value
