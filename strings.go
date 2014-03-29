@@ -10,15 +10,6 @@ import (
 	"go/token"
 )
 
-func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
-	result := llvm.Undef(typ)
-	ptr := c.builder.CreateExtractValue(v, 0, "")
-	len := c.builder.CreateExtractValue(v, 1, "")
-	result = c.builder.CreateInsertValue(result, ptr, 0, "")
-	result = c.builder.CreateInsertValue(result, len, 1, "")
-	return result
-}
-
 func (fr *frame) concatenateStrings(lhs, rhs *govalue) *govalue {
 	result := fr.runtime.stringPlus.call(fr, lhs.value, rhs.value)
 	return newValue(result[0], types.Typ[types.String])

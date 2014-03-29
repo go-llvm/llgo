@@ -19,21 +19,6 @@ func (fr *frame) makeSlice(sliceType types.Type, length, capacity *govalue) *gov
 	return newValue(llslice[0], sliceType)
 }
 
-// coerceSlice takes a slice of one element type and coerces it to a
-// slice of another.
-func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
-	dst := llvm.Undef(dsttyp)
-	srcmem := c.builder.CreateExtractValue(src, 0, "")
-	srclen := c.builder.CreateExtractValue(src, 1, "")
-	srccap := c.builder.CreateExtractValue(src, 2, "")
-	dstmemtyp := dsttyp.StructElementTypes()[0]
-	dstmem := c.builder.CreateBitCast(srcmem, dstmemtyp, "")
-	dst = c.builder.CreateInsertValue(dst, dstmem, 0, "")
-	dst = c.builder.CreateInsertValue(dst, srclen, 1, "")
-	dst = c.builder.CreateInsertValue(dst, srccap, 2, "")
-	return dst
-}
-
 func (fr *frame) slice(x, low, high *govalue) *govalue {
 	var lowval, highval llvm.Value
 	if low != nil {

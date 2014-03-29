@@ -1098,68 +1098,6 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 	return uncommonTypePtr
 }
 
-/*
-func (tm *TypeMap) nameRuntimeType(n *types.Named) (global, ptr llvm.Value) {
-	name := typeString(n)
-	path := "runtime"
-	if pkg := n.Obj().Pkg(); pkg != nil {
-		path = pkg.Path()
-	}
-	if path != tm.pkgpath {
-		// We're not compiling the package from whence the type came,
-		// so we'll just create a pointer to it here.
-		global := llvm.AddGlobal(tm.module, tm.runtime.rtype.llvm, typeSymbol(name))
-		global.SetInitializer(llvm.ConstNull(tm.runtime.rtype.llvm))
-		global.SetLinkage(llvm.CommonLinkage)
-		return global, global
-	}
-
-	// If the underlying type is Basic, then we always create
-	// a new global. Otherwise, we clone the value returned
-	// from toRuntime in case it is cached and reused.
-	underlying := n.Underlying()
-	if basic, ok := underlying.(*types.Basic); ok {
-		global, ptr = tm.basicRuntimeType(basic, true)
-		global.SetName(typeSymbol(name))
-	} else {
-		global, ptr = tm.toRuntime(underlying)
-		clone := llvm.AddGlobal(tm.module, global.Type().ElementType(), typeSymbol(name))
-		clone.SetInitializer(global.Initializer())
-		global = clone
-		ptr = llvm.ConstBitCast(global, llvm.PointerType(tm.runtime.rtype.llvm, 0))
-	}
-	global.SetLinkage(llvm.ExternalLinkage)
-
-	// Locate the rtype.
-	underlyingRuntimeType := global.Initializer()
-	rtype := underlyingRuntimeType
-	if rtype.Type() != tm.runtime.rtype.llvm {
-		rtype = llvm.ConstExtractValue(rtype, []uint32{0})
-	}
-
-	// Insert the uncommon type.
-	uncommonTypeInit := tm.uncommonType(n, nil)
-	uncommonType := llvm.AddGlobal(tm.module, uncommonTypeInit.Type(), "")
-	uncommonType.SetInitializer(uncommonTypeInit)
-	rtype = llvm.ConstInsertValue(rtype, uncommonType, []uint32{9})
-
-	// Replace the rtype's string representation with the one from
-	// uncommonType. XXX should we have the package name prepended? Probably.
-	namePtr := llvm.ConstExtractValue(uncommonTypeInit, []uint32{0})
-	rtype = llvm.ConstInsertValue(rtype, namePtr, []uint32{8})
-
-	// Update the global's initialiser. Note that we take a copy
-	// of the underlying type; we're not updating a shared type.
-	if underlyingRuntimeType.Type() != tm.runtime.rtype.llvm {
-		underlyingRuntimeType = llvm.ConstInsertValue(underlyingRuntimeType, rtype, []uint32{0})
-	} else {
-		underlyingRuntimeType = rtype
-	}
-	global.SetInitializer(underlyingRuntimeType)
-	return global, ptr
-}
-*/
-
 // globalStringPtr returns a *string with the specified value.
 func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	strval := llvm.ConstString(value, false)
@@ -1208,44 +1146,4 @@ func (tm *TypeMap) makeSlice(values []llvm.Value, slicetyp llvm.Type) llvm.Value
 func isGlobalObject(obj types.Object) bool {
 	pkg := obj.Pkg()
 	return pkg == nil || obj.Parent() == pkg.Scope()
-}
-
-func (tm *TypeMap) interfaceFuncWrapper(f llvm.Value) llvm.Value {
-	ftyp := f.Type().ElementType()
-	paramTypes := ftyp.ParamTypes()
-	recvType := paramTypes[0]
-	paramTypes[0] = llvm.PointerType(llvm.Int8Type(), 0)
-	newf := llvm.AddFunction(f.GlobalParent(), f.Name()+".ifn", llvm.FunctionType(
-		ftyp.ReturnType(),
-		paramTypes,
-		ftyp.IsFunctionVarArg(),
-	))
-
-	b := llvm.GlobalContext().NewBuilder()
-	defer b.Dispose()
-	entry := llvm.AddBasicBlock(newf, "entry")
-	b.SetInsertPointAtEnd(entry)
-	args := make([]llvm.Value, len(paramTypes))
-	for i := range paramTypes {
-		args[i] = newf.Param(i)
-	}
-
-	recvBits := int(tm.target.TypeSizeInBits(recvType))
-	if recvBits > 0 {
-		args[0] = b.CreatePtrToInt(args[0], tm.target.IntPtrType(), "")
-		if args[0].Type().IntTypeWidth() > recvBits {
-			args[0] = b.CreateTrunc(args[0], llvm.IntType(recvBits), "")
-		}
-		args[0] = coerce(b, args[0], recvType)
-	} else {
-		args[0] = llvm.ConstNull(recvType)
-	}
-
-	result := b.CreateCall(f, args, "")
-	if result.Type().TypeKind() == llvm.VoidTypeKind {
-		b.CreateRetVoid()
-	} else {
-		b.CreateRet(result)
-	}
-	return newf
 }
