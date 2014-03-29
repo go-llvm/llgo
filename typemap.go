@@ -17,7 +17,7 @@ import (
 )
 
 type MethodResolver interface {
-	ResolveMethod(*types.Selection) *LLVMValue
+	ResolveMethod(*types.Selection) *govalue
 }
 
 // llvmTypeMap is provides a means of mapping from a types.Map

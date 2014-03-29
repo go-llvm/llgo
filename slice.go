@@ -11,7 +11,7 @@ import (
 
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
-func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
+func (fr *frame) makeSlice(sliceType types.Type, length, capacity *govalue) *govalue {
 	length = fr.convert(length, types.Typ[types.Uintptr])
 	capacity = fr.convert(capacity, types.Typ[types.Uintptr])
 	runtimeType := fr.types.ToRuntime(sliceType)
@@ -34,7 +34,7 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 	return dst
 }
 
-func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
+func (fr *frame) slice(x, low, high *govalue) *govalue {
 	var lowval, highval llvm.Value
 	if low != nil {
 		lowval = fr.convert(low, types.Typ[types.Int]).value

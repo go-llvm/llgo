@@ -10,7 +10,7 @@ import (
 )
 
 // makeMap implements make(maptype[, initial space])
-func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
+func (fr *frame) makeMap(typ types.Type, cap_ *govalue) *govalue {
 	// TODO(pcc): call __go_new_map_big here if needed
 	dyntyp := fr.types.getMapDescriptorPointer(typ)
 	dyntyp = fr.builder.CreateBitCast(dyntyp, llvm.PointerType(llvm.Int8Type(), 0), "")
@@ -25,7 +25,7 @@ func (fr *frame) makeMap(typ types.Type, cap_ *LLVMValue) *LLVMValue {
 }
 
 // mapLookup implements v[, ok] = m[k]
-func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
+func (fr *frame) mapLookup(m, k *govalue) (v *govalue, ok *govalue) {
 	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
@@ -39,7 +39,7 @@ func (fr *frame) mapLookup(m, k *LLVMValue) (v *LLVMValue, ok *LLVMValue) {
 }
 
 // mapUpdate implements m[k] = v
-func (fr *frame) mapUpdate(m, k, v *LLVMValue) {
+func (fr *frame) mapUpdate(m, k, v *govalue) {
 	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
@@ -52,7 +52,7 @@ func (fr *frame) mapUpdate(m, k, v *LLVMValue) {
 }
 
 // mapDelete implements delete(m, k)
-func (fr *frame) mapDelete(m, k *LLVMValue) {
+func (fr *frame) mapDelete(m, k *govalue) {
 	llk := k.value
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
@@ -60,7 +60,7 @@ func (fr *frame) mapDelete(m, k *LLVMValue) {
 }
 
 // mapIterInit creates a map iterator
-func (fr *frame) mapIterInit(m *LLVMValue) []*LLVMValue {
+func (fr *frame) mapIterInit(m *govalue) []*govalue {
 	// We represent an iterator as a tuple (map, *bool). The second element
 	// controls whether the code we generate for "next" (below) calls the
 	// runtime function for the first or the next element. We let the
@@ -68,11 +68,11 @@ func (fr *frame) mapIterInit(m *LLVMValue) []*LLVMValue {
 	isinit := fr.allocaBuilder.CreateAlloca(llvm.Int1Type(), "")
 	fr.builder.CreateStore(llvm.ConstNull(llvm.Int1Type()), isinit)
 
-	return []*LLVMValue{m, newValue(isinit, types.NewPointer(types.Typ[types.Bool]))}
+	return []*govalue{m, newValue(isinit, types.NewPointer(types.Typ[types.Bool]))}
 }
 
 // mapIterNext advances the iterator, and returns the tuple (ok, k, v).
-func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
+func (fr *frame) mapIterNext(iter []*govalue) []*govalue {
 	maptyp := iter[0].Type().Underlying().(*types.Map)
 	ktyp := maptyp.Key()
 	klltyp := fr.types.ToLLVM(ktyp)
@@ -135,5 +135,5 @@ func (fr *frame) mapIterNext(iter []*LLVMValue) []*LLVMValue {
 		[]llvm.BasicBlock{contbb, loadbb},
 	)
 
-	return []*LLVMValue{newValue(ok, types.Typ[types.Bool]), newValue(k, ktyp), newValue(v, vtyp)}
+	return []*govalue{newValue(ok, types.Typ[types.Bool]), newValue(k, ktyp), newValue(v, vtyp)}
 }

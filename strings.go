@@ -19,12 +19,12 @@ func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
 	return result
 }
 
-func (fr *frame) concatenateStrings(lhs, rhs *LLVMValue) *LLVMValue {
+func (fr *frame) concatenateStrings(lhs, rhs *govalue) *govalue {
 	result := fr.runtime.stringPlus.call(fr, lhs.value, rhs.value)
 	return newValue(result[0], types.Typ[types.String])
 }
 
-func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue {
+func (fr *frame) compareStrings(lhs, rhs *govalue, op token.Token) *govalue {
 	result := fr.runtime.strcmp.call(fr, lhs.value, rhs.value)[0]
 	zero := llvm.ConstNull(fr.types.inttype)
 	var pred llvm.IntPredicate
@@ -40,7 +40,7 @@ func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue 
 	case token.GEQ:
 		pred = llvm.IntSGE
 	case token.NEQ:
-		panic("NEQ is handled in LLVMValue.BinaryOp")
+		panic("NEQ is handled in govalue.BinaryOp")
 	default:
 		panic("unreachable")
 	}
@@ -50,20 +50,20 @@ func (fr *frame) compareStrings(lhs, rhs *LLVMValue, op token.Token) *LLVMValue 
 }
 
 // stringIndex implements v = m[i]
-func (c *compiler) stringIndex(s, i *LLVMValue) *LLVMValue {
+func (c *compiler) stringIndex(s, i *govalue) *govalue {
 	ptr := c.builder.CreateExtractValue(s.value, 0, "")
 	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
 	return newValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
 }
 
-func (fr *frame) stringIterInit(str *LLVMValue) []*LLVMValue {
+func (fr *frame) stringIterInit(str *govalue) []*govalue {
 	indexptr := fr.allocaBuilder.CreateAlloca(fr.types.inttype, "")
 	fr.builder.CreateStore(llvm.ConstNull(fr.types.inttype), indexptr)
-	return []*LLVMValue{str, newValue(indexptr, types.Typ[types.Int])}
+	return []*govalue{str, newValue(indexptr, types.Typ[types.Int])}
 }
 
 // stringIterNext advances the iterator, and returns the tuple (ok, k, v).
-func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
+func (fr *frame) stringIterNext(iter []*govalue) []*govalue {
 	str, indexptr := iter[0], iter[1]
 	k := fr.builder.CreateLoad(indexptr.value, "")
 
@@ -73,22 +73,22 @@ func (fr *frame) stringIterNext(iter []*LLVMValue) []*LLVMValue {
 	ok = fr.builder.CreateZExt(ok, llvm.Int8Type(), "")
 	v := result[1]
 
-	return []*LLVMValue{newValue(ok, types.Typ[types.Bool]), newValue(k, types.Typ[types.Int]), newValue(v, types.Typ[types.Rune])}
+	return []*govalue{newValue(ok, types.Typ[types.Bool]), newValue(k, types.Typ[types.Int]), newValue(v, types.Typ[types.Rune])}
 }
 
-func (fr *frame) runeToString(v *LLVMValue) *LLVMValue {
+func (fr *frame) runeToString(v *govalue) *govalue {
 	v = fr.convert(v, types.Typ[types.Int])
 	result := fr.runtime.intToString.call(fr, v.value)
 	return newValue(result[0], types.Typ[types.String])
 }
 
-func (fr *frame) stringToRuneSlice(v *LLVMValue) *LLVMValue {
+func (fr *frame) stringToRuneSlice(v *govalue) *govalue {
 	result := fr.runtime.stringToIntArray.call(fr, v.value)
 	runeslice := types.NewSlice(types.Typ[types.Rune])
 	return newValue(result[0], runeslice)
 }
 
-func (fr *frame) runeSliceToString(v *LLVMValue) *LLVMValue {
+func (fr *frame) runeSliceToString(v *govalue) *govalue {
 	llv := v.value
 	ptr := fr.builder.CreateExtractValue(llv, 0, "")
 	len := fr.builder.CreateExtractValue(llv, 1, "")

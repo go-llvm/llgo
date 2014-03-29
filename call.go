@@ -11,7 +11,7 @@ import (
 
 // createCall emits the code for a function call,
 // taking into account receivers, and panic/defer.
-func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue) []*LLVMValue {
+func (c *compiler) createCall(fn *govalue, argValues []*govalue) []*govalue {
 	fntyp := fn.Type().Underlying().(*types.Signature)
 	typinfo := c.types.getSignatureInfo(fntyp)
 
@@ -21,7 +21,7 @@ func (c *compiler) createCall(fn *LLVMValue, argValues []*LLVMValue) []*LLVMValu
 	}
 	results := typinfo.call(c.types.ctx, c.allocaBuilder, c.builder, fn.value, args)
 
-	resultValues := make([]*LLVMValue, len(results))
+	resultValues := make([]*govalue, len(results))
 	for i, res := range results {
 		resultValues[i] = newValue(res, fntyp.Results().At(i).Type())
 	}

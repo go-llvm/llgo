@@ -10,7 +10,7 @@ import (
 )
 
 // makeChan implements make(chantype[, size])
-func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
+func (fr *frame) makeChan(chantyp types.Type, size *govalue) *govalue {
 	// TODO(pcc): call __go_new_channel_big here if needed
 	dyntyp := fr.types.ToRuntime(chantyp)
 	ch := fr.runtime.newChannel.call(fr, dyntyp, size.value)[0]
@@ -18,7 +18,7 @@ func (fr *frame) makeChan(chantyp types.Type, size *LLVMValue) *LLVMValue {
 }
 
 // chanSend implements ch<- x
-func (fr *frame) chanSend(ch *LLVMValue, elem *LLVMValue) {
+func (fr *frame) chanSend(ch *govalue, elem *govalue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
 	elem = fr.convert(elem, elemtyp)
 	elemptr := fr.allocaBuilder.CreateAlloca(elem.value.Type(), "")
@@ -29,7 +29,7 @@ func (fr *frame) chanSend(ch *LLVMValue, elem *LLVMValue) {
 }
 
 // chanRecv implements x[, ok] = <-ch
-func (fr *frame) chanRecv(ch *LLVMValue, commaOk bool) (x, ok *LLVMValue) {
+func (fr *frame) chanRecv(ch *govalue, commaOk bool) (x, ok *govalue) {
 	elemtyp := ch.Type().Underlying().(*types.Chan).Elem()
 	ptr := fr.allocaBuilder.CreateAlloca(fr.types.ToLLVM(elemtyp), "")
 	ptri8 := fr.builder.CreateBitCast(ptr, llvm.PointerType(llvm.Int8Type(), 0), "")
@@ -48,11 +48,11 @@ func (fr *frame) chanRecv(ch *LLVMValue, commaOk bool) (x, ok *LLVMValue) {
 // selectState is equivalent to ssa.SelectState
 type selectState struct {
 	Dir  types.ChanDir
-	Chan *LLVMValue
-	Send *LLVMValue
+	Chan *govalue
+	Send *govalue
 }
 
-func (fr *frame) chanSelect(states []selectState, blocking bool) *LLVMValue {
+func (fr *frame) chanSelect(states []selectState, blocking bool) *govalue {
 	stackptr := fr.stacksave()
 	defer fr.stackrestore(stackptr)
 

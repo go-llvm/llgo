@@ -16,7 +16,7 @@ func (fns byName) Less(i, j int) bool {
 	return fns[i].Name() < fns[j].Name()
 }
 
-func (fr *frame) loadOrNull(cond, ptr llvm.Value, ty types.Type) *LLVMValue {
+func (fr *frame) loadOrNull(cond, ptr llvm.Value, ty types.Type) *govalue {
 	startbb := fr.builder.GetInsertBlock()
 	loadbb := llvm.AddBasicBlock(fr.function, "")
 	contbb := llvm.AddBasicBlock(fr.function, "")

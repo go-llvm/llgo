@@ -11,7 +11,7 @@ import (
 
 // interfaceMethod returns a function and receiver pointer for the specified
 // interface and method pair.
-func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv *LLVMValue) {
+func (fr *frame) interfaceMethod(iface *govalue, method *types.Func) (fn, recv *govalue) {
 	lliface := iface.value
 	llitab := fr.builder.CreateExtractValue(lliface, 0, "")
 	recv = newValue(fr.builder.CreateExtractValue(lliface, 1, ""), types.Typ[types.UnsafePointer])
@@ -41,7 +41,7 @@ func (fr *frame) interfaceMethod(iface *LLVMValue, method *types.Func) (fn, recv
 
 // compareInterfaces emits code to compare two interfaces for
 // equality.
-func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
+func (fr *frame) compareInterfaces(a, b *govalue) *govalue {
 	aNull := a.value.IsNull()
 	bNull := b.value.IsNull()
 	if aNull && bNull {
@@ -66,7 +66,7 @@ func (fr *frame) compareInterfaces(a, b *LLVMValue) *LLVMValue {
 	return newValue(result, types.Typ[types.Bool])
 }
 
-func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
+func (fr *frame) makeInterface(v *govalue, iface types.Type) *govalue {
 	llv := v.value
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	if _, ok := v.Type().Underlying().(*types.Pointer); !ok {
@@ -82,7 +82,7 @@ func (fr *frame) makeInterface(v *LLVMValue, iface types.Type) *LLVMValue {
 }
 
 // Reads the type descriptor from the given interface type.
-func (fr *frame) getInterfaceTypeDescriptor(v *LLVMValue) llvm.Value {
+func (fr *frame) getInterfaceTypeDescriptor(v *govalue) llvm.Value {
 	isempty := v.Type().Underlying().(*types.Interface).NumMethods() == 0
 	itab := fr.builder.CreateExtractValue(v.value, 0, "")
 	if isempty {
@@ -95,7 +95,7 @@ func (fr *frame) getInterfaceTypeDescriptor(v *LLVMValue) llvm.Value {
 
 // Reads the value from the given interface type, assuming that the
 // interface holds a value of the correct type.
-func (fr *frame) getInterfaceValue(v *LLVMValue, ty types.Type) *LLVMValue {
+func (fr *frame) getInterfaceValue(v *govalue, ty types.Type) *govalue {
 	val := fr.builder.CreateExtractValue(v.value, 1, "")
 	if _, ok := ty.Underlying().(*types.Pointer); !ok {
 		typedval := fr.builder.CreateBitCast(val, llvm.PointerType(fr.types.ToLLVM(ty), 0), "")
@@ -106,7 +106,7 @@ func (fr *frame) getInterfaceValue(v *LLVMValue, ty types.Type) *LLVMValue {
 
 // If cond is true, reads the value from the given interface type, otherwise
 // returns a nil value.
-func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *LLVMValue, ty types.Type) *LLVMValue {
+func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *govalue, ty types.Type) *govalue {
 	val := fr.builder.CreateExtractValue(v.value, 1, "")
 	if _, ok := ty.Underlying().(*types.Pointer); ok {
 		val = fr.builder.CreateSelect(cond, val, llvm.ConstNull(val.Type()), "")
@@ -116,7 +116,7 @@ func (fr *frame) getInterfaceValueOrNull(cond llvm.Value, v *LLVMValue, ty types
 	return newValue(val, ty)
 }
 
-func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue, okval *LLVMValue) {
+func (fr *frame) interfaceTypeCheck(val *govalue, ty types.Type) (v *govalue, okval *govalue) {
 	tytd := fr.types.ToRuntime(ty)
 	if _, ok := ty.Underlying().(*types.Interface); ok {
 		var result []llvm.Value
@@ -138,7 +138,7 @@ func (fr *frame) interfaceTypeCheck(val *LLVMValue, ty types.Type) (v *LLVMValue
 	return
 }
 
-func (fr *frame) interfaceTypeAssert(val *LLVMValue, ty types.Type) *LLVMValue {
+func (fr *frame) interfaceTypeAssert(val *govalue, ty types.Type) *govalue {
 	if _, ok := ty.Underlying().(*types.Interface); ok {
 		return fr.changeInterface(val, ty, true)
 	} else {
@@ -152,7 +152,7 @@ func (fr *frame) interfaceTypeAssert(val *LLVMValue, ty types.Type) *LLVMValue {
 }
 
 // convertI2E converts a non-empty interface value to an empty interface.
-func (fr *frame) convertI2E(v *LLVMValue) *LLVMValue {
+func (fr *frame) convertI2E(v *govalue) *govalue {
 	td := fr.getInterfaceTypeDescriptor(v)
 	val := fr.builder.CreateExtractValue(v.value, 1, "")
 
@@ -163,7 +163,7 @@ func (fr *frame) convertI2E(v *LLVMValue) *LLVMValue {
 	return newValue(intf, typ)
 }
 
-func (fr *frame) changeInterface(v *LLVMValue, ty types.Type, assert bool) *LLVMValue {
+func (fr *frame) changeInterface(v *govalue, ty types.Type, assert bool) *govalue {
 	td := fr.getInterfaceTypeDescriptor(v)
 	tytd := fr.types.ToRuntime(ty)
 	var itab llvm.Value

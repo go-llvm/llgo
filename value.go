@@ -12,31 +12,29 @@ import (
 	"go/token"
 )
 
-// LLVMValue contains an LLVM value and a Go type,
+// govalue contains an LLVM value and a Go type,
 // representing the result of a Go expression.
-//
-// TODO(axw) unexport.
-type LLVMValue struct {
+type govalue struct {
 	value llvm.Value
 	typ   types.Type
 }
 
-func (v LLVMValue) String() string {
-	return fmt.Sprintf("[llgo.LLVMValue typ:%s value:%v]", v.typ, v.value)
+func (v *govalue) String() string {
+	return fmt.Sprintf("[llgo.govalue typ:%s value:%v]", v.typ, v.value)
 }
 
 // Create a new dynamic value from a (LLVM Value, Type) pair.
-func newValue(v llvm.Value, t types.Type) *LLVMValue {
-	return &LLVMValue{v, t}
+func newValue(v llvm.Value, t types.Type) *govalue {
+	return &govalue{v, t}
 }
 
 // TODO(axw) remove this, use .typ directly
-func (v *LLVMValue) Type() types.Type {
+func (v *govalue) Type() types.Type {
 	return v.typ
 }
 
 // newValueFromConst converts a constant value to an LLVM value.
-func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *LLVMValue {
+func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *govalue {
 	switch {
 	case v == nil:
 		llvmtyp := fr.types.ToLLVM(typ)
@@ -130,7 +128,7 @@ func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *LLVMValue {
 	panic(fmt.Sprintf("unhandled: t=%s(%T), v=%v(%T)", typ, typ, v, v))
 }
 
-func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs *LLVMValue) *LLVMValue {
+func (fr *frame) binaryOp(lhs *govalue, op token.Token, rhs *govalue) *govalue {
 	if op == token.NEQ {
 		result := fr.binaryOp(lhs, token.EQL, rhs)
 		return fr.unaryOp(result, token.NOT)
@@ -359,7 +357,7 @@ func (fr *frame) binaryOp(lhs *LLVMValue, op token.Token, rhs *LLVMValue) *LLVMV
 	panic("unreachable")
 }
 
-func (fr *frame) shift(lhs *LLVMValue, rhs *LLVMValue, op token.Token) *LLVMValue {
+func (fr *frame) shift(lhs *govalue, rhs *govalue, op token.Token) *govalue {
 	rhs = fr.convert(rhs, lhs.Type())
 	lhsval := lhs.value
 	bits := rhs.value
@@ -383,7 +381,7 @@ func (fr *frame) shift(lhs *LLVMValue, rhs *LLVMValue, op token.Token) *LLVMValu
 	return newValue(result, lhs.typ)
 }
 
-func (fr *frame) unaryOp(v *LLVMValue, op token.Token) *LLVMValue {
+func (fr *frame) unaryOp(v *govalue, op token.Token) *govalue {
 	switch op {
 	case token.SUB:
 		var value llvm.Value
@@ -409,7 +407,7 @@ func (fr *frame) unaryOp(v *LLVMValue, op token.Token) *LLVMValue {
 	}
 }
 
-func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) *LLVMValue {
+func (fr *frame) convert(v *govalue, dsttyp types.Type) *govalue {
 	b := fr.builder
 
 	// If it's a stack allocated value, we'll want to compare the
@@ -603,7 +601,7 @@ func (fr *frame) convert(v *LLVMValue, dsttyp types.Type) *LLVMValue {
 }
 
 // extractRealValue extracts the real component of a complex number.
-func (fr *frame) extractRealValue(v *LLVMValue) *LLVMValue {
+func (fr *frame) extractRealValue(v *govalue) *govalue {
 	component := fr.builder.CreateExtractValue(v.value, 0, "")
 	if component.Type().TypeKind() == llvm.FloatTypeKind {
 		return newValue(component, types.Typ[types.Float32])
@@ -612,7 +610,7 @@ func (fr *frame) extractRealValue(v *LLVMValue) *LLVMValue {
 }
 
 // extractRealValue extracts the imaginary component of a complex number.
-func (fr *frame) extractImagValue(v *LLVMValue) *LLVMValue {
+func (fr *frame) extractImagValue(v *govalue) *govalue {
 	component := fr.builder.CreateExtractValue(v.value, 1, "")
 	if component.Type().TypeKind() == llvm.FloatTypeKind {
 		return newValue(component, types.Typ[types.Float32])

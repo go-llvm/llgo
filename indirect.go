@@ -18,7 +18,7 @@ func (fr *frame) createThunk(call *ssa.CallCommon) (thunk llvm.Value, arg llvm.V
 	var nonconstindices []int
 	var nonconsttypes []*types.Var
 	var args []llvm.Value
-	packArg := func(arg *LLVMValue) {
+	packArg := func(arg *govalue) {
 		if arg.value.IsAConstant().C != nil {
 			args = append(args, arg.value)
 		} else {
