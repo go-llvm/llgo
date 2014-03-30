@@ -75,18 +75,18 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 }
 
 // ResolveMethod implements MethodResolver.ResolveMethod.
-func (u *unit) ResolveMethod(s *types.Selection) *LLVMValue {
+func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 	return u.resolveFunction(u.pkg.Prog.Method(s))
 }
 
 // ResolveFunc implements FuncResolver.ResolveFunc.
-func (u *unit) ResolveFunc(f *types.Func) *LLVMValue {
+func (u *unit) ResolveFunc(f *types.Func) *govalue {
 	return u.resolveFunction(u.pkg.Prog.FuncValue(f))
 }
 
-func (u *unit) resolveFunction(f *ssa.Function) *LLVMValue {
+func (u *unit) resolveFunction(f *ssa.Function) *govalue {
 	llvmFunction := u.resolveFunctionGlobal(f)
-	return u.NewValue(llvm.ConstBitCast(llvmFunction, llvm.PointerType(llvm.Int8Type(), 0)), f.Signature)
+	return newValue(llvm.ConstBitCast(llvmFunction, llvm.PointerType(llvm.Int8Type(), 0)), f.Signature)
 }
 
 func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
@@ -161,8 +161,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		unit:       u,
 		blocks:     make([]llvm.BasicBlock, len(f.Blocks)),
 		lastBlocks: make([]llvm.BasicBlock, len(f.Blocks)),
-		env:        make(map[ssa.Value]*LLVMValue),
-		tuples:     make(map[ssa.Value][]*LLVMValue),
+		env:        make(map[ssa.Value]*govalue),
+		tuples:     make(map[ssa.Value][]*govalue),
 	}
 
 	fr.logf("Define function: %s", f.String())
@@ -198,7 +198,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		for i, fv := range f.FreeVars {
 			addressPtr := fr.builder.CreateStructGEP(arg0, i, "")
 			address := fr.builder.CreateLoad(addressPtr, "")
-			fr.env[fv] = fr.NewValue(address, fv.Type())
+			fr.env[fv] = newValue(address, fv.Type())
 		}
 		paramOffset++
 	}
@@ -221,7 +221,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 				llparam = fr.builder.CreateLoad(llparam, "")
 			}
 		}
-		fr.env[param] = fr.NewValue(llparam, param.Type())
+		fr.env[param] = newValue(llparam, param.Type())
 	}
 
 	// Allocate stack space for locals in the prologue block.
@@ -229,7 +229,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		fr.memsetZero(alloca, llvm.SizeOf(typ))
-		value := fr.NewValue(alloca, local.Type())
+		value := newValue(alloca, local.Type())
 		fr.env[local] = value
 		if fr.GenerateDebug {
 			paramIndex, ok := paramPos[local.Pos()]
@@ -277,10 +277,10 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		/*
 			rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
 			defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
-			fr.builder.CreateCall(fr.runtime.initdefers.LLVMValue(), []llvm.Value{defers}, "")
+			fr.builder.CreateCall(fr.runtime.initdefers.value, []llvm.Value{defers}, "")
 			jb := fr.builder.CreateStructGEP(defers, 0, "")
 			jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-			result := fr.builder.CreateCall(fr.runtime.setjmp.LLVMValue(), []llvm.Value{jb}, "")
+			result := fr.builder.CreateCall(fr.runtime.setjmp.value, []llvm.Value{jb}, "")
 			result = fr.builder.CreateIsNotNull(result, "")
 			fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
 			// We'll only get here via a panic, which must either be
@@ -313,7 +313,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 				}
 			}
 			fr.builder.SetInsertPointAtEnd(rdblock)
-			fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+			fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
 			term = fr.builder.CreateBr(recoverBlock)
 		*/
 	} else {
@@ -339,8 +339,8 @@ type frame struct {
 	retInf     retInfo
 	blocks     []llvm.BasicBlock
 	lastBlocks []llvm.BasicBlock
-	env        map[ssa.Value]*LLVMValue
-	tuples     map[ssa.Value][]*LLVMValue
+	env        map[ssa.Value]*govalue
+	tuples     map[ssa.Value][]*govalue
 	phis       []pendingPhi
 }
 
@@ -350,7 +350,7 @@ func (fr *frame) fixupPhis() {
 		blocks := make([]llvm.BasicBlock, len(phi.ssa.Edges))
 		block := phi.ssa.Block()
 		for i, edge := range phi.ssa.Edges {
-			values[i] = fr.value(edge).LLVMValue()
+			values[i] = fr.value(edge).value
 			blocks[i] = fr.lastBlock(block.Preds[i])
 		}
 		phi.llvm.AddIncoming(values, blocks)
@@ -377,24 +377,24 @@ func (fr *frame) lastBlock(b *ssa.BasicBlock) llvm.BasicBlock {
 	return fr.lastBlocks[b.Index]
 }
 
-func (fr *frame) value(v ssa.Value) (result *LLVMValue) {
+func (fr *frame) value(v ssa.Value) (result *govalue) {
 	switch v := v.(type) {
 	case nil:
 		return nil
 	case *ssa.Function:
 		return fr.resolveFunction(v)
 	case *ssa.Const:
-		return fr.NewConstValue(v.Value, v.Type())
+		return fr.newValueFromConst(v.Value, v.Type())
 	case *ssa.Global:
 		if g, ok := fr.globals[v]; ok {
-			return fr.NewValue(g, v.Type())
+			return newValue(g, v.Type())
 		}
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
 		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
 		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
 		fr.globals[v] = llglobal
-		return fr.NewValue(llglobal, v.Type())
+		return newValue(llglobal, v.Type())
 	}
 	if value, ok := fr.env[v]; ok {
 		return value
@@ -418,15 +418,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			value = fr.createTypeMalloc(typ)
 			value.SetName(instr.Comment)
 			value = fr.builder.CreateBitCast(value, llvm.PointerType(llvm.Int8Type(), 0), "")
-			fr.env[instr] = fr.NewValue(value, instr.Type())
+			fr.env[instr] = newValue(value, instr.Type())
 		} else {
-			value = fr.env[instr].LLVMValue()
+			value = fr.env[instr].value
 		}
 		fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 
 	case *ssa.BinOp:
 		lhs, rhs := fr.value(instr.X), fr.value(instr.Y)
-		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs).(*LLVMValue)
+		fr.env[instr] = fr.binaryOp(lhs, instr.Op, rhs)
 
 	case *ssa.Call:
 		tuple := fr.callInstruction(instr)
@@ -450,15 +450,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = x
 
 	case *ssa.ChangeType:
-		value := fr.value(instr.X).LLVMValue()
+		value := fr.value(instr.X).value
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
-		fr.env[instr] = fr.NewValue(value, instr.Type())
+		fr.env[instr] = newValue(value, instr.Type())
 
 	case *ssa.Convert:
 		v := fr.value(instr.X)
-		fr.env[instr] = fr.convert(v, instr.Type()).(*LLVMValue)
+		fr.env[instr] = fr.convert(v, instr.Type())
 
 	//case *ssa.DebugRef:
 
@@ -470,44 +470,44 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			panic("illegal use of builtin in defer statement")
 		}
 		fn = fr.indirectFunction(fn, args)
-		fr.createCall(fr.runtime.pushdefer, []*LLVMValue{fn})
+		fr.createCall(fr.runtime.pushdefer, []*govalue{fn})
 	*/
 
 	case *ssa.Extract:
 		var elem llvm.Value
 		if t, ok := fr.tuples[instr.Tuple]; ok {
-			elem = t[instr.Index].LLVMValue()
+			elem = t[instr.Index].value
 		} else {
-			tuple := fr.value(instr.Tuple).LLVMValue()
+			tuple := fr.value(instr.Tuple).value
 			elem = fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
 		}
 		elemtyp := instr.Type()
-		fr.env[instr] = fr.NewValue(elem, elemtyp)
+		fr.env[instr] = newValue(elem, elemtyp)
 
 	case *ssa.Field:
-		value := fr.value(instr.X).LLVMValue()
+		value := fr.value(instr.X).value
 		field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
 		fieldtyp := instr.Type()
-		fr.env[instr] = fr.NewValue(field, fieldtyp)
+		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
 		// TODO: implement nil check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
-		ptr := fr.value(instr.X).LLVMValue()
+		ptr := fr.value(instr.X).value
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
 		ptr = fr.builder.CreateBitCast(ptr, ptrtyp, "")
 		fieldptr := fr.builder.CreateStructGEP(ptr, instr.Field, instr.Name())
 		fieldptr = fr.builder.CreateBitCast(fieldptr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		fieldptrtyp := instr.Type()
-		fr.env[instr] = fr.NewValue(fieldptr, fieldptrtyp)
+		fr.env[instr] = newValue(fieldptr, fieldptrtyp)
 
 	case *ssa.Go:
 		fn, arg := fr.createThunk(&instr.Call)
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
-		cond := fr.value(instr.Cond).LLVMValue()
+		cond := fr.value(instr.Cond).value
 		block := instr.Block()
 		trueBlock := fr.block(block.Succs[0])
 		falseBlock := fr.block(block.Succs[1])
@@ -517,19 +517,19 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Index:
 		// FIXME Surely we should be dealing with an
 		// *array, so we can do a GEP?
-		array := fr.value(instr.X).LLVMValue()
+		array := fr.value(instr.X).value
 		arrayptr := fr.builder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
-		index := fr.value(instr.Index).LLVMValue()
+		index := fr.value(instr.Index).value
 		zero := llvm.ConstNull(index.Type())
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
-		fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(addr, ""), instr.Type())
+		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
 		// TODO: implement nil-check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
-		x := fr.value(instr.X).LLVMValue()
-		index := fr.value(instr.Index).LLVMValue()
+		x := fr.value(instr.X).value
+		index := fr.value(instr.Index).value
 		var elemtyp types.Type
 		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
@@ -542,7 +542,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		x = fr.builder.CreateBitCast(x, ptrtyp, "")
 		addr := fr.builder.CreateGEP(x, []llvm.Value{index}, "")
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(llvm.Int8Type(), 0), "")
-		fr.env[instr] = fr.NewValue(addr, types.NewPointer(elemtyp))
+		fr.env[instr] = newValue(addr, types.NewPointer(elemtyp))
 
 	case *ssa.Jump:
 		succ := instr.Block().Succs[0]
@@ -556,7 +556,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		} else {
 			v, ok := fr.mapLookup(x, index)
 			if instr.CommaOk {
-				fr.tuples[instr] = []*LLVMValue{v, ok}
+				fr.tuples[instr] = []*govalue{v, ok}
 			} else {
 				fr.env[instr] = v
 			}
@@ -569,7 +569,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		panic("closures not supported yet")
 		/*
 			fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
-			bindings := make([]*LLVMValue, len(instr.Bindings))
+			bindings := make([]*govalue, len(instr.Bindings))
 			for i, binding := range instr.Bindings {
 				bindings[i] = fr.value(binding)
 			}
@@ -604,14 +604,14 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Panic:
 		// TODO(axw)
-		//arg := fr.value(instr.X).LLVMValue()
-		//fr.builder.CreateCall(fr.runtime.panic_.LLVMValue(), []llvm.Value{arg}, "")
+		//arg := fr.value(instr.X).value
+		//fr.builder.CreateCall(fr.runtime.panic_.value, []llvm.Value{arg}, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Phi:
 		typ := instr.Type()
 		phi := fr.builder.CreatePHI(fr.llvmtypes.ToLLVM(typ), instr.Comment)
-		fr.env[instr] = fr.NewValue(phi, typ)
+		fr.env[instr] = newValue(phi, typ)
 		fr.phis = append(fr.phis, pendingPhi{instr, phi})
 
 	case *ssa.Range:
@@ -628,13 +628,13 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		vals := make([]llvm.Value, len(instr.Results))
 		for i, res := range instr.Results {
-			vals[i] = fr.value(res).LLVMValue()
+			vals[i] = fr.value(res).value
 		}
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
 	case *ssa.RunDefers:
 		// TODO(axw)
-		//fr.builder.CreateCall(fr.runtime.rundefers.LLVMValue(), nil, "")
+		//fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
 		fr.builder.CreateUnreachable()
 
 	case *ssa.Select:
@@ -658,8 +658,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.slice(x, low, high)
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr).LLVMValue()
-		value := fr.value(instr.Val).LLVMValue()
+		addr := fr.value(instr.Addr).value
+		value := fr.value(instr.Val).value
 		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
 		fr.builder.CreateStore(value, addr)
@@ -668,7 +668,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		x := fr.value(instr.X)
 		if instr.CommaOk {
 			v, ok := fr.interfaceTypeCheck(x, instr.AssertedType)
-			fr.tuples[instr] = []*LLVMValue{v, ok}
+			fr.tuples[instr] = []*govalue{v, ok}
 		} else {
 			fr.env[instr] = fr.interfaceTypeAssert(x, instr.AssertedType)
 		}
@@ -679,16 +679,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		case token.ARROW:
 			x, ok := fr.chanRecv(operand, instr.CommaOk)
 			if instr.CommaOk {
-				fr.tuples[instr] = []*LLVMValue{x, ok}
+				fr.tuples[instr] = []*govalue{x, ok}
 			} else {
 				fr.env[instr] = x
 			}
 		case token.MUL:
 			// The bitcast is necessary to handle recursive pointer loads.
-			llptr := fr.builder.CreateBitCast(operand.LLVMValue(), llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
-			fr.env[instr] = fr.NewValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+			llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
+			fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
 		default:
-			fr.env[instr] = operand.UnaryOp(instr.Op).(*LLVMValue)
+			fr.env[instr] = fr.unaryOp(operand, instr.Op)
 		}
 
 	default:
@@ -696,7 +696,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	}
 }
 
-func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMValue) []*LLVMValue {
+func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*govalue) []*govalue {
 	switch builtin.Name() {
 	case "print", "println":
 		fr.printValues(builtin.Name() == "println", args...)
@@ -709,37 +709,37 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 		panic("TODO: recover")
 
 	case "append":
-		return []*LLVMValue{fr.callAppend(args[0], args[1])}
+		return []*govalue{fr.callAppend(args[0], args[1])}
 
 	case "close":
 		panic("TODO: close")
 
 	case "cap":
-		return []*LLVMValue{fr.callCap(args[0])}
+		return []*govalue{fr.callCap(args[0])}
 
 	case "len":
-		return []*LLVMValue{fr.callLen(args[0])}
+		return []*govalue{fr.callLen(args[0])}
 
 	case "copy":
-		return []*LLVMValue{fr.callCopy(args[0], args[1])}
+		return []*govalue{fr.callCopy(args[0], args[1])}
 
 	case "delete":
 		fr.mapDelete(args[0], args[1])
 		return nil
 
 	case "real":
-		return []*LLVMValue{args[0].extractComplexComponent(0)}
+		return []*govalue{fr.extractRealValue(args[0])}
 
 	case "imag":
-		return []*LLVMValue{args[0].extractComplexComponent(1)}
+		return []*govalue{fr.extractImagValue(args[0])}
 
 	case "complex":
-		r := args[0].LLVMValue()
-		i := args[1].LLVMValue()
+		r := args[0].value
+		i := args[1].value
 		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
-		return []*LLVMValue{fr.NewValue(cmplx, typ)}
+		return []*govalue{newValue(cmplx, typ)}
 
 	default:
 		panic("unimplemented: " + builtin.Name())
@@ -751,9 +751,9 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*LLVMV
 // For builtins that may not be used in go/defer, prepareCall
 // will emits inline code. In this case, prepareCall returns
 // nil for fn and args, and returns a non-nil value for result.
-func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
+func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	call := instr.Common()
-	args := make([]*LLVMValue, len(call.Args))
+	args := make([]*govalue, len(call.Args))
 	for i, arg := range call.Args {
 		args[i] = fr.value(arg)
 	}
@@ -762,18 +762,18 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*LLVMValue {
 		return fr.callBuiltin(instr.Value().Type(), builtin, args)
 	}
 
-	var fn *LLVMValue
+	var fn *govalue
 	if call.IsInvoke() {
-		var recv *LLVMValue
+		var recv *govalue
 		fn, recv = fr.interfaceMethod(fr.value(call.Value), call.Method)
-		args = append([]*LLVMValue{recv}, args...)
+		args = append([]*govalue{recv}, args...)
 	} else {
 		fn = fr.value(call.Value)
 		if recv := call.Signature().Recv(); recv != nil {
 			if _, ok := recv.Type().Underlying().(*types.Pointer); !ok {
-				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].LLVMValue().Type(), "")
-				fr.builder.CreateStore(args[0].LLVMValue(), recvalloca)
-				args[0] = fr.NewValue(recvalloca, types.NewPointer(args[0].Type()))
+				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].value.Type(), "")
+				fr.builder.CreateStore(args[0].value, recvalloca)
+				args[0] = newValue(recvalloca, types.NewPointer(args[0].Type()))
 			}
 		}
 	}
@@ -798,10 +798,10 @@ func hasDefer(f *ssa.Function) bool {
 //
 // contextFunction must be called with a global function
 // pointer.
-func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
+func contextFunction(c *compiler, f *govalue) *govalue {
 	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
 	resultType := c.llvmtypes.ToLLVM(f.Type())
-	fnptr := f.LLVMValue()
+	fnptr := f.value
 	contextType := resultType.StructElementTypes()[1]
 	llfntyp := fnptr.Type().ElementType()
 	llfntyp = llvm.FunctionType(
@@ -830,5 +830,5 @@ func contextFunction(c *compiler, f *LLVMValue) *LLVMValue {
 		}
 		c.builder.CreateAggregateRet(results)
 	}
-	return c.NewValue(wrapper, f.Type())
+	return newValue(wrapper, f.Type())
 }

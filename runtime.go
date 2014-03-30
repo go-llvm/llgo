@@ -18,7 +18,7 @@ import (
 )
 
 type FuncResolver interface {
-	ResolveFunc(*types.Func) *LLVMValue
+	ResolveFunc(*types.Func) *govalue
 }
 
 type runtimeType struct {
@@ -50,7 +50,7 @@ type runtimeInterface struct {
 	selectinit,
 	selectrecv,
 	selectsend,
-	selectsize *LLVMValue
+	selectsize *govalue
 
 	// LLVM intrinsics
 	memcpy,
@@ -106,7 +106,7 @@ type runtimeInterface struct {
 
 func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
 	var ri runtimeInterface
-	intrinsics := map[string]**LLVMValue{
+	intrinsics := map[string]**govalue{
 		"selectdefault": &ri.selectdefault,
 		"selectgo":      &ri.selectgo,
 		"selectinit":    &ri.selectinit,

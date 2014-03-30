@@ -11,12 +11,12 @@ import (
 
 // makeSlice allocates a new slice with the optional length and capacity,
 // initialising its contents to their zero values.
-func (fr *frame) makeSlice(sliceType types.Type, length, capacity *LLVMValue) *LLVMValue {
-	length = fr.convert(length, types.Typ[types.Uintptr]).(*LLVMValue)
-	capacity = fr.convert(capacity, types.Typ[types.Uintptr]).(*LLVMValue)
+func (fr *frame) makeSlice(sliceType types.Type, length, capacity *govalue) *govalue {
+	length = fr.convert(length, types.Typ[types.Uintptr])
+	capacity = fr.convert(capacity, types.Typ[types.Uintptr])
 	runtimeType := fr.types.ToRuntime(sliceType)
-	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.LLVMValue(), capacity.LLVMValue())
-	return fr.NewValue(llslice[0], sliceType)
+	llslice := fr.runtime.makeSlice.call(fr, runtimeType, length.value, capacity.value)
+	return newValue(llslice[0], sliceType)
 }
 
 // coerceSlice takes a slice of one element type and coerces it to a
@@ -34,15 +34,15 @@ func (c *compiler) coerceSlice(src llvm.Value, dsttyp llvm.Type) llvm.Value {
 	return dst
 }
 
-func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
+func (fr *frame) slice(x, low, high *govalue) *govalue {
 	var lowval, highval llvm.Value
 	if low != nil {
-		lowval = fr.convert(low, types.Typ[types.Int]).LLVMValue()
+		lowval = fr.convert(low, types.Typ[types.Int]).value
 	} else {
 		lowval = llvm.ConstNull(fr.types.inttype)
 	}
 	if high != nil {
-		highval = fr.convert(high, types.Typ[types.Int]).LLVMValue()
+		highval = fr.convert(high, types.Typ[types.Int]).value
 	}
 
 	var arrayptr, arraylen, arraycap llvm.Value
@@ -53,14 +53,14 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		errcode = 3 // TODO(pcc): symbolic
 		arraytyp := typ.Elem().Underlying().(*types.Array)
 		elemtyp = arraytyp.Elem()
-		arrayptr = x.LLVMValue()
+		arrayptr = x.value
 		arrayptr = fr.builder.CreateBitCast(arrayptr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
 		arraycap = arraylen
 	case *types.Slice:
 		errcode = 4 // TODO(pcc): symbolic
 		elemtyp = typ.Elem()
-		sliceValue := x.LLVMValue()
+		sliceValue := x.value
 		arrayptr = fr.builder.CreateExtractValue(sliceValue, 0, "")
 		arraylen = fr.builder.CreateExtractValue(sliceValue, 1, "")
 		arraycap = fr.builder.CreateExtractValue(sliceValue, 2, "")
@@ -68,8 +68,8 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 		if high == nil {
 			highval = llvm.ConstAllOnes(fr.types.inttype) // -1
 		}
-		result := fr.runtime.stringSlice.call(fr, x.LLVMValue(), lowval, highval)
-		return fr.NewValue(result[0], x.Type())
+		result := fr.runtime.stringSlice.call(fr, x.value, lowval, highval)
+		return newValue(result[0], x.Type())
 	default:
 		panic("unimplemented")
 	}
@@ -110,5 +110,5 @@ func (fr *frame) slice(x, low, high *LLVMValue) *LLVMValue {
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicelen, 1, "")
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicecap, 2, "")
 
-	return fr.NewValue(sliceValue, types.NewSlice(elemtyp))
+	return newValue(sliceValue, types.NewSlice(elemtyp))
 }

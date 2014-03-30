@@ -10,9 +10,9 @@ import (
 	"code.google.com/p/go.tools/go/types"
 )
 
-func (fr *frame) printValues(println_ bool, values ...*LLVMValue) {
+func (fr *frame) printValues(println_ bool, values ...*govalue) {
 	for i, value := range values {
-		llvm_value := value.LLVMValue()
+		llvm_value := value.value
 
 		typ := value.Type().Underlying()
 		if name, isname := typ.(*types.Named); isname {
