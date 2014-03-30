@@ -5,26 +5,12 @@
 package llgo
 
 import (
-	"fmt"
-	"go/ast"
-	"go/build"
-	"go/token"
-	"path"
 	"strconv"
 
 	"code.google.com/p/go.tools/go/types"
 
 	"github.com/go-llvm/llvm"
 )
-
-type FuncResolver interface {
-	ResolveFunc(*types.Func) *govalue
-}
-
-type runtimeType struct {
-	types.Type
-	llvm llvm.Type
-}
 
 type runtimeFnInfo struct {
 	fi *functionTypeInfo
@@ -44,14 +30,6 @@ func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
 // runtimeInterface is a struct containing references to
 // runtime types and intrinsic function declarations.
 type runtimeInterface struct {
-	// intrinsics
-	selectdefault,
-	selectgo,
-	selectinit,
-	selectrecv,
-	selectsend,
-	selectsize *govalue
-
 	// LLVM intrinsics
 	memcpy,
 	memset llvm.Value
@@ -104,23 +82,8 @@ type runtimeInterface struct {
 	typeDescriptorsEqual runtimeFnInfo
 }
 
-func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap, fr FuncResolver) (*runtimeInterface, error) {
+func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface, error) {
 	var ri runtimeInterface
-	intrinsics := map[string]**govalue{
-		"selectdefault": &ri.selectdefault,
-		"selectgo":      &ri.selectgo,
-		"selectinit":    &ri.selectinit,
-		"selectrecv":    &ri.selectrecv,
-		"selectsend":    &ri.selectsend,
-		"selectsize":    &ri.selectsize,
-	}
-	for name, field := range intrinsics {
-		obj := pkg.Scope().Lookup(name)
-		if obj == nil {
-			return nil, fmt.Errorf("no runtime function with name %s", name)
-		}
-		*field = fr.ResolveFunc(obj.(*types.Func))
-	}
 
 	Bool := types.Typ[types.Bool]
 	Float64 := types.Typ[types.Float64]
@@ -408,20 +371,6 @@ func newRuntimeInterface(pkg *types.Package, module llvm.Module, tm *llvmTypeMap
 	return &ri, nil
 }
 
-// importRuntime locates the the runtime package and parses its files
-// to *ast.Files. This is used to generate runtime type structures.
-func parseRuntime(buildctx *build.Context, fset *token.FileSet) ([]*ast.File, error) {
-	buildpkg, err := buildctx.Import("github.com/go-llvm/llgo/pkg/runtime", "", 0)
-	if err != nil {
-		return nil, err
-	}
-	filenames := make([]string, len(buildpkg.GoFiles))
-	for i, f := range buildpkg.GoFiles {
-		filenames[i] = path.Join(buildpkg.Dir, f)
-	}
-	return parseFiles(fset, filenames)
-}
-
 func (fr *frame) createZExtOrTrunc(v llvm.Value, t llvm.Type, name string) llvm.Value {
 	switch n := v.Type().IntTypeWidth() - t.IntTypeWidth(); {
 	case n < 0:
@@ -469,9 +418,3 @@ func (fr *frame) memcpy(dest llvm.Value, src llvm.Value, size llvm.Value) {
 	fr.builder.CreateCall(memcpy, []llvm.Value{dest, src, size, align, isvolatile}, "")
 }
 
-func (c *compiler) stacksave() llvm.Value {
-	return llvm.Value{C: nil}
-}
-
-func (c *compiler) stackrestore(ctx llvm.Value) {
-}

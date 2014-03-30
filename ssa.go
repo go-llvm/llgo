@@ -79,11 +79,6 @@ func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 	return u.resolveFunction(u.pkg.Prog.Method(s))
 }
 
-// ResolveFunc implements FuncResolver.ResolveFunc.
-func (u *unit) ResolveFunc(f *types.Func) *govalue {
-	return u.resolveFunction(u.pkg.Prog.FuncValue(f))
-}
-
 func (u *unit) resolveFunction(f *ssa.Function) *govalue {
 	llvmFunction := u.resolveFunctionGlobal(f)
 	return newValue(llvm.ConstBitCast(llvmFunction, llvm.PointerType(llvm.Int8Type(), 0)), f.Signature)

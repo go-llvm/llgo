@@ -53,6 +53,8 @@ type selectState struct {
 }
 
 func (fr *frame) chanSelect(states []selectState, blocking bool) *govalue {
+    panic("chanSelect not implemented")
+    /*
 	stackptr := fr.stacksave()
 	defer fr.stackrestore(stackptr)
 
@@ -124,4 +126,5 @@ func (fr *frame) chanSelect(states []selectState, blocking bool) *govalue {
 	tuple := fr.builder.CreateLoad(tupleptr, "")
 	tuple = fr.builder.CreateInsertValue(tuple, index, 0, "")
 	return newValue(tuple, resType)
+    */
 }
