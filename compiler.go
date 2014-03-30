@@ -261,7 +261,10 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
 	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
 	entry := llvm.AddBasicBlock(initMain, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
+
+	builder := llvm.GlobalContext().NewBuilder()
+	defer builder.Dispose()
+	builder.SetInsertPointAtEnd(entry)
 
 	seenInit := make(map[string]bool)
 
@@ -272,15 +275,15 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 		seenInit[init.Function] = true
 
 		initfn := llvm.AddFunction(c.module.Module, init.Function, ftyp)
-		c.builder.CreateCall(initfn, nil, "")
+		builder.CreateCall(initfn, nil, "")
 	}
 
 	maininitfn := c.module.Module.NamedFunction("main..import")
 	if maininitfn.C != nil {
-		c.builder.CreateCall(maininitfn, nil, "")
+		builder.CreateCall(maininitfn, nil, "")
 	}
 
-	c.builder.CreateRetVoid()
+	builder.CreateRetVoid()
 	return nil
 }
 

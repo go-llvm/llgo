@@ -41,10 +41,10 @@ func (fr *frame) compareStrings(lhs, rhs *govalue, op token.Token) *govalue {
 }
 
 // stringIndex implements v = m[i]
-func (c *compiler) stringIndex(s, i *govalue) *govalue {
-	ptr := c.builder.CreateExtractValue(s.value, 0, "")
-	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
-	return newValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
+func (fr *frame) stringIndex(s, i *govalue) *govalue {
+	ptr := fr.builder.CreateExtractValue(s.value, 0, "")
+	ptr = fr.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
+	return newValue(fr.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
 }
 
 func (fr *frame) stringIterInit(str *govalue) []*govalue {
