@@ -105,10 +105,10 @@ type compiler struct {
 	CompilerOptions
 
 	builder, allocaBuilder llvm.Builder
-	module     *Module
-	dataLayout string
-	target     llvm.TargetData
-	fileset    *token.FileSet
+	module                 *Module
+	dataLayout             string
+	target                 llvm.TargetData
+	fileset                *token.FileSet
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -164,27 +164,12 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		importpath = pkgname
 	}
 	impcfg.CreateFromFiles(importpath, astFiles...)
-	// Create a "runtime" package too, so we can reference
-	// its types and functions in the compiler and generated
-	// code.
-	if importpath != "runtime" {
-		astFiles, err := parseRuntime(&buildctx.Context, impcfg.Fset)
-		if err != nil {
-			return nil, err
-		}
-		impcfg.CreateFromFiles("runtime", astFiles...)
-	}
 	iprog, err := impcfg.Load()
 	if err != nil {
 		return nil, err
 	}
 	program := ssa.Create(iprog, ssa.GccgoImport)
-	var mainPkginfo, runtimePkginfo *loader.PackageInfo
-	if pkgs := iprog.InitialPackages(); len(pkgs) == 1 {
-		mainPkginfo, runtimePkginfo = pkgs[0], pkgs[0]
-	} else {
-		mainPkginfo, runtimePkginfo = pkgs[0], pkgs[1]
-	}
+	mainPkginfo := iprog.InitialPackages()[0]
 	mainPkg := program.CreatePackage(mainPkginfo)
 
 	// Create a Module, which contains the LLVM bitcode.
@@ -197,12 +182,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	unit := newUnit(compiler, mainPkg)
 
 	// Create the runtime interface.
-	compiler.runtime, err = newRuntimeInterface(
-		runtimePkginfo.Pkg,
-		compiler.module.Module,
-		compiler.llvmtypes,
-		FuncResolver(unit),
-	)
+	compiler.runtime, err = newRuntimeInterface(compiler.module.Module, compiler.llvmtypes)
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +212,6 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	mainPkg.Build()
 	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
-	if runtimePkginfo != mainPkginfo {
-		compiler.processAnnotations(unit, runtimePkginfo)
-	}
 
 	compiler.types.finalize()
 
@@ -265,11 +242,11 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		}
 	}
 
-
 	return compiler.module, nil
 }
 
 type ByPriority []types.PackageInit
+
 func (a ByPriority) Len() int           { return len(a) }
 func (a ByPriority) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByPriority) Less(i, j int) bool { return a[i].Priority < a[j].Priority }
