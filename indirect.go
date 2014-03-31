@@ -13,46 +13,74 @@ import (
 // createThunk creates a thunk from a
 // given function and arguments, suitable for use with
 // "defer" and "go".
-func (fr *frame) createThunk(call *ssa.CallCommon) (thunk llvm.Value, arg llvm.Value) {
-	var nonconstargs []llvm.Value
-	var nonconstindices []int
-	var nonconsttypes []*types.Var
-	var args []llvm.Value
-	packArg := func(arg *govalue) {
-		if arg.value.IsAConstant().C != nil {
-			args = append(args, arg.value)
-		} else {
-			args = append(args, llvm.Value{nil})
-			nonconstargs = append(nonconstargs, arg.value)
-			nonconstindices = append(nonconstindices, len(args)-1)
-			nonconsttypes = append(nonconsttypes, types.NewField(0, nil, "", arg.Type(), true))
+func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg llvm.Value) {
+	seenarg := make(map[ssa.Value]bool)
+	var args []ssa.Value
+	var argtypes []*types.Var
+
+	packArg := func(arg ssa.Value) {
+		switch arg.(type) {
+		case *ssa.Builtin, *ssa.Function, *ssa.Const, *ssa.Global:
+			// Do nothing: we can generate these in the thunk
+		default:
+			if !seenarg[arg] {
+				seenarg[arg] = true
+				args = append(args, arg)
+				field := types.NewField(0, nil, "_", arg.Type(), true)
+				argtypes = append(argtypes, field)
+			}
 		}
 	}
 
-	_, isbuiltin := call.Value.(*ssa.Builtin)
-	if !isbuiltin {
-		packArg(fr.value(call.Value))
-	}
-
-	for _, arg := range call.Args {
-		packArg(fr.value(arg))
+	packArg(call.Common().Value)
+	for _, arg := range call.Common().Args {
+		packArg(arg)
 	}
 
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	if len(nonconstargs) == 0 {
+	var structllptr llvm.Type
+	if len(args) == 0 {
 		arg = llvm.ConstPointerNull(i8ptr)
 	} else {
-		structtype := types.NewStruct(nonconsttypes, nil)
+		structtype := types.NewStruct(argtypes, nil)
 		arg = fr.createTypeMalloc(structtype)
-		for i, arg := range nonconstargs {
+		structllptr = arg.Type()
+		for i, ssaarg := range args {
 			argptr := fr.builder.CreateStructGEP(arg, i, "")
-			fr.builder.CreateStore(arg, argptr)
+			fr.builder.CreateStore(fr.value(ssaarg).value, argptr)
 		}
+		arg = fr.builder.CreateBitCast(arg, i8ptr, "")
 	}
 
 	thunkfntype := llvm.FunctionType(llvm.VoidType(), []llvm.Type{i8ptr}, false)
 	thunkfn := llvm.AddFunction(fr.module.Module, "", thunkfntype)
 	thunkfn.SetLinkage(llvm.InternalLinkage)
+
+	thunkfr := newFrame(fr.unit, thunkfn)
+	defer thunkfr.dispose()
+
+	prologuebb := llvm.AddBasicBlock(thunkfn, "prologue")
+	thunkfr.builder.SetInsertPointAtEnd(prologuebb)
+
+	if len(args) > 0 {
+		thunkarg := thunkfn.Param(0)
+		thunkarg = thunkfr.builder.CreateBitCast(thunkarg, structllptr, "")
+
+		for i, ssaarg := range args {
+			thunkargptr := thunkfr.builder.CreateStructGEP(thunkarg, i, "")
+			thunkarg := thunkfr.builder.CreateLoad(thunkargptr, "")
+			thunkfr.env[ssaarg] = newValue(thunkarg, ssaarg.Type())
+		}
+	}
+
+	entrybb := llvm.AddBasicBlock(thunkfn, "entry")
+	br := thunkfr.builder.CreateBr(entrybb)
+	thunkfr.allocaBuilder.SetInsertPointBefore(br)
+
+	thunkfr.builder.SetInsertPointAtEnd(entrybb)
+	thunkfr.callInstruction(call)
+	thunkfr.builder.CreateRetVoid()
+
 	thunk = fr.builder.CreateBitCast(thunkfn, i8ptr, "")
 	return
 }

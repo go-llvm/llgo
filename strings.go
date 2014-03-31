@@ -10,15 +10,6 @@ import (
 	"go/token"
 )
 
-func (c *compiler) coerceString(v llvm.Value, typ llvm.Type) llvm.Value {
-	result := llvm.Undef(typ)
-	ptr := c.builder.CreateExtractValue(v, 0, "")
-	len := c.builder.CreateExtractValue(v, 1, "")
-	result = c.builder.CreateInsertValue(result, ptr, 0, "")
-	result = c.builder.CreateInsertValue(result, len, 1, "")
-	return result
-}
-
 func (fr *frame) concatenateStrings(lhs, rhs *govalue) *govalue {
 	result := fr.runtime.stringPlus.call(fr, lhs.value, rhs.value)
 	return newValue(result[0], types.Typ[types.String])
@@ -50,10 +41,10 @@ func (fr *frame) compareStrings(lhs, rhs *govalue, op token.Token) *govalue {
 }
 
 // stringIndex implements v = m[i]
-func (c *compiler) stringIndex(s, i *govalue) *govalue {
-	ptr := c.builder.CreateExtractValue(s.value, 0, "")
-	ptr = c.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
-	return newValue(c.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
+func (fr *frame) stringIndex(s, i *govalue) *govalue {
+	ptr := fr.builder.CreateExtractValue(s.value, 0, "")
+	ptr = fr.builder.CreateGEP(ptr, []llvm.Value{i.value}, "")
+	return newValue(fr.builder.CreateLoad(ptr, ""), types.Typ[types.Byte])
 }
 
 func (fr *frame) stringIterInit(str *govalue) []*govalue {

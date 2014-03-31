@@ -104,11 +104,10 @@ func (c *Compiler) Compile(filenames []string, importpath string) (m *Module, er
 type compiler struct {
 	CompilerOptions
 
-	builder, allocaBuilder llvm.Builder
-	module                 *Module
-	dataLayout             string
-	target                 llvm.TargetData
-	fileset                *token.FileSet
+	module     *Module
+	dataLayout string
+	target     llvm.TargetData
+	fileset    *token.FileSet
 
 	runtime   *runtimeInterface
 	llvmtypes *llvmTypeMap
@@ -197,13 +196,6 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		MethodResolver(unit),
 	)
 
-	// Create a Builder, for building LLVM instructions.
-	compiler.builder = llvm.GlobalContext().NewBuilder()
-	defer compiler.builder.Dispose()
-
-	compiler.allocaBuilder = llvm.GlobalContext().NewBuilder()
-	defer compiler.allocaBuilder.Dispose()
-
 	// Initialise debugging.
 	compiler.debug.module = compiler.module.Module
 	compiler.debug.Fset = impcfg.Fset
@@ -261,7 +253,10 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
 	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
 	entry := llvm.AddBasicBlock(initMain, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
+
+	builder := llvm.GlobalContext().NewBuilder()
+	defer builder.Dispose()
+	builder.SetInsertPointAtEnd(entry)
 
 	seenInit := make(map[string]bool)
 
@@ -272,15 +267,15 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 		seenInit[init.Function] = true
 
 		initfn := llvm.AddFunction(c.module.Module, init.Function, ftyp)
-		c.builder.CreateCall(initfn, nil, "")
+		builder.CreateCall(initfn, nil, "")
 	}
 
 	maininitfn := c.module.Module.NamedFunction("main..import")
 	if maininitfn.C != nil {
-		c.builder.CreateCall(maininitfn, nil, "")
+		builder.CreateCall(maininitfn, nil, "")
 	}
 
-	c.builder.CreateRetVoid()
+	builder.CreateRetVoid()
 	return nil
 }
 

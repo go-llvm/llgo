@@ -11,15 +11,15 @@ import (
 
 // createCall emits the code for a function call,
 // taking into account receivers, and panic/defer.
-func (c *compiler) createCall(fn *govalue, argValues []*govalue) []*govalue {
+func (fr *frame) createCall(fn *govalue, argValues []*govalue) []*govalue {
 	fntyp := fn.Type().Underlying().(*types.Signature)
-	typinfo := c.types.getSignatureInfo(fntyp)
+	typinfo := fr.types.getSignatureInfo(fntyp)
 
 	args := make([]llvm.Value, len(argValues))
 	for i, arg := range argValues {
 		args[i] = arg.value
 	}
-	results := typinfo.call(c.types.ctx, c.allocaBuilder, c.builder, fn.value, args)
+	results := typinfo.call(fr.types.ctx, fr.allocaBuilder, fr.builder, fn.value, args)
 
 	resultValues := make([]*govalue, len(results))
 	for i, res := range results {

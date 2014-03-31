@@ -152,19 +152,16 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	fr := frame{
-		unit:       u,
-		blocks:     make([]llvm.BasicBlock, len(f.Blocks)),
-		lastBlocks: make([]llvm.BasicBlock, len(f.Blocks)),
-		env:        make(map[ssa.Value]*govalue),
-		tuples:     make(map[ssa.Value][]*govalue),
-	}
+	llvmFunction := u.resolveFunctionGlobal(f)
+	fr := newFrame(u, llvmFunction)
+	defer fr.dispose()
+
+	fr.blocks = make([]llvm.BasicBlock, len(f.Blocks))
+	fr.lastBlocks = make([]llvm.BasicBlock, len(f.Blocks))
 
 	fr.logf("Define function: %s", f.String())
-	llvmFunction := fr.resolveFunctionGlobal(f)
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
 	delete(u.undefinedFuncs, f)
-	fr.function = llvmFunction
 	fr.retInf = fti.retInf
 
 	// Push the function onto the debug context.
@@ -172,7 +169,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if u.GenerateDebug && f.Synthetic == "" {
 		u.debug.pushFunctionContext(llvmFunction, f.Signature, f.Pos())
 		defer u.debug.popFunctionContext()
-		u.debug.setLocation(u.builder, f.Pos())
+		u.debug.setLocation(fr.builder, f.Pos())
 	}
 
 	// Functions that call recover must not be inlined, or we
@@ -330,13 +327,30 @@ type pendingPhi struct {
 
 type frame struct {
 	*unit
-	function   llvm.Value
-	retInf     retInfo
-	blocks     []llvm.BasicBlock
-	lastBlocks []llvm.BasicBlock
-	env        map[ssa.Value]*govalue
-	tuples     map[ssa.Value][]*govalue
-	phis       []pendingPhi
+	function               llvm.Value
+	builder, allocaBuilder llvm.Builder
+	retInf                 retInfo
+	blocks                 []llvm.BasicBlock
+	lastBlocks             []llvm.BasicBlock
+	env                    map[ssa.Value]*govalue
+	tuples                 map[ssa.Value][]*govalue
+	phis                   []pendingPhi
+}
+
+func newFrame(u *unit, fn llvm.Value) *frame {
+	return &frame{
+		unit:          u,
+		function:      fn,
+		builder:       llvm.GlobalContext().NewBuilder(),
+		allocaBuilder: llvm.GlobalContext().NewBuilder(),
+		env:           make(map[ssa.Value]*govalue),
+		tuples:        make(map[ssa.Value][]*govalue),
+	}
+}
+
+func (fr *frame) dispose() {
+	fr.builder.Dispose()
+	fr.allocaBuilder.Dispose()
 }
 
 func (fr *frame) fixupPhis() {
@@ -498,7 +512,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(fieldptr, fieldptrtyp)
 
 	case *ssa.Go:
-		fn, arg := fr.createThunk(&instr.Call)
+		fn, arg := fr.createThunk(instr)
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
@@ -754,7 +768,11 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	}
 
 	if builtin, ok := call.Value.(*ssa.Builtin); ok {
-		return fr.callBuiltin(instr.Value().Type(), builtin, args)
+		var typ types.Type
+		if v := instr.Value(); v != nil {
+			typ = v.Type()
+		}
+		return fr.callBuiltin(typ, builtin, args)
 	}
 
 	var fn *govalue
@@ -784,46 +802,4 @@ func hasDefer(f *ssa.Function) bool {
 		}
 	}
 	return false
-}
-
-// contextFunction creates a wrapper function that
-// has the same signature as the specified function,
-// but has an additional first parameter that accepts
-// and ignores the function context value.
-//
-// contextFunction must be called with a global function
-// pointer.
-func contextFunction(c *compiler, f *govalue) *govalue {
-	defer c.builder.SetInsertPointAtEnd(c.builder.GetInsertBlock())
-	resultType := c.llvmtypes.ToLLVM(f.Type())
-	fnptr := f.value
-	contextType := resultType.StructElementTypes()[1]
-	llfntyp := fnptr.Type().ElementType()
-	llfntyp = llvm.FunctionType(
-		llfntyp.ReturnType(),
-		append([]llvm.Type{contextType}, llfntyp.ParamTypes()...),
-		llfntyp.IsFunctionVarArg(),
-	)
-	wrapper := llvm.AddFunction(c.module.Module, fnptr.Name()+".ctx", llfntyp)
-	wrapper.SetLinkage(llvm.PrivateLinkage)
-	entry := llvm.AddBasicBlock(wrapper, "entry")
-	c.builder.SetInsertPointAtEnd(entry)
-	args := make([]llvm.Value, len(llfntyp.ParamTypes())-1)
-	for i := range args {
-		args[i] = wrapper.Param(i + 1)
-	}
-	result := c.builder.CreateCall(fnptr, args, "")
-	switch nresults := f.Type().(*types.Signature).Results().Len(); nresults {
-	case 0:
-		c.builder.CreateRetVoid()
-	case 1:
-		c.builder.CreateRet(result)
-	default:
-		results := make([]llvm.Value, nresults)
-		for i := range results {
-			results[i] = c.builder.CreateExtractValue(result, i, "")
-		}
-		c.builder.CreateAggregateRet(results)
-	}
-	return newValue(wrapper, f.Type())
 }
