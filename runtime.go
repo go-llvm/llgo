@@ -43,6 +43,7 @@ type runtimeInterface struct {
 	convertInterface,
 	copy,
 	emptyInterfaceCompare,
+	getClosure,
 	Go,
 	ifaceE2I2,
 	ifaceI2I2,
@@ -74,6 +75,7 @@ type runtimeInterface struct {
 	receiveBig,
 	runtimeError,
 	sendBig,
+	setClosure,
 	strcmp,
 	stringiter2,
 	stringPlus,
@@ -154,6 +156,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			rfi:  &ri.emptyInterfaceCompare,
 			args: []types.Type{EmptyInterface, EmptyInterface},
 			res:  []types.Type{Int},
+		},
+		{
+			name: "__go_get_closure",
+			rfi:  &ri.getClosure,
+			res:  []types.Type{UnsafePointer},
 		},
 		{
 			name: "__go_go",
@@ -321,6 +328,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
 		},
 		{
+			name: "__go_set_closure",
+			rfi:  &ri.setClosure,
+			args: []types.Type{UnsafePointer},
+		},
+		{
 			name: "__go_strcmp",
 			rfi:  &ri.strcmp,
 			args: []types.Type{String, String},
@@ -417,4 +429,3 @@ func (fr *frame) memcpy(dest llvm.Value, src llvm.Value, size llvm.Value) {
 	isvolatile := llvm.ConstNull(llvm.Int1Type())
 	fr.builder.CreateCall(memcpy, []llvm.Value{dest, src, size, align, isvolatile}, "")
 }
-
