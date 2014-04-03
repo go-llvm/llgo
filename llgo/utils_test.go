@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
-	"go/build"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -67,32 +65,9 @@ func init() {
 	}
 }
 
-func getRuntimeFiles() (gofiles []string, llfiles []string, cfiles []string, err error) {
-	var pkg *build.Package
-	pkgpath := "github.com/go-llvm/llgo/pkg/runtime"
-	pkg, err = build.Import(pkgpath, "", 0)
-	if err != nil {
-		return
-	}
-	gofiles = make([]string, len(pkg.GoFiles))
-	for i, filename := range pkg.GoFiles {
-		gofiles[i] = path.Join(pkg.Dir, filename)
-	}
-	llfiles, err = filepath.Glob(pkg.Dir + "/*.ll")
-	if err != nil {
-		gofiles = nil
-		return
-	}
-	cfiles = make([]string, len(pkg.CFiles))
-	for i, filename := range pkg.CFiles {
-		cfiles[i] = path.Join(pkg.Dir, filename)
-	}
-	return
-}
-
 func runMainFunction(files []string, importPath string) (output []string, err error) {
 	bcpath := filepath.Join(tempdir, "test.bc")
-	args := []string{"-g=false", "-importpath=" + importPath, "-o", bcpath}
+	args := []string{"-importpath=" + importPath, "-o", bcpath}
 	args = append(args, files...)
 	cmd := exec.Command("./llgo", args...)
 	data, err := cmd.CombinedOutput()
@@ -191,5 +166,3 @@ func checkOutputEqualUnordered(t *testing.T, files ...string) {
 		t.Fatal(err)
 	}
 }
-
-// vim: set ft=go:
