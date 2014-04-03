@@ -20,6 +20,10 @@ type unit struct {
 	pkg     *ssa.Package
 	globals map[ssa.Value]llvm.Value
 
+	// funcDescriptors maps *ssa.Functions to function descriptors,
+	// the first-class representation of functions.
+	funcDescriptors map[*ssa.Function]llvm.Value
+
 	// undefinedFuncs contains functions that have been resolved
 	// (declared) but not defined.
 	undefinedFuncs map[*ssa.Function]bool
@@ -27,10 +31,11 @@ type unit struct {
 
 func newUnit(c *compiler, pkg *ssa.Package) *unit {
 	u := &unit{
-		compiler:       c,
-		pkg:            pkg,
-		globals:        make(map[ssa.Value]llvm.Value),
-		undefinedFuncs: make(map[*ssa.Function]bool),
+		compiler:        c,
+		pkg:             pkg,
+		globals:         make(map[ssa.Value]llvm.Value),
+		funcDescriptors: make(map[*ssa.Function]llvm.Value),
+		undefinedFuncs:  make(map[*ssa.Function]bool),
 	}
 	return u
 }
@@ -76,14 +81,28 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 
 // ResolveMethod implements MethodResolver.ResolveMethod.
 func (u *unit) ResolveMethod(s *types.Selection) *govalue {
-	return u.resolveFunction(u.pkg.Prog.Method(s))
+	m := u.pkg.Prog.Method(s)
+	llfn := u.resolveFunctionGlobal(m)
+	llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
+	return newValue(llfn, m.Signature)
 }
 
-func (u *unit) resolveFunction(f *ssa.Function) *govalue {
-	llvmFunction := u.resolveFunctionGlobal(f)
-	return newValue(llvm.ConstBitCast(llvmFunction, llvm.PointerType(llvm.Int8Type(), 0)), f.Signature)
+// resolveFunctionDescriptor returns a function's
+// first-class value representation.
+func (u *unit) resolveFunctionDescriptor(f *ssa.Function) *govalue {
+	llfd, ok := u.funcDescriptors[f]
+	if !ok {
+		llfn := u.resolveFunctionGlobal(f)
+		llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
+		llfd = llvm.AddGlobal(u.module.Module, llfn.Type(), f.String()+"$descriptor")
+		llfd.SetInitializer(llfn)
+		llfd = llvm.ConstBitCast(llfd, llfn.Type())
+		u.funcDescriptors[f] = llfd
+	}
+	return newValue(llfd, f.Signature)
 }
 
+// resolveFunctionGlobal returns an llvm.Value for a function global.
 func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
@@ -102,28 +121,6 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if llvmFunction.IsNil() {
 		fti := u.llvmtypes.getSignatureInfo(f.Signature)
 		llvmFunction = fti.declare(u.module.Module, name)
-		/*
-			llvmType := u.llvmtypes.ToLLVM(f.Signature)
-			llvmType = llvmType.StructElementTypes()[0].ElementType()
-			if len(f.FreeVars) > 0 {
-				// Add an implicit first argument.
-				returnType := llvmType.ReturnType()
-				paramTypes := llvmType.ParamTypes()
-				vararg := llvmType.IsFunctionVarArg()
-				blockElementTypes := make([]llvm.Type, len(f.FreeVars))
-				for i, fv := range f.FreeVars {
-					blockElementTypes[i] = u.llvmtypes.ToLLVM(fv.Type())
-				}
-				blockType := llvm.StructType(blockElementTypes, false)
-				blockPtrType := llvm.PointerType(blockType, 0)
-				paramTypes = append([]llvm.Type{blockPtrType}, paramTypes...)
-				llvmType = llvm.FunctionType(returnType, paramTypes, vararg)
-			}
-			llvmFunction = llvm.AddFunction(u.module.Module, name, llvmType)
-			if f.Enclosing != nil {
-				llvmFunction.SetLinkage(llvm.PrivateLinkage)
-			}
-		*/
 		u.undefinedFuncs[f] = true
 	}
 	u.globals[f] = llvmFunction
@@ -183,18 +180,6 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 	fr.builder.SetInsertPointAtEnd(fr.blocks[0])
 
-	var paramOffset int
-	if len(f.FreeVars) > 0 {
-		// Extract captures from the first implicit parameter.
-		arg0 := llvmFunction.Param(0)
-		for i, fv := range f.FreeVars {
-			addressPtr := fr.builder.CreateStructGEP(arg0, i, "")
-			address := fr.builder.CreateLoad(addressPtr, "")
-			fr.env[fv] = newValue(address, fv.Type())
-		}
-		paramOffset++
-	}
-
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
 
@@ -205,7 +190,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// when generating debug metadata.
 	paramPos := make(map[token.Pos]int)
 	for i, param := range f.Params {
-		paramPos[param.Pos()] = i + paramOffset
+		paramPos[param.Pos()] = i
 		llparam := fti.argInfos[i].decode(llvm.GlobalContext(), fr.builder, fr.builder)
 		if isMethod && i == 0 {
 			if _, ok := param.Type().Underlying().(*types.Pointer); !ok {
@@ -214,6 +199,26 @@ func (u *unit) defineFunction(f *ssa.Function) {
 			}
 		}
 		fr.env[param] = newValue(llparam, param.Type())
+	}
+
+	// Load closure, extract free vars.
+	if len(f.FreeVars) > 0 {
+		for _, fv := range f.FreeVars {
+			fr.env[fv] = newValue(llvm.ConstNull(u.llvmtypes.ToLLVM(fv.Type())), fv.Type())
+		}
+		elemTypes := make([]llvm.Type, len(f.FreeVars)+1)
+		elemTypes[0] = llvm.PointerType(llvm.Int8Type(), 0) // function pointer
+		for i, fv := range f.FreeVars {
+			elemTypes[i+1] = u.llvmtypes.ToLLVM(fv.Type())
+		}
+		structType := llvm.StructType(elemTypes, false)
+		closure := fr.runtime.getClosure.call(fr)[0]
+		closure = fr.builder.CreateBitCast(closure, llvm.PointerType(structType, 0), "")
+		for i, fv := range f.FreeVars {
+			ptr := fr.builder.CreateStructGEP(closure, i+1, "")
+			ptr = fr.builder.CreateLoad(ptr, "")
+			fr.env[fv] = newValue(ptr, types.NewPointer(fv.Type()))
+		}
 	}
 
 	// Allocate stack space for locals in the prologue block.
@@ -391,7 +396,7 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 	case nil:
 		return nil
 	case *ssa.Function:
-		return fr.resolveFunction(v)
+		return fr.resolveFunctionDescriptor(v)
 	case *ssa.Const:
 		return fr.newValueFromConst(v.Value, v.Type())
 	case *ssa.Global:
@@ -575,15 +580,14 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeChan(instr.Type(), fr.value(instr.Size))
 
 	case *ssa.MakeClosure:
-		panic("closures not supported yet")
-		/*
-			fn := fr.resolveFunction(instr.Fn.(*ssa.Function))
-			bindings := make([]*govalue, len(instr.Bindings))
-			for i, binding := range instr.Bindings {
-				bindings[i] = fr.value(binding)
-			}
-			fr.env[instr] = fr.makeClosure(fn, bindings)
-		*/
+		llfn := fr.resolveFunctionGlobal(instr.Fn.(*ssa.Function))
+		llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
+		fn := newValue(llfn, instr.Fn.(*ssa.Function).Signature)
+		bindings := make([]*govalue, len(instr.Bindings))
+		for i, binding := range instr.Bindings {
+			bindings[i] = fr.value(binding)
+		}
+		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
 		receiver := fr.value(instr.X)
@@ -755,11 +759,7 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*goval
 	}
 }
 
-// prepareCall returns the evaluated function and arguments.
-//
-// For builtins that may not be used in go/defer, prepareCall
-// will emits inline code. In this case, prepareCall returns
-// nil for fn and args, and returns a non-nil value for result.
+// callInstruction translates function call instructions.
 func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	call := instr.Common()
 	args := make([]*govalue, len(call.Args))
@@ -781,7 +781,20 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 		fn, recv = fr.interfaceMethod(fr.value(call.Value), call.Method)
 		args = append([]*govalue{recv}, args...)
 	} else {
-		fn = fr.value(call.Value)
+		if ssafn, ok := call.Value.(*ssa.Function); ok {
+			llfn := fr.resolveFunctionGlobal(ssafn)
+			llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
+			fn = newValue(llfn, ssafn.Type())
+		} else {
+			// First-class function values are stored as *{*fnptr}, so
+			// we must extract the function pointer. We must also
+			// call __go_set_closure, in case the function is a closure.
+			fn = fr.value(call.Value)
+			fr.runtime.setClosure.call(fr, fn.value)
+			fnptr := fr.builder.CreateBitCast(fn.value, llvm.PointerType(fn.value.Type(), 0), "")
+			fnptr = fr.builder.CreateLoad(fnptr, "")
+			fn = newValue(fnptr, fn.Type())
+		}
 		if recv := call.Signature().Recv(); recv != nil {
 			if _, ok := recv.Type().Underlying().(*types.Pointer); !ok {
 				recvalloca := fr.allocaBuilder.CreateAlloca(args[0].value.Type(), "")

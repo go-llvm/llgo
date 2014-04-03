@@ -4,33 +4,25 @@
 
 package llgo
 
-/*
 import (
-	"github.com/go-llvm/llvm"
+	"code.google.com/p/go.tools/go/types"
 )
-*/
 
 // makeClosure creates a closure from a function pointer and
 // a set of bindings. The bindings are addresses of captured
 // variables.
-func (c *compiler) makeClosure(fn *govalue, bindings []*govalue) *govalue    {
-	/*
-		types := make([]llvm.Type, len(bindings))
-		for i, binding := range bindings {
-			types[i] = c.types.ToLLVM(binding.Type())
-		}
-		block := c.createTypeMalloc(llvm.StructType(types, false))
-		for i, binding := range bindings {
-			addressPtr := c.builder.CreateStructGEP(block, i, "")
-			c.builder.CreateStore(binding.LLVMValue(), addressPtr)
-		}
-		block = c.builder.CreateBitCast(block, llvm.PointerType(llvm.Int8Type(), 0), "")
-		// fn is a raw function pointer; ToLLVM yields {*fn, *uint8}.
-		closure := llvm.Undef(c.types.ToLLVM(fn.Type()))
-		fnptr := c.builder.CreateBitCast(fn.LLVMValue(), closure.Type().StructElementTypes()[0], "")
-		closure = c.builder.CreateInsertValue(closure, fnptr, 0, "")
-		closure = c.builder.CreateInsertValue(closure, block, 1, "")
-		return newValue(closure, fn.Type())
-	*/
-	return nil
+func (fr *frame) makeClosure(fn *govalue, bindings []*govalue) *govalue {
+	govalues := append([]*govalue{fn}, bindings...)
+	fields := make([]*types.Var, len(govalues))
+	for i, v := range govalues {
+		field := types.NewField(0, nil, "_", v.Type(), false)
+		fields[i] = field
+	}
+	block := fr.createTypeMalloc(types.NewStruct(fields, nil))
+	for i, v := range govalues {
+		addressPtr := fr.builder.CreateStructGEP(block, i, "")
+		fr.builder.CreateStore(v.value, addressPtr)
+	}
+	closure := fr.builder.CreateBitCast(block, fn.value.Type(), "")
+	return newValue(closure, fn.Type())
 }
