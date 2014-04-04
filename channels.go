@@ -45,6 +45,11 @@ func (fr *frame) chanRecv(ch *govalue, commaOk bool) (x, ok *govalue) {
 	return
 }
 
+// chanClose implements close(ch)
+func (fr *frame) chanClose(ch *govalue) {
+	fr.runtime.builtinClose.call(fr, ch.value)
+}
+
 // selectState is equivalent to ssa.SelectState
 type selectState struct {
 	Dir  types.ChanDir
@@ -53,78 +58,78 @@ type selectState struct {
 }
 
 func (fr *frame) chanSelect(states []selectState, blocking bool) *govalue {
-    panic("chanSelect not implemented")
-    /*
-	stackptr := fr.stacksave()
-	defer fr.stackrestore(stackptr)
+	panic("chanSelect not implemented")
+	/*
+		stackptr := fr.stacksave()
+		defer fr.stackrestore(stackptr)
 
-	n := uint64(len(states))
-	if !blocking {
-		// blocking means there's no default case
-		n++
-	}
-	lln := llvm.ConstInt(llvm.Int32Type(), n, false)
-	allocsize := fr.builder.CreateCall(fr.runtime.selectsize.value, []llvm.Value{lln}, "")
-	selectp := fr.builder.CreateArrayAlloca(llvm.Int8Type(), allocsize, "selectp")
-	fr.memsetZero(selectp, allocsize)
-	selectp = fr.builder.CreatePtrToInt(selectp, fr.target.IntPtrType(), "")
-	fr.builder.CreateCall(fr.runtime.selectinit.value, []llvm.Value{lln, selectp}, "")
+		n := uint64(len(states))
+		if !blocking {
+			// blocking means there's no default case
+			n++
+		}
+		lln := llvm.ConstInt(llvm.Int32Type(), n, false)
+		allocsize := fr.builder.CreateCall(fr.runtime.selectsize.value, []llvm.Value{lln}, "")
+		selectp := fr.builder.CreateArrayAlloca(llvm.Int8Type(), allocsize, "selectp")
+		fr.memsetZero(selectp, allocsize)
+		selectp = fr.builder.CreatePtrToInt(selectp, fr.target.IntPtrType(), "")
+		fr.builder.CreateCall(fr.runtime.selectinit.value, []llvm.Value{lln, selectp}, "")
 
-	// Allocate stack for the values to send/receive.
-	//
-	// TODO(axw) request optimisation in ssa to special-
-	// case receive cases with no assignment, so we know
-	// not to allocate stack space or do a copy.
-	resTypes := []types.Type{types.Typ[types.Int], types.Typ[types.Bool]}
-	for _, state := range states {
-		if state.Dir == types.RecvOnly {
+		// Allocate stack for the values to send/receive.
+		//
+		// TODO(axw) request optimisation in ssa to special-
+		// case receive cases with no assignment, so we know
+		// not to allocate stack space or do a copy.
+		resTypes := []types.Type{types.Typ[types.Int], types.Typ[types.Bool]}
+		for _, state := range states {
+			if state.Dir == types.RecvOnly {
+				chantyp := state.Chan.Type().Underlying().(*types.Chan)
+				resTypes = append(resTypes, chantyp.Elem())
+			}
+		}
+		resType := tupleType(resTypes...)
+		llResType := fr.types.ToLLVM(resType)
+		tupleptr := fr.builder.CreateAlloca(llResType, "")
+		fr.memsetZero(tupleptr, llvm.SizeOf(llResType))
+
+		var recvindex int
+		ptrs := make([]llvm.Value, len(states))
+		for i, state := range states {
 			chantyp := state.Chan.Type().Underlying().(*types.Chan)
-			resTypes = append(resTypes, chantyp.Elem())
+			elemtyp := fr.types.ToLLVM(chantyp.Elem())
+			if state.Dir == types.SendOnly {
+				ptrs[i] = fr.builder.CreateAlloca(elemtyp, "")
+				fr.builder.CreateStore(state.Send.value, ptrs[i])
+			} else {
+				ptrs[i] = fr.builder.CreateStructGEP(tupleptr, recvindex+2, "")
+				recvindex++
+			}
+			ptrs[i] = fr.builder.CreatePtrToInt(ptrs[i], fr.target.IntPtrType(), "")
 		}
-	}
-	resType := tupleType(resTypes...)
-	llResType := fr.types.ToLLVM(resType)
-	tupleptr := fr.builder.CreateAlloca(llResType, "")
-	fr.memsetZero(tupleptr, llvm.SizeOf(llResType))
 
-	var recvindex int
-	ptrs := make([]llvm.Value, len(states))
-	for i, state := range states {
-		chantyp := state.Chan.Type().Underlying().(*types.Chan)
-		elemtyp := fr.types.ToLLVM(chantyp.Elem())
-		if state.Dir == types.SendOnly {
-			ptrs[i] = fr.builder.CreateAlloca(elemtyp, "")
-			fr.builder.CreateStore(state.Send.value, ptrs[i])
-		} else {
-			ptrs[i] = fr.builder.CreateStructGEP(tupleptr, recvindex+2, "")
-			recvindex++
+		// Create select{send,recv} calls.
+		selectsend := fr.runtime.selectsend.value
+		selectrecv := fr.runtime.selectrecv.value
+		var received llvm.Value
+		if recvindex > 0 {
+			received = fr.builder.CreateStructGEP(tupleptr, 1, "")
 		}
-		ptrs[i] = fr.builder.CreatePtrToInt(ptrs[i], fr.target.IntPtrType(), "")
-	}
-
-	// Create select{send,recv} calls.
-	selectsend := fr.runtime.selectsend.value
-	selectrecv := fr.runtime.selectrecv.value
-	var received llvm.Value
-	if recvindex > 0 {
-		received = fr.builder.CreateStructGEP(tupleptr, 1, "")
-	}
-	if !blocking {
-		fr.builder.CreateCall(fr.runtime.selectdefault.value, []llvm.Value{selectp}, "")
-	}
-	for i, state := range states {
-		ch := state.Chan.value
-		if state.Dir == types.SendOnly {
-			fr.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
-		} else {
-			fr.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")
+		if !blocking {
+			fr.builder.CreateCall(fr.runtime.selectdefault.value, []llvm.Value{selectp}, "")
 		}
-	}
+		for i, state := range states {
+			ch := state.Chan.value
+			if state.Dir == types.SendOnly {
+				fr.builder.CreateCall(selectsend, []llvm.Value{selectp, ch, ptrs[i]}, "")
+			} else {
+				fr.builder.CreateCall(selectrecv, []llvm.Value{selectp, ch, ptrs[i], received}, "")
+			}
+		}
 
-	// Fire off the select.
-	index := fr.builder.CreateCall(fr.runtime.selectgo.value, []llvm.Value{selectp}, "")
-	tuple := fr.builder.CreateLoad(tupleptr, "")
-	tuple = fr.builder.CreateInsertValue(tuple, index, 0, "")
-	return newValue(tuple, resType)
-    */
+		// Fire off the select.
+		index := fr.builder.CreateCall(fr.runtime.selectgo.value, []llvm.Value{selectp}, "")
+		tuple := fr.builder.CreateLoad(tupleptr, "")
+		tuple = fr.builder.CreateInsertValue(tuple, index, 0, "")
+		return newValue(tuple, resType)
+	*/
 }

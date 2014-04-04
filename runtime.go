@@ -40,6 +40,7 @@ type runtimeInterface struct {
 	chanLen,
 	chanrecv2,
 	checkInterfaceType,
+	builtinClose,
 	convertInterface,
 	copy,
 	emptyInterfaceCompare,
@@ -139,6 +140,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_check_interface_type",
 			rfi:  &ri.checkInterfaceType,
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "__go_builtin_close",
+			rfi:  &ri.builtinClose,
+			args: []types.Type{UnsafePointer},
 		},
 		{
 			name: "__go_convert_interface",

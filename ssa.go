@@ -725,7 +725,8 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*goval
 		return []*govalue{fr.callAppend(args[0], args[1])}
 
 	case "close":
-		panic("TODO: close")
+		fr.chanClose(args[0])
+		return nil
 
 	case "cap":
 		return []*govalue{fr.callCap(args[0])}
