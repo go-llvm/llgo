@@ -478,8 +478,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// The source type must be a non-empty interface,
 		// as ChangeInterface cannot fail (E2I may fail).
 		if instr.Type().Underlying().(*types.Interface).NumMethods() > 0 {
-			// TODO(axw) optimisation for I2I case where we
-			// know statically the methods to carry over.
 			x = fr.changeInterface(x, instr.Type(), false)
 		} else {
 			x = fr.convertI2E(x)
@@ -528,7 +526,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
-		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		ptr := fr.value(instr.X).value
 		fr.nilCheck(instr.X, ptr)
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
@@ -552,10 +549,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.builder.CreateCondBr(cond, trueBlock, falseBlock)
 
 	case *ssa.Index:
-		// FIXME Surely we should be dealing with an
-		// *array, so we can do a GEP?
+		// The optimiser will remove the alloca/store/load
+		// instructions if the array is already addressable.
 		array := fr.value(instr.X).value
-		arrayptr := fr.builder.CreateAlloca(array.Type(), "")
+		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
 		index := fr.value(instr.Index).value
 		zero := llvm.ConstNull(index.Type())
@@ -563,7 +560,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
-		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).value
 		index := fr.value(instr.Index).value
 		var arrayptr, arraylen llvm.Value
