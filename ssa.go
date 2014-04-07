@@ -659,7 +659,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 				Send: fr.value(state.Send),
 			}
 		}
-		fr.env[instr] = fr.chanSelect(states, instr.Blocking)
+		index, recvOk, recvElems := fr.chanSelect(states, instr.Blocking)
+		tuple := append([]*govalue{index, recvOk}, recvElems...)
+		fr.tuples[instr] = tuple
 
 	case *ssa.Send:
 		fr.chanSend(fr.value(instr.Chan), fr.value(instr.X))
