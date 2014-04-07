@@ -411,6 +411,9 @@ func (d FileDescriptor) Tag() dwarf.Tag {
 }
 
 func (d FileDescriptor) path() llvm.Value {
+	if d == "" {
+		d = "<synthetic>"
+	}
 	dirname, filename := path.Split(string(d))
 	if l := len(dirname); l > 0 && dirname[l-1] == '/' {
 		dirname = dirname[:l-1]
@@ -419,9 +422,6 @@ func (d FileDescriptor) path() llvm.Value {
 }
 
 func (d FileDescriptor) mdNode(info *DebugInfo) llvm.Value {
-	if d == "" {
-		return llvm.Value{}
-	}
 	return llvm.MDNode([]llvm.Value{
 		llvm.ConstInt(llvm.Int32Type(), llvm.LLVMDebugVersion+uint64(d.Tag()), false),
 		d.path(),
