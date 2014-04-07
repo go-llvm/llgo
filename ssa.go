@@ -337,6 +337,7 @@ type frame struct {
 	retInf                 retInfo
 	blocks                 []llvm.BasicBlock
 	lastBlocks             []llvm.BasicBlock
+	runtimeErrorBlocks     [gccgoRuntimeErrorCount]llvm.BasicBlock
 	env                    map[ssa.Value]*govalue
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi

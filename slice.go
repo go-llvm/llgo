@@ -35,7 +35,7 @@ func (fr *frame) slice(x, low, high *govalue) *govalue {
 	var errcode uint64
 	switch typ := x.Type().Underlying().(type) {
 	case *types.Pointer: // *array
-		errcode = 3 // TODO(pcc): symbolic
+		errcode = gccgoRuntimeErrorARRAY_SLICE_OUT_OF_BOUNDS
 		arraytyp := typ.Elem().Underlying().(*types.Array)
 		elemtyp = arraytyp.Elem()
 		arrayptr = x.value
@@ -43,7 +43,7 @@ func (fr *frame) slice(x, low, high *govalue) *govalue {
 		arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
 		arraycap = arraylen
 	case *types.Slice:
-		errcode = 4 // TODO(pcc): symbolic
+		errcode = gccgoRuntimeErrorSLICE_SLICE_OUT_OF_BOUNDS
 		elemtyp = typ.Elem()
 		sliceValue := x.value
 		arrayptr = fr.builder.CreateExtractValue(sliceValue, 0, "")
@@ -71,15 +71,7 @@ func (fr *frame) slice(x, low, high *govalue) *govalue {
 	cond := fr.builder.CreateOr(l0, zh, "")
 	cond = fr.builder.CreateOr(cond, hl, "")
 
-	errorbb := llvm.AddBasicBlock(fr.function, "")
-	contbb := llvm.AddBasicBlock(fr.function, "")
-	fr.builder.CreateCondBr(cond, errorbb, contbb)
-
-	fr.builder.SetInsertPointAtEnd(errorbb)
-	fr.runtime.runtimeError.call(fr, llvm.ConstInt(llvm.Int32Type(), errcode, false))
-	fr.builder.CreateUnreachable()
-
-	fr.builder.SetInsertPointAtEnd(contbb)
+	fr.condBrRuntimeError(cond, errcode)
 
 	slicelen := fr.builder.CreateSub(highval, lowval, "")
 	slicecap := fr.builder.CreateSub(arraycap, lowval, "")
