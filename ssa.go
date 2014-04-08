@@ -337,6 +337,7 @@ type frame struct {
 	retInf                 retInfo
 	blocks                 []llvm.BasicBlock
 	lastBlocks             []llvm.BasicBlock
+	runtimeErrorBlocks     [gccgoRuntimeErrorCount]llvm.BasicBlock
 	env                    map[ssa.Value]*govalue
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi
@@ -415,6 +416,28 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 	}
 
 	panic("Instruction not visited yet")
+}
+
+func (fr *frame) isNonNull(v ssa.Value) bool {
+	switch v.(type) {
+	case
+		// Globals have a fixed (non-nil) address.
+		*ssa.Global,
+		// The language does not specify what happens if an allocation fails.
+		*ssa.Alloc,
+		// These have already been nil checked.
+		*ssa.FieldAddr, *ssa.IndexAddr:
+		return true
+	default:
+		return false
+	}
+}
+
+func (fr *frame) nilCheck(v ssa.Value, llptr llvm.Value) {
+	if !fr.isNonNull(v) {
+		ptrnull := fr.builder.CreateIsNull(llptr, "")
+		fr.condBrRuntimeError(ptrnull, gccgoRuntimeErrorNIL_DEREFERENCE)
+	}
 }
 
 func (fr *frame) instruction(instr ssa.Instruction) {
@@ -505,9 +528,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
-		// TODO: implement nil check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		ptr := fr.value(instr.X).value
+		fr.nilCheck(instr.X, ptr)
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
 		ptr = fr.builder.CreateBitCast(ptr, ptrtyp, "")
@@ -540,21 +563,39 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
-		// TODO: implement nil-check and panic.
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).value
 		index := fr.value(instr.Index).value
+		var arrayptr, arraylen llvm.Value
 		var elemtyp types.Type
+		var errcode uint64
 		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
 			elemtyp = typ.Elem()
-			x = fr.builder.CreateExtractValue(x, 0, "")
+			arrayptr = fr.builder.CreateExtractValue(x, 0, "")
+			arraylen = fr.builder.CreateExtractValue(x, 1, "")
+			errcode = gccgoRuntimeErrorSLICE_INDEX_OUT_OF_BOUNDS
 		case *types.Pointer: // *array
-			elemtyp = typ.Elem().Underlying().(*types.Array).Elem()
+			arraytyp := typ.Elem().Underlying().(*types.Array)
+			elemtyp = arraytyp.Elem()
+			fr.nilCheck(instr.X, x)
+			arrayptr = x
+			arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
+			errcode = gccgoRuntimeErrorARRAY_INDEX_OUT_OF_BOUNDS
 		}
+
+		// Bounds checking: 0 <= index < len
+		zero := llvm.ConstNull(fr.types.inttype)
+		i0 := fr.builder.CreateICmp(llvm.IntSLT, index, zero, "")
+		li := fr.builder.CreateICmp(llvm.IntSLE, arraylen, index, "")
+
+		cond := fr.builder.CreateOr(i0, li, "")
+
+		fr.condBrRuntimeError(cond, errcode)
+
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(elemtyp), 0)
-		x = fr.builder.CreateBitCast(x, ptrtyp, "")
-		addr := fr.builder.CreateGEP(x, []llvm.Value{index}, "")
+		arrayptr = fr.builder.CreateBitCast(arrayptr, ptrtyp, "")
+		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{index}, "")
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		fr.env[instr] = newValue(addr, types.NewPointer(elemtyp))
 
@@ -674,6 +715,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Store:
 		addr := fr.value(instr.Addr).value
+		fr.nilCheck(instr.Addr, addr)
 		value := fr.value(instr.Val).value
 		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
@@ -699,6 +741,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 				fr.env[instr] = x
 			}
 		case token.MUL:
+			fr.nilCheck(instr.X, operand.value)
 			// The bitcast is necessary to handle recursive pointer loads.
 			llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
 			fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
