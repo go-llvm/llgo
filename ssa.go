@@ -566,18 +566,36 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).value
 		index := fr.value(instr.Index).value
+		var arrayptr, arraylen llvm.Value
 		var elemtyp types.Type
+		var errcode uint64
 		switch typ := instr.X.Type().Underlying().(type) {
 		case *types.Slice:
 			elemtyp = typ.Elem()
-			x = fr.builder.CreateExtractValue(x, 0, "")
+			arrayptr = fr.builder.CreateExtractValue(x, 0, "")
+			arraylen = fr.builder.CreateExtractValue(x, 1, "")
+			errcode = gccgoRuntimeErrorSLICE_INDEX_OUT_OF_BOUNDS
 		case *types.Pointer: // *array
-			elemtyp = typ.Elem().Underlying().(*types.Array).Elem()
+			arraytyp := typ.Elem().Underlying().(*types.Array)
+			elemtyp = arraytyp.Elem()
 			fr.nilCheck(instr.X, x)
+			arrayptr = x
+			arraylen = llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
+			errcode = gccgoRuntimeErrorARRAY_INDEX_OUT_OF_BOUNDS
 		}
+
+		// Bounds checking: 0 <= index < len
+		zero := llvm.ConstNull(fr.types.inttype)
+		i0 := fr.builder.CreateICmp(llvm.IntSLT, index, zero, "")
+		li := fr.builder.CreateICmp(llvm.IntSLE, arraylen, index, "")
+
+		cond := fr.builder.CreateOr(i0, li, "")
+
+		fr.condBrRuntimeError(cond, errcode)
+
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(elemtyp), 0)
-		x = fr.builder.CreateBitCast(x, ptrtyp, "")
-		addr := fr.builder.CreateGEP(x, []llvm.Value{index}, "")
+		arrayptr = fr.builder.CreateBitCast(arrayptr, ptrtyp, "")
+		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{index}, "")
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(llvm.Int8Type(), 0), "")
 		fr.env[instr] = newValue(addr, types.NewPointer(elemtyp))
 
