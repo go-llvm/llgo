@@ -152,14 +152,16 @@ func (fr *frame) binaryOp(lhs *govalue, op token.Token, rhs *govalue) *govalue {
 		return value
 
 	case *types.Slice:
-		// []T == nil
-		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+		// []T == nil or nil == []T
+		lhsptr := b.CreateExtractValue(lhs.value, 0, "")
+		rhsptr := b.CreateExtractValue(rhs.value, 0, "")
+		isnil := b.CreateICmp(llvm.IntEQ, lhsptr, rhsptr, "")
 		isnil = b.CreateZExt(isnil, llvm.Int8Type(), "")
 		return newValue(isnil, types.Typ[types.Bool])
 
 	case *types.Signature:
-		// func == nil
-		isnil := b.CreateIsNull(b.CreateExtractValue(lhs.value, 0, ""), "")
+		// func == nil or nil == func
+		isnil := b.CreateICmp(llvm.IntEQ, lhs.value, rhs.value, "")
 		isnil = b.CreateZExt(isnil, llvm.Int8Type(), "")
 		return newValue(isnil, types.Typ[types.Bool])
 
