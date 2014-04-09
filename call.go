@@ -19,7 +19,13 @@ func (fr *frame) createCall(fn *govalue, argValues []*govalue) []*govalue {
 	for i, arg := range argValues {
 		args[i] = arg.value
 	}
-	results := typinfo.call(fr.types.ctx, fr.allocaBuilder, fr.builder, fn.value, args)
+	var results []llvm.Value
+	if fr.unwindBlock.IsNil() {
+		results = typinfo.call(fr.types.ctx, fr.allocaBuilder, fr.builder, fn.value, args)
+	} else {
+		contbb := llvm.AddBasicBlock(fr.function, "")
+		results = typinfo.invoke(fr.types.ctx, fr.allocaBuilder, fr.builder, fn.value, args, contbb, fr.unwindBlock)
+	}
 
 	resultValues := make([]*govalue, len(results))
 	for i, res := range results {

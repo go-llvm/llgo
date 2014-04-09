@@ -236,85 +236,15 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 	}
 
-	// Move any allocs relating to named results from the entry block
-	// to the prologue block, so they dominate the rundefers and recover
-	// blocks.
-	//
-	// TODO(axw) ask adonovan for a cleaner way of doing this, e.g.
-	// have ssa generate an entry block that defines Allocs and related
-	// stores, and then a separate block for function body instructions.
-	if f.Synthetic == "" {
-		if results := f.Signature.Results(); results != nil {
-			for i := 0; i < results.Len(); i++ {
-				result := results.At(i)
-				if result.Name() == "" {
-					break
-				}
-				for i, instr := range f.Blocks[0].Instrs {
-					if instr, ok := instr.(*ssa.Alloc); ok && instr.Heap && instr.Pos() == result.Pos() {
-						fr.instruction(instr)
-						instrs := f.Blocks[0].Instrs
-						instrs = append(instrs[:i], instrs[i+1:]...)
-						f.Blocks[0].Instrs = instrs
-						break
-					}
-				}
-			}
-		}
-	}
-
-	var term llvm.Value
-	// If the function contains any defers, we must first call
-	// setjmp so we can call rundefers in response to a panic.
-	// We can short-circuit the check for defers with
+	// If the function contains any defers, we must first create
+	// an unwind block. We can short-circuit the check for defers with
 	// f.Recover != nil.
 	if f.Recover != nil || hasDefer(f) {
-		panic("setjmp unsupported")
-		/*
-			rdblock := llvm.AddBasicBlock(fr.function, "rundefers")
-			defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
-			fr.builder.CreateCall(fr.runtime.initdefers.value, []llvm.Value{defers}, "")
-			jb := fr.builder.CreateStructGEP(defers, 0, "")
-			jb = fr.builder.CreateBitCast(jb, llvm.PointerType(llvm.Int8Type(), 0), "")
-			result := fr.builder.CreateCall(fr.runtime.setjmp.value, []llvm.Value{jb}, "")
-			result = fr.builder.CreateIsNotNull(result, "")
-			fr.builder.CreateCondBr(result, rdblock, fr.blocks[0])
-			// We'll only get here via a panic, which must either be
-			// recovered or continue panicking up the stack without
-			// returning from "rundefers". The recover block may be
-			// nil even if we can recover, in which case we just need
-			// to return the zero value for each result (if any).
-			var recoverBlock llvm.BasicBlock
-			if f.Recover != nil {
-				recoverBlock = fr.block(f.Recover)
-			} else {
-				recoverBlock = llvm.AddBasicBlock(fr.function, "recover")
-				fr.builder.SetInsertPointAtEnd(recoverBlock)
-				var nresults int
-				results := f.Signature.Results()
-				if results != nil {
-					nresults = results.Len()
-				}
-				switch nresults {
-				case 0:
-					fr.builder.CreateRetVoid()
-				case 1:
-					fr.builder.CreateRet(llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(0).Type())))
-				default:
-					values := make([]llvm.Value, nresults)
-					for i := range values {
-						values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
-					}
-					fr.builder.CreateAggregateRet(values)
-				}
-			}
-			fr.builder.SetInsertPointAtEnd(rdblock)
-			fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
-			term = fr.builder.CreateBr(recoverBlock)
-		*/
-	} else {
-		term = fr.builder.CreateBr(fr.blocks[0])
+		fr.unwindBlock = llvm.AddBasicBlock(fr.function, "")
+		fr.frameptr = fr.builder.CreateAlloca(llvm.Int8Type(), "")
 	}
+
+	term := fr.builder.CreateBr(fr.blocks[0])
 	fr.allocaBuilder.SetInsertPointBefore(term)
 
 	for _, block := range f.DomPreorder() {
@@ -322,6 +252,10 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	fr.fixupPhis()
+
+	if !fr.unwindBlock.IsNil() {
+		fr.setupUnwindBlock(f.Recover, f.Signature.Results())
+	}
 }
 
 type pendingPhi struct {
@@ -337,6 +271,8 @@ type frame struct {
 	blocks                 []llvm.BasicBlock
 	lastBlocks             []llvm.BasicBlock
 	runtimeErrorBlocks     [gccgoRuntimeErrorCount]llvm.BasicBlock
+	unwindBlock            llvm.BasicBlock
+	frameptr               llvm.Value
 	env                    map[ssa.Value]*govalue
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi
@@ -416,6 +352,69 @@ func (fr *frame) fixupPhis() {
 		}
 		phi.llvm.AddIncoming(values, blocks)
 	}
+}
+
+func (fr *frame) createLandingPad(cleanup bool) llvm.Value {
+	lp := fr.builder.CreateLandingPad(fr.runtime.gccgoExceptionType, fr.runtime.gccgoPersonality, 0, "")
+	if cleanup {
+		lp.SetCleanup(true)
+	} else {
+		lp.AddClause(llvm.ConstNull(llvm.PointerType(llvm.Int8Type(), 0)))
+	}
+	return lp
+}
+
+// Runs defers. If a defer panics, check for recovers in later defers.
+func (fr *frame) runDefers() {
+	loopbb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.CreateBr(loopbb)
+
+	retrylpad := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.SetInsertPointAtEnd(retrylpad)
+	fr.createLandingPad(false)
+	fr.runtime.checkDefer.callOnly(fr, fr.frameptr)
+	fr.builder.CreateBr(loopbb)
+
+	fr.builder.SetInsertPointAtEnd(loopbb)
+	fr.runtime.undefer.invoke(fr, retrylpad, fr.frameptr)
+}
+
+func (fr *frame) setupUnwindBlock(rec *ssa.BasicBlock, results *types.Tuple) {
+	recoverbb := llvm.AddBasicBlock(fr.function, "")
+	if rec != nil {
+		fr.translateBlock(rec, recoverbb)
+	} else if results.Len() == 0 || results.At(0).Anonymous() {
+		// TODO(pcc): Remove this code after https://codereview.appspot.com/87210044/ lands
+		fr.builder.SetInsertPointAtEnd(recoverbb)
+		values := make([]llvm.Value, results.Len())
+		for i := range values {
+			values[i] = llvm.ConstNull(fr.llvmtypes.ToLLVM(results.At(i).Type()))
+		}
+		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, values)
+	} else {
+		fr.builder.SetInsertPointAtEnd(recoverbb)
+		fr.builder.CreateUnreachable()
+	}
+
+	checkunwindbb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.SetInsertPointAtEnd(checkunwindbb)
+	exc := fr.createLandingPad(true)
+	fr.runDefers()
+
+	frame := fr.builder.CreateLoad(fr.frameptr, "")
+	shouldresume := fr.builder.CreateIsNull(frame, "")
+
+	resumebb := llvm.AddBasicBlock(fr.function, "")
+	fr.builder.CreateCondBr(shouldresume, resumebb, recoverbb)
+
+	fr.builder.SetInsertPointAtEnd(resumebb)
+	fr.builder.CreateResume(exc)
+
+	fr.builder.SetInsertPointAtEnd(fr.unwindBlock)
+	fr.createLandingPad(false)
+	fr.runtime.checkDefer.invoke(fr, checkunwindbb, fr.frameptr)
+	fr.runDefers()
+	fr.builder.CreateBr(recoverbb)
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
@@ -541,18 +540,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		v := fr.value(instr.X)
 		fr.env[instr] = fr.convert(v, instr.Type())
 
-	//case *ssa.DebugRef:
-
 	case *ssa.Defer:
-		panic("defer not supported yet")
-	/*
-		fn, args, result := fr.prepareCall(instr)
-		if result != nil {
-			panic("illegal use of builtin in defer statement")
-		}
-		fn = fr.indirectFunction(fn, args)
-		fr.createCall(fr.runtime.pushdefer, []*govalue{fn})
-	*/
+		fn, arg := fr.createThunk(instr)
+		fr.runtime.Defer.call(fr, fr.frameptr, fn, arg)
 
 	case *ssa.Extract:
 		var elem llvm.Value
@@ -727,9 +717,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
 	case *ssa.RunDefers:
-		// TODO(axw)
-		//fr.builder.CreateCall(fr.runtime.rundefers.value, nil, "")
-		fr.builder.CreateUnreachable()
+		fr.runDefers()
 
 	case *ssa.Select:
 		states := make([]selectState, len(instr.States))
