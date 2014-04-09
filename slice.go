@@ -19,7 +19,7 @@ func (fr *frame) makeSlice(sliceType types.Type, length, capacity *govalue) *gov
 	return newValue(llslice[0], sliceType)
 }
 
-func (fr *frame) slice(x, low, high *govalue) *govalue {
+func (fr *frame) slice(x, low, high *govalue, slicetyp types.Type) *govalue {
 	var lowval, highval llvm.Value
 	if low != nil {
 		lowval = fr.convert(low, types.Typ[types.Int]).value
@@ -81,11 +81,11 @@ func (fr *frame) slice(x, low, high *govalue) *govalue {
 
 	sliceptr := fr.builder.CreateInBoundsGEP(arrayptr, []llvm.Value{offset}, "")
 
-	slicetyp := fr.llvmtypes.sliceBackendType().ToLLVM(fr.llvmtypes.ctx)
-	sliceValue := llvm.Undef(slicetyp)
+	llslicetyp := fr.llvmtypes.sliceBackendType().ToLLVM(fr.llvmtypes.ctx)
+	sliceValue := llvm.Undef(llslicetyp)
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, sliceptr, 0, "")
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicelen, 1, "")
 	sliceValue = fr.builder.CreateInsertValue(sliceValue, slicecap, 2, "")
 
-	return newValue(sliceValue, types.NewSlice(elemtyp))
+	return newValue(sliceValue, slicetyp)
 }
