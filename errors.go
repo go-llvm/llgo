@@ -37,10 +37,15 @@ func (fr *frame) setBranchWeightMetadata(br llvm.Value, trueweight, falseweight 
 }
 
 func (fr *frame) condBrRuntimeError(cond llvm.Value, errcode uint64) {
+	if cond.IsNull() {
+		return
+	}
+
 	errorbb := fr.runtimeErrorBlocks[errcode]
 	newbb := errorbb.C == nil
 	if newbb {
 		errorbb = llvm.AddBasicBlock(fr.function, "")
+		fr.runtimeErrorBlocks[errcode] = errorbb
 	}
 
 	contbb := llvm.AddBasicBlock(fr.function, "")
