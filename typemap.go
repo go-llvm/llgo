@@ -843,7 +843,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
-	vals[7] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+	vals[7] = tm.globalStringPtr(t.String())
 	vals[8] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
 		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
