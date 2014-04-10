@@ -711,7 +711,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		x := fr.value(instr.X)
 		low := fr.value(instr.Low)
 		high := fr.value(instr.High)
-		fr.env[instr] = fr.slice(x, low, high)
+		fr.env[instr] = fr.slice(x, low, high, instr.Type())
 
 	case *ssa.Store:
 		addr := fr.value(instr.Addr).value

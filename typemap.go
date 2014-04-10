@@ -51,12 +51,12 @@ type TypeMap struct {
 	methodResolver MethodResolver
 	types.MethodSetCache
 
-	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType llvm.Type
-	mapDescType                                                                                                                             llvm.Type
+	commonTypeType, uncommonTypeType, ptrTypeType, funcTypeType, arrayTypeType, sliceTypeType, mapTypeType, chanTypeType, interfaceTypeType, structTypeType llvm.Type
+	mapDescType                                                                                                                                             llvm.Type
 
-	methodType, imethodType llvm.Type
+	methodType, imethodType, structFieldType llvm.Type
 
-	typeSliceType, methodSliceType, imethodSliceType llvm.Type
+	typeSliceType, methodSliceType, imethodSliceType, structFieldSliceType llvm.Type
 
 	hashFnType, equalFnType llvm.Type
 
@@ -212,6 +212,23 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.interfaceTypeType.StructSetBody([]llvm.Type{
 		tm.commonTypeType,
 		tm.imethodSliceType,
+	}, false)
+
+	tm.structFieldType = tm.ctx.StructCreateNamed("structField")
+	tm.structFieldType.StructSetBody([]llvm.Type{
+		stringPtrType,     // name
+		stringPtrType,     // pkgPath
+		commonTypeTypePtr, // typ
+		stringPtrType,     // tag
+		tm.inttype,        // offset
+	}, false)
+
+	tm.structFieldSliceType = tm.makeNamedSliceType("structFieldSlice", tm.structFieldType)
+
+	tm.structTypeType = tm.ctx.StructCreateNamed("structType")
+	tm.structTypeType.StructSetBody([]llvm.Type{
+		tm.commonTypeType,
+		tm.structFieldSliceType, // fields
 	}, false)
 
 	tm.mapDescType = tm.ctx.StructCreateNamed("mapDesc")
@@ -508,7 +525,7 @@ func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	case *types.Chan:
 		return tm.chanTypeType
 	case *types.Struct:
-		return tm.commonTypeType // FIXME
+		return tm.structTypeType
 	case *types.Interface:
 		return tm.interfaceTypeType
 	default:
@@ -587,7 +604,7 @@ func (tm *TypeMap) makeTypeDescInitializer(t types.Type) llvm.Value {
 	case *types.Chan:
 		return tm.makeChanType(t, u)
 	case *types.Struct:
-		return tm.makeCommonType(t) // FIXME
+		return tm.makeStructType(t, u)
 	case *types.Interface:
 		return tm.makeInterfaceType(t, u)
 	default:
@@ -843,7 +860,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
-	vals[7] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
+	vals[7] = tm.globalStringPtr(t.String())
 	vals[8] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
 		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
@@ -876,50 +893,42 @@ func (tm *TypeMap) makeSliceType(t types.Type, s *types.Slice) llvm.Value {
 	return llvm.ConstNamedStruct(tm.sliceTypeType, vals[:])
 }
 
-/*
-func (tm *TypeMap) structRuntimeType(tstr string, s *types.Struct) (global, ptr llvm.Value) {
-	rtype := tm.makeRtype(s, reflect.Struct)
-	structType := llvm.ConstNull(tm.runtime.structType.llvm)
-	structType = llvm.ConstInsertValue(structType, rtype, []uint32{0})
-	global, ptr = tm.makeRuntimeTypeGlobal(structType, typeString(s))
-	tm.types.Set(s, runtimeTypeInfo{global, ptr})
+func (tm *TypeMap) makeStructType(t types.Type, s *types.Struct) llvm.Value {
+	var vals [2]llvm.Value
+	vals[0] = tm.makeCommonType(t)
+
 	fieldVars := make([]*types.Var, s.NumFields())
 	for i := range fieldVars {
 		fieldVars[i] = s.Field(i)
 	}
 	offsets := tm.Offsetsof(fieldVars)
 	structFields := make([]llvm.Value, len(fieldVars))
-	for i := range structFields {
-		field := fieldVars[i]
-		structField := llvm.ConstNull(tm.runtime.structField.llvm)
+	for i, field := range fieldVars {
+		var sfvals [5]llvm.Value
 		if !field.Anonymous() {
-			name := tm.globalStringPtr(field.Name())
-			name = llvm.ConstBitCast(name, tm.runtime.structField.llvm.StructElementTypes()[0])
-			structField = llvm.ConstInsertValue(structField, name, []uint32{0})
+			sfvals[0] = tm.globalStringPtr(field.Name())
+		} else {
+			sfvals[0] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
 		}
-		if !ast.IsExported(field.Name()) {
-			pkgpath := tm.globalStringPtr(field.Pkg().Path())
-			pkgpath = llvm.ConstBitCast(pkgpath, tm.runtime.structField.llvm.StructElementTypes()[1])
-			structField = llvm.ConstInsertValue(structField, pkgpath, []uint32{1})
+		if !field.Exported() && field.Pkg() != nil {
+			sfvals[1] = tm.globalStringPtr(field.Pkg().Path())
+		} else {
+			sfvals[1] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
 		}
-		fieldType := tm.ToRuntime(field.Type())
-		structField = llvm.ConstInsertValue(structField, fieldType, []uint32{2})
+		sfvals[2] = tm.getTypeDescriptorPointer(field.Type())
 		if tag := s.Tag(i); tag != "" {
-			tag := tm.globalStringPtr(tag)
-			tag = llvm.ConstBitCast(tag, tm.runtime.structField.llvm.StructElementTypes()[3])
-			structField = llvm.ConstInsertValue(structField, tag, []uint32{3})
+			sfvals[3] = tm.globalStringPtr(tag)
+		} else {
+			sfvals[3] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
 		}
-		offset := llvm.ConstInt(tm.runtime.structField.llvm.StructElementTypes()[4], uint64(offsets[i]), false)
-		structField = llvm.ConstInsertValue(structField, offset, []uint32{4})
-		structFields[i] = structField
+		sfvals[4] = llvm.ConstInt(tm.inttype, uint64(offsets[i]), false)
+
+		structFields[i] = llvm.ConstNamedStruct(tm.structFieldType, sfvals[:])
 	}
-	structFieldsSliceType := tm.runtime.structType.llvm.StructElementTypes()[1]
-	structFieldsSlice := tm.makeSlice(structFields, structFieldsSliceType)
-	structType = llvm.ConstInsertValue(structType, structFieldsSlice, []uint32{1})
-	global.SetInitializer(structType)
-	return global, ptr
+	vals[1] = tm.makeSlice(structFields, tm.structFieldSliceType)
+
+	return llvm.ConstNamedStruct(tm.structTypeType, vals[:])
 }
-*/
 
 func (tm *TypeMap) makePointerType(t types.Type, p *types.Pointer) llvm.Value {
 	var vals [2]llvm.Value
