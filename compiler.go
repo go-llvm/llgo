@@ -5,19 +5,21 @@
 package llgo
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/token"
 	"log"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	llgobuild "github.com/go-llvm/llgo/build"
-	llgoimporter "github.com/go-llvm/llgo/importer"
 	"github.com/go-llvm/llvm"
 
 	"code.google.com/p/go.tools/go/gccgoimporter"
+	"code.google.com/p/go.tools/go/importer"
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
@@ -35,8 +37,9 @@ func assert(cond bool) {
 
 type Module struct {
 	llvm.Module
-	Name     string
-	disposed bool
+	Path       string
+	ExportData []byte
+	disposed   bool
 }
 
 func (m *Module) Dispose() {
@@ -145,10 +148,11 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
+	initmap := make(map[*types.Package]gccgoimporter.InitData)
 	impcfg := &loader.Config{
 		Fset: token.NewFileSet(),
 		TypeChecker: types.Config{
-			Import: inst.GetImporter(compiler.ImportPaths),
+			Import: inst.GetImporter(compiler.ImportPaths, initmap),
 			Sizes:  compiler.llvmtypes,
 		},
 		Build: &buildctx.Context,
@@ -174,9 +178,9 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	mainPkginfo := iprog.InitialPackages()[0]
 	mainPkg := program.CreatePackage(mainPkginfo)
 
-	// Create a Module, which contains the LLVM bitcode.
+	// Create a Module, which contains the LLVM module.
 	modulename := importpath
-	compiler.module = &Module{Module: llvm.NewModule(modulename), Name: modulename}
+	compiler.module = &Module{Module: llvm.NewModule(modulename), Path: modulename}
 	compiler.module.SetTarget(compiler.TargetTriple)
 	compiler.module.SetDataLayout(compiler.dataLayout)
 
@@ -228,30 +232,61 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
 	if importpath == "main" {
-		if err = compiler.createInitMainFunction(mainPkg); err != nil {
+		if err = compiler.createInitMainFunction(mainPkg, initmap); err != nil {
 			return nil, fmt.Errorf("failed to create __go_init_main: %v", err)
 		}
 	} else {
-		if err := llgoimporter.Export(buildctx, mainPkg.Object); err != nil {
-			return nil, fmt.Errorf("failed to export package data: %v", err)
-		}
+		compiler.module.ExportData = compiler.buildExportData(mainPkg, initmap)
 	}
 
 	return compiler.module, nil
 }
 
-type ByPriority []types.PackageInit
+type byPriorityThenFunc []gccgoimporter.PackageInit
 
-func (a ByPriority) Len() int           { return len(a) }
-func (a ByPriority) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByPriority) Less(i, j int) bool { return a[i].Priority < a[j].Priority }
-
-func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
-	var inits []types.PackageInit
-	for _, imp := range mainPkg.Object.Imports() {
-		inits = append(inits, imp.Inits()...)
+func (a byPriorityThenFunc) Len() int      { return len(a) }
+func (a byPriorityThenFunc) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a byPriorityThenFunc) Less(i, j int) bool {
+	switch {
+	case a[i].Priority < a[j].Priority:
+		return true
+	case a[i].Priority > a[j].Priority:
+		return false
+	case a[i].InitFunc < a[j].InitFunc:
+		return true
+	default:
+		return false
 	}
-	sort.Sort(ByPriority(inits))
+}
+
+func (c *compiler) buildPackageInitData(mainPkg *ssa.Package, initmap map[*types.Package]gccgoimporter.InitData) gccgoimporter.InitData {
+	var inits []gccgoimporter.PackageInit
+	for _, imp := range mainPkg.Object.Imports() {
+		inits = append(inits, initmap[imp].Inits...)
+	}
+	sort.Sort(byPriorityThenFunc(inits))
+
+	var uniqinits []gccgoimporter.PackageInit
+	for i, init := range inits {
+		if i == 0 || uniqinits[len(uniqinits)-1].InitFunc != init.InitFunc {
+			uniqinits = append(uniqinits, init)
+		}
+	}
+
+	ourprio := 1
+	if len(uniqinits) != 0 {
+		ourprio = uniqinits[len(uniqinits)-1].Priority + 1
+	}
+
+	if mainPkg.Func(".import") != nil {
+		uniqinits = append(uniqinits, gccgoimporter.PackageInit{mainPkg.Object.Name(), mainPkg.Object.Path() + "..import", ourprio})
+	}
+
+	return gccgoimporter.InitData{ourprio, uniqinits}
+}
+
+func (c *compiler) createInitMainFunction(mainPkg *ssa.Package, initmap map[*types.Package]gccgoimporter.InitData) error {
+	initdata := c.buildPackageInitData(mainPkg, initmap)
 
 	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
 	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
@@ -261,25 +296,41 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 	defer builder.Dispose()
 	builder.SetInsertPointAtEnd(entry)
 
-	seenInit := make(map[string]bool)
-
-	for _, init := range inits {
-		if seenInit[init.Function] {
-			continue
+	for _, init := range initdata.Inits {
+		initfn := c.module.Module.NamedFunction(init.InitFunc)
+		if initfn.IsNil() {
+			initfn = llvm.AddFunction(c.module.Module, init.InitFunc, ftyp)
 		}
-		seenInit[init.Function] = true
-
-		initfn := llvm.AddFunction(c.module.Module, init.Function, ftyp)
 		builder.CreateCall(initfn, nil, "")
-	}
-
-	maininitfn := c.module.Module.NamedFunction("main..import")
-	if maininitfn.C != nil {
-		builder.CreateCall(maininitfn, nil, "")
 	}
 
 	builder.CreateRetVoid()
 	return nil
+}
+
+func (c *compiler) buildExportData(mainPkg *ssa.Package, initmap map[*types.Package]gccgoimporter.InitData) []byte {
+	exportData := importer.ExportData(mainPkg.Object)
+	b := bytes.NewBuffer(exportData)
+
+	initdata := c.buildPackageInitData(mainPkg, initmap)
+	b.WriteString("v1;\npriority ")
+	b.WriteString(strconv.Itoa(initdata.Priority))
+	b.WriteString(";\n")
+
+	if len(initdata.Inits) != 0 {
+		b.WriteString("init")
+		for _, init := range initdata.Inits {
+			b.WriteRune(' ')
+			b.WriteString(init.Name)
+			b.WriteRune(' ')
+			b.WriteString(init.InitFunc)
+			b.WriteRune(' ')
+			b.WriteString(strconv.Itoa(init.Priority))
+		}
+		b.WriteString(";\n")
+	}
+
+	return b.Bytes()
 }
 
 // vim: set ft=go :
