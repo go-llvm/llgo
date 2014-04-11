@@ -73,3 +73,29 @@ func (fr *frame) callCopy(dest, source *govalue) *govalue {
 	fr.runtime.copy.call(fr, aptr, bptr, bytes)
 	return newValue(minlen, types.Typ[types.Int])
 }
+
+func (fr *frame) callRecover() *govalue {
+	startbb := fr.builder.GetInsertBlock()
+	recoverbb := llvm.AddBasicBlock(fr.function, "")
+	contbb := llvm.AddBasicBlock(fr.function, "")
+	canRecover := fr.builder.CreateTrunc(fr.canRecover, llvm.Int1Type(), "")
+	fr.builder.CreateCondBr(canRecover, recoverbb, contbb)
+
+	fr.builder.SetInsertPointAtEnd(recoverbb)
+	recovered := fr.runtime.recover.call(fr)[0]
+	fr.builder.CreateBr(contbb)
+
+	fr.builder.SetInsertPointAtEnd(contbb)
+	eface := types.NewInterface(nil, nil)
+	llv := fr.builder.CreatePHI(fr.types.ToLLVM(eface), "")
+	llv.AddIncoming(
+		[]llvm.Value{llvm.ConstNull(llv.Type()), recovered},
+		[]llvm.BasicBlock{startbb, recoverbb},
+	)
+	return newValue(llv, eface)
+}
+
+func (fr *frame) callPanic(arg *govalue) {
+	fr.runtime.panic.call(fr, arg.value)
+	fr.builder.CreateUnreachable()
+}

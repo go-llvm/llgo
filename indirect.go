@@ -37,10 +37,20 @@ func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg ll
 		packArg(arg)
 	}
 
+	var isRecoverCall bool
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	var structllptr llvm.Type
 	if len(args) == 0 {
-		arg = llvm.ConstPointerNull(i8ptr)
+		if builtin, ok := call.Common().Value.(*ssa.Builtin); ok {
+			isRecoverCall = builtin.Name() == "recover"
+		}
+		if isRecoverCall {
+			// When creating a thunk for recover(), we must pass fr.canRecover.
+			arg = fr.builder.CreateZExt(fr.canRecover, fr.target.IntPtrType(), "")
+			arg = fr.builder.CreateIntToPtr(arg, i8ptr, "")
+		} else {
+			arg = llvm.ConstPointerNull(i8ptr)
+		}
 	} else {
 		structtype := types.NewStruct(argtypes, nil)
 		arg = fr.createTypeMalloc(structtype)
@@ -62,10 +72,13 @@ func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg ll
 	prologuebb := llvm.AddBasicBlock(thunkfn, "prologue")
 	thunkfr.builder.SetInsertPointAtEnd(prologuebb)
 
-	if len(args) > 0 {
+	if isRecoverCall {
+		thunkarg := thunkfn.Param(0)
+		thunkarg = thunkfr.builder.CreatePtrToInt(thunkarg, fr.target.IntPtrType(), "")
+		thunkfr.canRecover = thunkfr.builder.CreateTrunc(thunkarg, llvm.Int1Type(), "")
+	} else if len(args) > 0 {
 		thunkarg := thunkfn.Param(0)
 		thunkarg = thunkfr.builder.CreateBitCast(thunkarg, structllptr, "")
-
 		for i, ssaarg := range args {
 			thunkargptr := thunkfr.builder.CreateStructGEP(thunkarg, i, "")
 			thunkarg := thunkfr.builder.CreateLoad(thunkargptr, "")
