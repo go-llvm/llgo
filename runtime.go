@@ -32,10 +32,12 @@ func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
 type runtimeInterface struct {
 	// LLVM intrinsics
 	memcpy,
-	memset llvm.Value
+	memset,
+	returnaddress llvm.Value
 
 	append,
 	assertInterface,
+	canRecover,
 	chanCap,
 	chanLen,
 	chanrecv2,
@@ -63,6 +65,7 @@ type runtimeInterface struct {
 	newMap,
 	NewNopointers,
 	newSelect,
+	panic,
 	printBool,
 	printDouble,
 	printEmptyInterface,
@@ -75,6 +78,7 @@ type runtimeInterface struct {
 	printString,
 	printUint64,
 	receiveBig,
+	recover,
 	runtimeError,
 	selectdefault,
 	selectrecv2,
@@ -110,6 +114,7 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 		name      string
 		rfi       *runtimeFnInfo
 		args, res []types.Type
+		attrs     []llvm.Attribute
 	}{
 		{
 			name: "__go_append",
@@ -122,6 +127,12 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			rfi:  &ri.assertInterface,
 			args: []types.Type{UnsafePointer, UnsafePointer},
 			res:  []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_can_recover",
+			rfi:  &ri.canRecover,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Bool},
 		},
 		{
 			name: "__go_chan_cap",
@@ -277,6 +288,12 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			res:  []types.Type{UnsafePointer},
 		},
 		{
+			name:  "__go_panic",
+			rfi:   &ri.panic,
+			args:  []types.Type{EmptyInterface},
+			attrs: []llvm.Attribute{llvm.NoReturnAttribute},
+		},
+		{
 			name: "__go_print_bool",
 			rfi:  &ri.printBool,
 			args: []types.Type{Bool},
@@ -335,9 +352,15 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
 		},
 		{
-			name: "__go_runtime_error",
-			rfi:  &ri.runtimeError,
-			args: []types.Type{Int32},
+			name: "__go_recover",
+			rfi:  &ri.recover,
+			res:  []types.Type{EmptyInterface},
+		},
+		{
+			name:  "__go_runtime_error",
+			rfi:   &ri.runtimeError,
+			args:  []types.Type{Int32},
+			attrs: []llvm.Attribute{llvm.NoReturnAttribute},
 		},
 		{
 			name: "runtime.selectdefault",
@@ -408,15 +431,45 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 		},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.res)
+		for _, attr := range rt.attrs {
+			rt.rfi.fn.AddFunctionAttr(attr)
+		}
 	}
 
 	memsetName := "llvm.memset.p0i8.i" + strconv.Itoa(tm.target.IntPtrType().IntTypeWidth())
-	memsetType := llvm.FunctionType(llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0), llvm.Int8Type(), tm.target.IntPtrType(), llvm.Int32Type(), llvm.Int1Type()}, false)
+	memsetType := llvm.FunctionType(
+		llvm.VoidType(),
+		[]llvm.Type{
+			llvm.PointerType(llvm.Int8Type(), 0),
+			llvm.Int8Type(),
+			tm.target.IntPtrType(),
+			llvm.Int32Type(),
+			llvm.Int1Type(),
+		},
+		false,
+	)
 	ri.memset = llvm.AddFunction(module, memsetName, memsetType)
 
 	memcpyName := "llvm.memcpy.p0i8.p0i8.i" + strconv.Itoa(tm.target.IntPtrType().IntTypeWidth())
-	memcpyType := llvm.FunctionType(llvm.VoidType(), []llvm.Type{llvm.PointerType(llvm.Int8Type(), 0), llvm.PointerType(llvm.Int8Type(), 0), tm.target.IntPtrType(), llvm.Int32Type(), llvm.Int1Type()}, false)
+	memcpyType := llvm.FunctionType(
+		llvm.VoidType(),
+		[]llvm.Type{
+			llvm.PointerType(llvm.Int8Type(), 0),
+			llvm.PointerType(llvm.Int8Type(), 0),
+			tm.target.IntPtrType(),
+			llvm.Int32Type(),
+			llvm.Int1Type(),
+		},
+		false,
+	)
 	ri.memcpy = llvm.AddFunction(module, memcpyName, memcpyType)
+
+	returnaddressType := llvm.FunctionType(
+		llvm.PointerType(llvm.Int8Type(), 0),
+		[]llvm.Type{llvm.Int32Type()},
+		false,
+	)
+	ri.returnaddress = llvm.AddFunction(module, "llvm.returnaddress", returnaddressType)
 
 	return &ri, nil
 }
@@ -466,4 +519,10 @@ func (fr *frame) memcpy(dest llvm.Value, src llvm.Value, size llvm.Value) {
 	align := llvm.ConstInt(llvm.Int32Type(), 1, false)
 	isvolatile := llvm.ConstNull(llvm.Int1Type())
 	fr.builder.CreateCall(memcpy, []llvm.Value{dest, src, size, align, isvolatile}, "")
+}
+
+func (fr *frame) returnAddress(level uint64) llvm.Value {
+	returnaddress := fr.runtime.returnaddress
+	levelValue := llvm.ConstInt(llvm.Int32Type(), level, false)
+	return fr.builder.CreateCall(returnaddress, []llvm.Value{levelValue}, "")
 }

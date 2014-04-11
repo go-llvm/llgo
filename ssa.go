@@ -149,12 +149,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	llvmFunction := u.resolveFunctionGlobal(f)
-	fr := newFrame(u, llvmFunction)
+	fr := newFrame(u, u.resolveFunctionGlobal(f))
 	defer fr.dispose()
-
-	fr.blocks = make([]llvm.BasicBlock, len(f.Blocks))
-	fr.lastBlocks = make([]llvm.BasicBlock, len(f.Blocks))
 
 	fr.logf("Define function: %s", f.String())
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
@@ -164,19 +160,22 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// Push the function onto the debug context.
 	// TODO(axw) create a fake CU for synthetic functions
 	if u.GenerateDebug && f.Synthetic == "" {
-		u.debug.pushFunctionContext(llvmFunction, f.Signature, f.Pos())
+		u.debug.pushFunctionContext(fr.function, f.Signature, f.Pos())
 		defer u.debug.popFunctionContext()
 		u.debug.setLocation(fr.builder, f.Pos())
 	}
 
-	// Functions that call recover must not be inlined, or we
-	// can't tell whether the recover call is valid at runtime.
-	if f.Recover != nil {
-		llvmFunction.AddFunctionAttr(llvm.NoInlineAttribute)
+	// If a function calls recover, we create a separate function to
+	// hold the real function, and this function calls __go_can_recover
+	// and bridges to it.
+	if callsRecover(f) {
+		fr = fr.bridgeRecoverFunc(fr.function, fti)
 	}
 
+	fr.blocks = make([]llvm.BasicBlock, len(f.Blocks))
+	fr.lastBlocks = make([]llvm.BasicBlock, len(f.Blocks))
 	for i, block := range f.Blocks {
-		fr.blocks[i] = llvm.AddBasicBlock(llvmFunction, fmt.Sprintf(".%d.%s", i, block.Comment))
+		fr.blocks[i] = llvm.AddBasicBlock(fr.function, fmt.Sprintf(".%d.%s", i, block.Comment))
 	}
 	fr.builder.SetInsertPointAtEnd(fr.blocks[0])
 
@@ -272,7 +271,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if f.Recover != nil || hasDefer(f) {
 		panic("setjmp unsupported")
 		/*
-			rdblock := llvm.AddBasicBlock(llvmFunction, "rundefers")
+			rdblock := llvm.AddBasicBlock(fr.function, "rundefers")
 			defers := fr.builder.CreateAlloca(fr.runtime.defers.llvm, "")
 			fr.builder.CreateCall(fr.runtime.initdefers.value, []llvm.Value{defers}, "")
 			jb := fr.builder.CreateStructGEP(defers, 0, "")
@@ -289,7 +288,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 			if f.Recover != nil {
 				recoverBlock = fr.block(f.Recover)
 			} else {
-				recoverBlock = llvm.AddBasicBlock(llvmFunction, "recover")
+				recoverBlock = llvm.AddBasicBlock(fr.function, "recover")
 				fr.builder.SetInsertPointAtEnd(recoverBlock)
 				var nresults int
 				results := f.Signature.Results()
@@ -341,6 +340,7 @@ type frame struct {
 	env                    map[ssa.Value]*govalue
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi
+	canRecover             llvm.Value
 }
 
 func newFrame(u *unit, fn llvm.Value) *frame {
@@ -357,6 +357,52 @@ func newFrame(u *unit, fn llvm.Value) *frame {
 func (fr *frame) dispose() {
 	fr.builder.Dispose()
 	fr.allocaBuilder.Dispose()
+}
+
+// bridgeRecoverFunc creates a function that may call recover(), and creates
+// a call to it from the current frame. The created function will be called
+// with a boolean parameter that indicates whether it may call recover().
+//
+// The created function will have the same name as the current frame's function
+// with "$recover" appended, having the same return types and parameters with
+// an additional boolean parameter appended.
+//
+// A new frame will be returned for the newly created function.
+func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame {
+	// The bridging function must not be inlined, or the return address
+	// may not correspond to the source function.
+	llfn.AddFunctionAttr(llvm.NoInlineAttribute)
+
+	// Call __go_can_recover, passing in the function's return address.
+	entry := llvm.AddBasicBlock(llfn, "entry")
+	fr.builder.SetInsertPointAtEnd(entry)
+	canRecover := fr.runtime.canRecover.call(fr, fr.returnAddress(0))[0]
+	returnType := fti.functionType.ReturnType()
+	argTypes := fti.functionType.ParamTypes()
+	argTypes = append(argTypes, canRecover.Type())
+
+	// Create and call the $recover function.
+	ftiRecover := fti
+	ftiRecover.functionType = llvm.FunctionType(returnType, argTypes, false)
+	llfnRecover := ftiRecover.declare(fr.module.Module, llfn.Name()+"$recover")
+	args := make([]llvm.Value, len(argTypes)-1, len(argTypes))
+	for i := range args {
+		args[i] = llfn.Param(i)
+	}
+	args = append(args, canRecover)
+	result := fr.builder.CreateCall(llfnRecover, args, "")
+	if returnType.TypeKind() == llvm.VoidTypeKind {
+		fr.builder.CreateRetVoid()
+	} else {
+		fr.builder.CreateRet(result)
+	}
+
+	// The $recover function must condition calls to __go_recover on
+	// the result of __go_can_recover passed in as an argument.
+	fr = newFrame(fr.unit, llfnRecover)
+	fr.retInf = ftiRecover.retInf
+	fr.canRecover = fr.function.Param(len(argTypes) - 1)
+	return fr
 }
 
 func (fr *frame) fixupPhis() {
@@ -478,8 +524,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// The source type must be a non-empty interface,
 		// as ChangeInterface cannot fail (E2I may fail).
 		if instr.Type().Underlying().(*types.Interface).NumMethods() > 0 {
-			// TODO(axw) optimisation for I2I case where we
-			// know statically the methods to carry over.
 			x = fr.changeInterface(x, instr.Type(), false)
 		} else {
 			x = fr.convertI2E(x)
@@ -528,7 +572,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
-		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		ptr := fr.value(instr.X).value
 		fr.nilCheck(instr.X, ptr)
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
@@ -552,10 +595,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.builder.CreateCondBr(cond, trueBlock, falseBlock)
 
 	case *ssa.Index:
-		// FIXME Surely we should be dealing with an
-		// *array, so we can do a GEP?
+		// The optimiser will remove the alloca/store/load
+		// instructions if the array is already addressable.
 		array := fr.value(instr.X).value
-		arrayptr := fr.builder.CreateAlloca(array.Type(), "")
+		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
 		index := fr.value(instr.Index).value
 		zero := llvm.ConstNull(index.Type())
@@ -563,7 +606,6 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
-		// TODO: combine a chain of {Field,Index}Addrs into a single GEP.
 		x := fr.value(instr.X).value
 		index := fr.value(instr.Index).value
 		var arrayptr, arraylen llvm.Value
@@ -657,10 +699,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		}
 
 	case *ssa.Panic:
-		// TODO(axw)
-		//arg := fr.value(instr.X).value
-		//fr.builder.CreateCall(fr.runtime.panic_.value, []llvm.Value{arg}, "")
-		fr.builder.CreateUnreachable()
+		arg := fr.value(instr.X)
+		fr.callPanic(arg)
 
 	case *ssa.Phi:
 		typ := instr.Type()
@@ -761,10 +801,11 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*goval
 		return nil
 
 	case "panic":
-		panic("TODO: panic")
+		fr.callPanic(args[0])
+		return nil
 
 	case "recover":
-		panic("TODO: recover")
+		return []*govalue{fr.callRecover()}
 
 	case "append":
 		return []*govalue{fr.callAppend(args[0], args[1])}
@@ -857,6 +898,20 @@ func hasDefer(f *ssa.Function) bool {
 		for _, instr := range b.Instrs {
 			if _, ok := instr.(*ssa.Defer); ok {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+func callsRecover(f *ssa.Function) bool {
+	for _, b := range f.Blocks {
+		for _, instr := range b.Instrs {
+			if instr, ok := instr.(ssa.CallInstruction); ok {
+				b, ok := instr.Common().Value.(*ssa.Builtin)
+				if ok && b.Name() == "recover" {
+					return true
+				}
 			}
 		}
 	}
