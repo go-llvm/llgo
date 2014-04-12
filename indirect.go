@@ -86,12 +86,27 @@ func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg ll
 		}
 	}
 
+	_, isDefer := call.(*ssa.Defer)
+
 	entrybb := llvm.AddBasicBlock(thunkfn, "entry")
 	br := thunkfr.builder.CreateBr(entrybb)
 	thunkfr.allocaBuilder.SetInsertPointBefore(br)
 
 	thunkfr.builder.SetInsertPointAtEnd(entrybb)
-	thunkfr.callInstruction(call)
+	var exitbb llvm.BasicBlock
+	if isDefer {
+		exitbb = llvm.AddBasicBlock(thunkfn, "exit")
+		thunkfr.runtime.setDeferRetaddr.call(thunkfr, llvm.BlockAddress(thunkfn, exitbb))
+	}
+	if isDefer && isRecoverCall {
+		thunkfr.callRecover(true)
+	} else {
+		thunkfr.callInstruction(call)
+	}
+	if isDefer {
+		thunkfr.builder.CreateBr(exitbb)
+		thunkfr.builder.SetInsertPointAtEnd(exitbb)
+	}
 	thunkfr.builder.CreateRetVoid()
 
 	thunk = fr.builder.CreateBitCast(thunkfn, i8ptr, "")

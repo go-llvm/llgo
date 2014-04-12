@@ -793,7 +793,7 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*goval
 		return nil
 
 	case "recover":
-		return []*govalue{fr.callRecover()}
+		return []*govalue{fr.callRecover(false)}
 
 	case "append":
 		return []*govalue{fr.callAppend(args[0], args[1])}

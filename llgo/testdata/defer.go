@@ -1,10 +1,5 @@
 package main
 
-// FIXME(axw) this is a workaround for lack of support
-// for interfaces. Remove this when we have it.
-func panic(interface{}) {
-}
-
 type T struct {
 	value int
 }

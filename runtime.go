@@ -65,6 +65,7 @@ type runtimeInterface struct {
 	convertInterface,
 	copy,
 	Defer,
+	deferredRecover,
 	emptyInterfaceCompare,
 	getClosure,
 	Go,
@@ -106,6 +107,7 @@ type runtimeInterface struct {
 	selectgo,
 	sendBig,
 	setClosure,
+	setDeferRetaddr,
 	strcmp,
 	stringiter2,
 	stringPlus,
@@ -203,6 +205,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_defer",
 			rfi:  &ri.Defer,
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "__go_deferred_recover",
+			rfi:  &ri.deferredRecover,
+			res:  []types.Type{EmptyInterface},
 		},
 		{
 			name: "__go_empty_interface_compare",
@@ -423,6 +430,12 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_set_closure",
 			rfi:  &ri.setClosure,
 			args: []types.Type{UnsafePointer},
+		},
+		{
+			name: "__go_set_defer_retaddr",
+			rfi:  &ri.setDeferRetaddr,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Bool},
 		},
 		{
 			name: "__go_strcmp",
