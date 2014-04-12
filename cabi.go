@@ -506,6 +506,22 @@ func (fi *functionTypeInfo) call(ctx llvm.Context, allocaBuilder llvm.Builder, b
 	return fi.retInf.decode(ctx, allocaBuilder, builder, call)
 }
 
+func (fi *functionTypeInfo) invoke(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, callee llvm.Value, args []llvm.Value, cont, lpad llvm.BasicBlock) []llvm.Value {
+	callArgs := make([]llvm.Value, len(fi.argAttrs))
+	for i, a := range args {
+		fi.argInfos[i].encode(ctx, allocaBuilder, builder, callArgs, a)
+	}
+	fi.retInf.prepare(ctx, allocaBuilder, callArgs)
+	typedCallee := builder.CreateBitCast(callee, llvm.PointerType(fi.functionType, 0), "")
+	call := builder.CreateInvoke(typedCallee, callArgs, cont, lpad, "")
+	call.AddInstrAttribute(0, fi.retAttr)
+	for i, a := range fi.argAttrs {
+		call.AddInstrAttribute(i+1, a)
+	}
+	builder.SetInsertPointAtEnd(cont)
+	return fi.retInf.decode(ctx, allocaBuilder, builder, call)
+}
+
 func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Type) (fi functionTypeInfo) {
 	var returnType llvm.Type
 	var argTypes []llvm.Type

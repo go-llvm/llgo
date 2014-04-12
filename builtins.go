@@ -74,7 +74,7 @@ func (fr *frame) callCopy(dest, source *govalue) *govalue {
 	return newValue(minlen, types.Typ[types.Int])
 }
 
-func (fr *frame) callRecover() *govalue {
+func (fr *frame) callRecover(isDeferredRecover bool) *govalue {
 	startbb := fr.builder.GetInsertBlock()
 	recoverbb := llvm.AddBasicBlock(fr.function, "")
 	contbb := llvm.AddBasicBlock(fr.function, "")
@@ -82,7 +82,12 @@ func (fr *frame) callRecover() *govalue {
 	fr.builder.CreateCondBr(canRecover, recoverbb, contbb)
 
 	fr.builder.SetInsertPointAtEnd(recoverbb)
-	recovered := fr.runtime.recover.call(fr)[0]
+	var recovered llvm.Value
+	if isDeferredRecover {
+		recovered = fr.runtime.deferredRecover.call(fr)[0]
+	} else {
+		recovered = fr.runtime.recover.call(fr)[0]
+	}
 	fr.builder.CreateBr(contbb)
 
 	fr.builder.SetInsertPointAtEnd(contbb)

@@ -24,7 +24,20 @@ func (rfi *runtimeFnInfo) init(tm *llvmTypeMap, m llvm.Module, name string, args
 }
 
 func (rfi *runtimeFnInfo) call(f *frame, args ...llvm.Value) []llvm.Value {
+	if f.unwindBlock.IsNil() {
+		return rfi.callOnly(f, args...)
+	} else {
+		return rfi.invoke(f, f.unwindBlock, args...)
+	}
+}
+
+func (rfi *runtimeFnInfo) callOnly(f *frame, args ...llvm.Value) []llvm.Value {
 	return rfi.fi.call(f.llvmtypes.ctx, f.allocaBuilder, f.builder, rfi.fn, args)
+}
+
+func (rfi *runtimeFnInfo) invoke(f *frame, lpad llvm.BasicBlock, args ...llvm.Value) []llvm.Value {
+	contbb := llvm.AddBasicBlock(f.function, "")
+	return rfi.fi.invoke(f.llvmtypes.ctx, f.allocaBuilder, f.builder, rfi.fn, args, contbb, lpad)
 }
 
 // runtimeInterface is a struct containing references to
@@ -35,16 +48,24 @@ type runtimeInterface struct {
 	memset,
 	returnaddress llvm.Value
 
+	// Exception handling support
+	gccgoPersonality llvm.Value
+	gccgoExceptionType llvm.Type
+
+	// Runtime intrinsics
 	append,
 	assertInterface,
 	canRecover,
 	chanCap,
 	chanLen,
 	chanrecv2,
+	checkDefer,
 	checkInterfaceType,
 	builtinClose,
 	convertInterface,
 	copy,
+	Defer,
+	deferredRecover,
 	emptyInterfaceCompare,
 	getClosure,
 	Go,
@@ -86,12 +107,14 @@ type runtimeInterface struct {
 	selectgo,
 	sendBig,
 	setClosure,
+	setDeferRetaddr,
 	strcmp,
 	stringiter2,
 	stringPlus,
 	stringSlice,
 	stringToIntArray,
-	typeDescriptorsEqual runtimeFnInfo
+	typeDescriptorsEqual,
+	undefer runtimeFnInfo
 }
 
 func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface, error) {
@@ -153,6 +176,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			res:  []types.Type{Bool},
 		},
 		{
+			name: "__go_check_defer",
+			rfi:  &ri.checkDefer,
+			args: []types.Type{UnsafePointer},
+		},
+		{
 			name: "__go_check_interface_type",
 			rfi:  &ri.checkInterfaceType,
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
@@ -172,6 +200,16 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_copy",
 			rfi:  &ri.copy,
 			args: []types.Type{UnsafePointer, UnsafePointer, Uintptr},
+		},
+		{
+			name: "__go_defer",
+			rfi:  &ri.Defer,
+			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
+		},
+		{
+			name: "__go_deferred_recover",
+			rfi:  &ri.deferredRecover,
+			res:  []types.Type{EmptyInterface},
 		},
 		{
 			name: "__go_empty_interface_compare",
@@ -394,6 +432,12 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			args: []types.Type{UnsafePointer},
 		},
 		{
+			name: "__go_set_defer_retaddr",
+			rfi:  &ri.setDeferRetaddr,
+			args: []types.Type{UnsafePointer},
+			res:  []types.Type{Bool},
+		},
+		{
 			name: "__go_strcmp",
 			rfi:  &ri.strcmp,
 			args: []types.Type{String, String},
@@ -428,6 +472,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			rfi:  &ri.typeDescriptorsEqual,
 			args: []types.Type{UnsafePointer, UnsafePointer},
 			res:  []types.Type{Bool},
+		},
+		{
+			name: "__go_undefer",
+			rfi:  &ri.undefer,
+			args: []types.Type{UnsafePointer},
 		},
 	} {
 		rt.rfi.init(tm, module, rt.name, rt.args, rt.res)
@@ -471,6 +520,26 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 	)
 	ri.returnaddress = llvm.AddFunction(module, "llvm.returnaddress", returnaddressType)
 
+	gccgoPersonalityType := llvm.FunctionType(
+		llvm.Int32Type(),
+		[]llvm.Type{
+			llvm.Int32Type(),
+			llvm.Int64Type(),
+			llvm.PointerType(llvm.Int8Type(), 0),
+			llvm.PointerType(llvm.Int8Type(), 0),
+		},
+		false,
+	)
+	ri.gccgoPersonality = llvm.AddFunction(module, "__gccgo_personality_v0", gccgoPersonalityType)
+
+	ri.gccgoExceptionType = llvm.StructType(
+		[]llvm.Type{
+			llvm.PointerType(llvm.Int8Type(), 0),
+			llvm.Int32Type(),
+		},
+		false,
+	)
+
 	return &ri, nil
 }
 
@@ -492,7 +561,7 @@ func (fr *frame) createMalloc(size llvm.Value, hasPointers bool) llvm.Value {
 		allocator = &fr.runtime.NewNopointers
 	}
 
-	return allocator.call(fr, fr.createZExtOrTrunc(size, fr.target.IntPtrType(), ""))[0]
+	return allocator.callOnly(fr, fr.createZExtOrTrunc(size, fr.target.IntPtrType(), ""))[0]
 }
 
 func (fr *frame) createTypeMalloc(t types.Type) llvm.Value {
