@@ -151,6 +151,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	fr := newFrame(u, u.resolveFunctionGlobal(f))
 	defer fr.dispose()
+	addCommonFunctionAttrs(fr.function)
 
 	fr.logf("Define function: %s", f.String())
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
@@ -321,6 +322,7 @@ func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame
 	ftiRecover := fti
 	ftiRecover.functionType = llvm.FunctionType(returnType, argTypes, false)
 	llfnRecover := ftiRecover.declare(fr.module.Module, llfn.Name()+"$recover")
+	addCommonFunctionAttrs(llfnRecover)
 	args := make([]llvm.Value, len(argTypes)-1, len(argTypes))
 	for i := range args {
 		args[i] = llfn.Param(i)
