@@ -49,7 +49,7 @@ type runtimeInterface struct {
 	returnaddress llvm.Value
 
 	// Exception handling support
-	gccgoPersonality llvm.Value
+	gccgoPersonality   llvm.Value
 	gccgoExceptionType llvm.Type
 
 	// Runtime intrinsics

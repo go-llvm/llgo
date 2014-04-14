@@ -1,8 +1,8 @@
 package llgo
 
 import (
-	"github.com/go-llvm/llvm"
 	"code.google.com/p/go.tools/go/types"
+	"github.com/go-llvm/llvm"
 )
 
 type abiArgInfo int
@@ -24,7 +24,7 @@ func (t ptrBType) ToLLVM(c llvm.Context) llvm.Type {
 }
 
 type intBType struct {
-	width int
+	width  int
 	signed bool
 }
 
@@ -58,7 +58,7 @@ func (t structBType) ToLLVM(c llvm.Context) llvm.Type {
 
 type arrayBType struct {
 	length uint64
-	elem backendType
+	elem   backendType
 }
 
 func (t arrayBType) ToLLVM(c llvm.Context) llvm.Type {
@@ -88,9 +88,8 @@ func (tm *llvmTypeMap) sizeofStruct(fields ...types.Type) int64 {
 func (tm *llvmTypeMap) classify(t ...types.Type) abiArgInfo {
 	if tm.sizeofStruct(t...) > 16 {
 		return AIK_Indirect
-	} else {
-		return AIK_Direct
 	}
+	return AIK_Direct
 }
 
 func (tm *llvmTypeMap) sliceBackendType() backendType {
@@ -168,7 +167,7 @@ func (tm *llvmTypeMap) getBackendType(t types.Type) backendType {
 }
 
 type offsetedType struct {
-	typ backendType
+	typ    backendType
 	offset uint64
 }
 
@@ -194,7 +193,7 @@ func (tm *llvmTypeMap) getBackendOffsets(bt backendType) (offsets []offsetedType
 		}
 
 	default:
-		offsets = []offsetedType { offsetedType{bt, 0} }
+		offsets = []offsetedType{offsetedType{bt, 0}}
 	}
 
 	return
@@ -271,8 +270,8 @@ type retInfo interface {
 
 type directArgInfo struct {
 	argOffset int
-	argTypes []llvm.Type
-	valType llvm.Type
+	argTypes  []llvm.Type
+	valType   llvm.Type
 }
 
 func directEncode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, argTypes []llvm.Type, args []llvm.Value, val llvm.Value) {
@@ -367,8 +366,8 @@ func (ai *indirectArgInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, 
 }
 
 type directRetInfo struct {
-	numResults int
-	retTypes []llvm.Type
+	numResults  int
+	retTypes    []llvm.Type
 	resultsType llvm.Type
 }
 
@@ -381,7 +380,7 @@ func (ri *directRetInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 	case 0:
 		return nil
 	case 1:
-		args = []llvm.Value { call }
+		args = []llvm.Value{call}
 	default:
 		args = make([]llvm.Value, len(ri.retTypes))
 		for i := 0; i != len(ri.retTypes); i++ {
@@ -392,7 +391,7 @@ func (ri *directRetInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 	d := directDecode(ctx, allocaBuilder, builder, ri.resultsType, args)
 
 	if ri.numResults == 1 {
-		return []llvm.Value { d }
+		return []llvm.Value{d}
 	} else {
 		results := make([]llvm.Value, ri.numResults)
 		for i := 0; i != ri.numResults; i++ {
@@ -436,8 +435,8 @@ func (ri *directRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 }
 
 type indirectRetInfo struct {
-	numResults int
-	sretSlot llvm.Value
+	numResults  int
+	sretSlot    llvm.Value
 	resultsType llvm.Type
 }
 
@@ -448,7 +447,7 @@ func (ri *indirectRetInfo) prepare(ctx llvm.Context, allocaBuilder llvm.Builder,
 
 func (ri *indirectRetInfo) decode(ctx llvm.Context, allocaBuilder llvm.Builder, builder llvm.Builder, call llvm.Value) []llvm.Value {
 	if ri.numResults == 1 {
-		return []llvm.Value { builder.CreateLoad(ri.sretSlot, "") }
+		return []llvm.Value{builder.CreateLoad(ri.sretSlot, "")}
 	} else {
 		vals := make([]llvm.Value, ri.numResults)
 		for i, _ := range vals {
@@ -474,10 +473,10 @@ func (ri *indirectRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, 
 
 type functionTypeInfo struct {
 	functionType llvm.Type
-	argAttrs []llvm.Attribute
-	retAttr llvm.Attribute
-	argInfos []argInfo
-	retInf retInfo
+	argAttrs     []llvm.Attribute
+	retAttr      llvm.Attribute
+	argInfos     []argInfo
+	retInf       retInfo
 }
 
 func (fi *functionTypeInfo) declare(m llvm.Module, name string) llvm.Value {
@@ -566,8 +565,8 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 
 		case AIK_Indirect:
 			returnType = llvm.VoidType()
-			argTypes = []llvm.Type { llvm.PointerType(resultsType, 0) }
-			fi.argAttrs = []llvm.Attribute { llvm.StructRetAttribute }
+			argTypes = []llvm.Type{llvm.PointerType(resultsType, 0)}
+			fi.argAttrs = []llvm.Attribute{llvm.StructRetAttribute}
 			fi.retInf = &indirectRetInfo{numResults: len(results), resultsType: resultsType}
 		}
 	}
@@ -601,7 +600,7 @@ func (tm *llvmTypeMap) getSignatureInfo(sig *types.Signature) functionTypeInfo {
 		if _, ok := recvtype.Underlying().(*types.Pointer); !ok && recvtype != types.Typ[types.UnsafePointer] {
 			recvtype = types.NewPointer(recvtype)
 		}
-		args = []types.Type { recvtype }
+		args = []types.Type{recvtype}
 	}
 
 	for i := 0; i != sig.Params().Len(); i++ {
