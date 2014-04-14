@@ -431,7 +431,7 @@ func (ri *directRetInfo) encode(ctx llvm.Context, allocaBuilder llvm.Builder, bu
 			retval = builder.CreateInsertValue(retval, a, i, "")
 		}
 	}
-	builder.CreateRet(val)
+	builder.CreateRet(retval)
 }
 
 type indirectRetInfo struct {
