@@ -23,6 +23,19 @@ import (
 	"github.com/go-llvm/llvm"
 )
 
+type stringList []string
+
+func (s *stringList) Set(val string) error {
+	*s = append(*s, val)
+	return nil
+}
+
+func (s *stringList) String() string {
+	return ""
+}
+
+var importpaths stringList
+
 var dump = flag.Bool(
 	"dump", false,
 	"Dump the LLVM assembly to stderr and exit")
@@ -186,6 +199,7 @@ func initCompiler() (*llgo.Compiler, error) {
 	}
 	opts.GenerateDebug = *generateDebug
 	opts.GccgoPath = *gccgoPath
+	opts.ImportPaths = []string(importpaths)
 	return llgo.NewCompiler(opts)
 }
 
@@ -193,6 +207,9 @@ func main() {
 	llvm.InitializeAllTargets()
 	llvm.InitializeAllTargetMCs()
 	llvm.InitializeAllTargetInfos()
+
+	flag.Var(&importpaths, "I", "Additional import search paths")
+
 	flag.Parse()
 
 	if *version {
