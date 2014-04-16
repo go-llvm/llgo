@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 )
 
@@ -20,7 +21,9 @@ func parseFiles(fset *token.FileSet, filenames []string) ([]*ast.File, error) {
 	files := make([]*ast.File, len(filenames))
 	for i, filename := range filenames {
 		file, err := parseFile(fset, filename)
-		if err != nil {
+		if _, ok := err.(scanner.ErrorList); ok {
+			return nil, err
+		} else if err != nil {
 			return nil, fmt.Errorf("%q: %v", filename, err)
 		}
 		files[i] = file
