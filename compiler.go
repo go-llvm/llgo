@@ -67,6 +67,9 @@ type CompilerOptions struct {
 	// GccgoPath is the path to the gccgo binary whose libgo we read import
 	// data from
 	GccgoPath string
+
+	// ImportPaths is the list of additional import paths
+	ImportPaths []string
 }
 
 type Compiler struct {
@@ -145,7 +148,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	impcfg := &loader.Config{
 		Fset: token.NewFileSet(),
 		TypeChecker: types.Config{
-			Import: inst.GetImporter(nil),
+			Import: inst.GetImporter(compiler.ImportPaths),
 			Sizes:  compiler.llvmtypes,
 		},
 		Build: &buildctx.Context,
