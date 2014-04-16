@@ -85,7 +85,7 @@ func runMainFunction(files []string, importPath string) (output []string, err er
 	}
 
 	objpath := filepath.Join(tempdir, "test.o")
-	cmd = exec.Command("llc", "-filetype=obj", "-disable-tail-calls", "-O3", "-o", objpath, optbcpath)
+	cmd = exec.Command("llc", "-filetype=obj", "-O3", "-o", objpath, optbcpath)
 	data, err = cmd.CombinedOutput()
 	if err != nil {
 		output = strings.Split(strings.TrimSpace(string(data)), "\n")

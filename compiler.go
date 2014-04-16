@@ -9,7 +9,6 @@ import (
 	"go/ast"
 	"go/token"
 	"log"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -23,14 +22,9 @@ import (
 	"code.google.com/p/go.tools/go/types"
 )
 
-func assert(cond bool) {
-	if !cond {
-		_, file, line, ok := runtime.Caller(1)
-		if !ok {
-			panic("assertion failed")
-		}
-		panic(fmt.Sprintf("assertion failed [%s:%d]", file, line))
-	}
+func addCommonFunctionAttrs(fn llvm.Value) {
+	fn.AddTargetDependentFunctionAttr("disable-tail-calls", "true")
+	fn.AddTargetDependentFunctionAttr("split-stack", "")
 }
 
 type Module struct {
@@ -252,6 +246,7 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package) error {
 
 	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
 	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
+	addCommonFunctionAttrs(initMain)
 	entry := llvm.AddBasicBlock(initMain, "entry")
 
 	builder := llvm.GlobalContext().NewBuilder()
