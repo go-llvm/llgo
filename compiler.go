@@ -207,14 +207,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	compiler.processAnnotations(unit, mainPkginfo)
 
 	compiler.types.finalize()
-
-	// Finalise debugging.
-	for _, cu := range compiler.debug.cu {
-		compiler.module.AddNamedMetadataOperand(
-			"llvm.dbg.cu",
-			compiler.debug.MDNode(cu),
-		)
-	}
+	compiler.debug.finalize()
 
 	// Export runtime type information.
 	var exportedTypes []types.Type

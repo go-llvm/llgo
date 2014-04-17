@@ -127,7 +127,8 @@ func (d *BasicTypeDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		llvm.ConstInt(llvm.Int64Type(), d.Alignment, false),
 		llvm.ConstInt(llvm.Int64Type(), d.Offset, false),
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Flags), false),
-		llvm.ConstInt(llvm.Int32Type(), uint64(d.TypeEncoding), false)})
+		llvm.ConstInt(llvm.Int32Type(), uint64(d.TypeEncoding), false),
+	})
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -158,7 +159,9 @@ func (d *CompositeTypeDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		info.MDNode(d.Base), // reference type derived from
 		llvm.MDNode(info.MDNodes(d.Members)),
 		llvm.ConstInt(llvm.Int32Type(), uint64(0), false), // Runtime language
-		llvm.ConstInt(llvm.Int32Type(), uint64(0), false), // Base type containing the vtable pointer for this type
+		info.MDNode(nil),                                  // Base type containing the vtable pointer for this type
+		info.MDNode(nil),                                  // template parameters
+		info.MDNode(nil),                                  // type UID
 	})
 }
 
@@ -223,7 +226,7 @@ func (d *CompileUnitDescriptor) Tag() dwarf.Tag {
 	return dwarf.TagCompileUnit
 }
 
-func (d *CompileUnitDescriptor) mdNodeList(info *DebugInfo, list []DebugDescriptor) llvm.Value {
+func mdNodeList(info *DebugInfo, list []DebugDescriptor) llvm.Value {
 	if len(list) > 0 {
 		return llvm.MDNode(info.MDNodes(list))
 	}
@@ -239,12 +242,12 @@ func (d *CompileUnitDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		constInt1(d.Optimized),
 		llvm.MDString(d.CompilerFlags),
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Runtime), false),
-		d.mdNodeList(info, d.EnumTypes),
-		d.mdNodeList(info, d.RetainedTypes),
-		d.mdNodeList(info, d.Subprograms),
-		d.mdNodeList(info, d.GlobalVariables),
-		d.mdNodeList(info, nil), // List of imported entities
-		llvm.MDString(""),       // Split debug filename
+		mdNodeList(info, d.EnumTypes),
+		mdNodeList(info, d.RetainedTypes),
+		mdNodeList(info, d.Subprograms),
+		mdNodeList(info, d.GlobalVariables),
+		mdNodeList(info, nil), // List of imported entities
+		llvm.MDString(""),     // Split debug filename
 	})
 }
 
@@ -272,7 +275,8 @@ func (d *DerivedTypeDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		llvm.ConstInt(llvm.Int64Type(), d.Alignment, false),
 		llvm.ConstInt(llvm.Int64Type(), d.Offset, false),
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Flags), false),
-		info.MDNode(d.Base)})
+		info.MDNode(d.Base),
+	})
 }
 
 func NewMemberDerivedType(base DebugDescriptor) *DerivedTypeDescriptor {
@@ -327,7 +331,7 @@ func (d *SubprogramDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		d.Function,
 		info.MDNode(nil),                                            // Template parameters
 		info.MDNode(nil),                                            // function declaration descriptor
-		llvm.MDNode(nil),                                            // function variables
+		mdNodeList(info, nil),                                       // function variables
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.ScopeLine), false), // Line number where the scope of the subprogram begins
 	})
 }
@@ -364,7 +368,9 @@ func (d *GlobalVariableDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		info.MDNode(d.Type),
 		constInt1(d.Local),
 		constInt1(!d.External),
-		d.Value})
+		d.Value,
+		llvm.MDNode(nil), // static member declaration
+	})
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -450,6 +456,7 @@ func (d *BlockDescriptor) mdNode(info *DebugInfo) llvm.Value {
 		info.MDNode(d.Context),
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Line), false),
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Column), false),
+		llvm.ConstInt(llvm.Int32Type(), 0, false), // DWARF path discriminator
 		llvm.ConstInt(llvm.Int32Type(), uint64(d.Id), false),
 	})
 }

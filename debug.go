@@ -142,3 +142,27 @@ func (d *debugInfo) setLocation(b llvm.Builder, pos token.Pos) {
 		llvm.Value{},
 	}))
 }
+
+// finalize must be called after all compilation units are translated,
+// generating the final debug metadata for the module.
+func (d *debugInfo) finalize() {
+	for _, cu := range d.cu {
+		d.module.AddNamedMetadataOperand("llvm.dbg.cu", d.MDNode(cu))
+	}
+	d.module.AddNamedMetadataOperand(
+		"llvm.module.flags",
+		llvm.MDNode([]llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), 2, false), // Warn on mismatch
+			llvm.MDString("Dwarf Version"),
+			llvm.ConstInt(llvm.Int32Type(), 4, false),
+		}),
+	)
+	d.module.AddNamedMetadataOperand(
+		"llvm.module.flags",
+		llvm.MDNode([]llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), 1, false), // Error on mismatch
+			llvm.MDString("Debug Info Version"),
+			llvm.ConstInt(llvm.Int32Type(), 1, false),
+		}),
+	)
+}
