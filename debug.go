@@ -98,9 +98,7 @@ func (d *debugInfo) pushFunctionContext(fnptr llvm.Value, sig *types.Signature, 
 		subprog.Line = uint32(file.Line(pos))
 		subprog.ScopeLine = uint32(file.Line(pos)) // TODO(axw)
 	}
-	sigType := d.TypeDebugDescriptor(sig).(*debug.CompositeTypeDescriptor)
-	subroutineType := sigType.Members[0]
-	subprog.Type = subroutineType
+	subprog.Type = d.TypeDebugDescriptor(sig)
 	cu.Subprograms = append(cu.Subprograms, subprog)
 	d.pushContext(subprog)
 }
