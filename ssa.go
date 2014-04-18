@@ -665,8 +665,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		receiver := fr.value(instr.X)
-		fr.env[instr] = fr.makeInterface(receiver, instr.Type())
+		receiver := fr.value(instr.X).value
+		fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
 
 	case *ssa.MakeMap:
 		fr.env[instr] = fr.makeMap(instr.Type(), fr.value(instr.Reserve))
