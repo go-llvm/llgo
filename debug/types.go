@@ -216,11 +216,7 @@ func (m *TypeMap) descriptorSignature(t *types.Signature, name string) TypeDebug
 			paramTypes[i] = m.TypeDebugDescriptor(params.At(i).Type())
 		}
 	}
-	ct := NewStructCompositeType([]DebugDescriptor{
-		NewSubroutineCompositeType(returnType, paramTypes),
-		m.TypeDebugDescriptor(types.NewPointer(types.Typ[types.Uint8])),
-	})
-	ct.Name = name
-	m.m.Set(t, ct)
-	return ct
+	st := NewSubroutineCompositeType(returnType, paramTypes)
+	st.Name = name
+	return st
 }
