@@ -45,9 +45,9 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 // translatePackage translates an *ssa.Package into an LLVM module, and returns
 // the translation unit information.
 func (u *unit) translatePackage(pkg *ssa.Package) {
-	// Initialize global storage for this package. We must create globals
-	// regardless of whether they're referenced, hence the duplication in
-	// frame.value.
+	// Initialize global storage and type descriptors for this package.
+	// We must create globals regardless of whether they're referenced,
+	// hence the duplication in frame.value.
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
@@ -56,6 +56,8 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			global = llvm.ConstBitCast(global, u.llvmtypes.ToLLVM(v.Type()))
 			u.globals[v] = global
+		case *ssa.Type:
+			u.types.getTypeDescriptorPointer(v.Type())
 		}
 	}
 
