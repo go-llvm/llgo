@@ -5,6 +5,7 @@
 package llgo
 
 import (
+	"bytes"
 	"fmt"
 	"go/token"
 	"sort"
@@ -90,18 +91,25 @@ func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 	return newValue(llfn, m.Signature)
 }
 
+// resolveFunctionDescriptorGlobal returns a reference to the LLVM global
+// storing the function's descriptor.
+func (u *unit) resolveFunctionDescriptorGlobal(f *ssa.Function) llvm.Value {
+	llfd, ok := u.funcDescriptors[f]
+	if !ok {
+		var b bytes.Buffer
+		u.types.mc.mangleFunctionName(f, &b)
+		name := b.String() + "$descriptor"
+		llfd = llvm.AddGlobal(u.module.Module, llvm.PointerType(llvm.Int8Type(), 0), name)
+		u.funcDescriptors[f] = llfd
+	}
+	return llfd
+}
+
 // resolveFunctionDescriptor returns a function's
 // first-class value representation.
 func (u *unit) resolveFunctionDescriptor(f *ssa.Function) *govalue {
-	llfd, ok := u.funcDescriptors[f]
-	if !ok {
-		llfn := u.resolveFunctionGlobal(f)
-		llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
-		llfd = llvm.AddGlobal(u.module.Module, llfn.Type(), f.String()+"$descriptor")
-		llfd.SetInitializer(llfn)
-		llfd = llvm.ConstBitCast(llfd, llfn.Type())
-		u.funcDescriptors[f] = llfd
-	}
+	llfd := u.resolveFunctionDescriptorGlobal(f)
+	llfd = llvm.ConstBitCast(llfd, llvm.PointerType(llvm.Int8Type(), 0))
 	return newValue(llfd, f.Signature)
 }
 
@@ -110,13 +118,9 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
-	name := f.String()
-
-	if f.Enclosing != nil {
-		// Anonymous functions are not guaranteed to
-		// have unique identifiers at the global scope.
-		name = f.Enclosing.String() + ":" + name
-	}
+	var b bytes.Buffer
+	u.types.mc.mangleFunctionName(f, &b)
+	name := b.String()
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
@@ -131,11 +135,6 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
-	// Nothing to do for functions without bodies.
-	if len(f.Blocks) == 0 {
-		return
-	}
-
 	// Only define functions from this package.
 	if f.Pkg == nil {
 		if r := f.Signature.Recv(); r != nil {
@@ -152,7 +151,17 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	fr := newFrame(u, u.resolveFunctionGlobal(f))
+	llfn := u.resolveFunctionGlobal(f)
+
+	llfd := u.resolveFunctionDescriptorGlobal(f)
+	llfd.SetInitializer(llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0)))
+
+	// We only need to emit a descriptor for functions without bodies.
+	if len(f.Blocks) == 0 {
+		return
+	}
+
+	fr := newFrame(u, llfn)
 	defer fr.dispose()
 	addCommonFunctionAttrs(fr.function)
 
