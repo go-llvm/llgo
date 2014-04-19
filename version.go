@@ -5,8 +5,10 @@
 package llgo
 
 const (
-	LLGOVersion        = "0.1"
-	LLGORuntimeVersion = 0
+	version = "0.1"
 )
 
-// vim: set ft=go :
+// Version returns the version of the llgo compiler.
+func Version() string {
+	return version
+}
