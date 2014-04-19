@@ -604,7 +604,7 @@ func (tm *TypeMap) getTypeDescLinkage(t types.Type) (linkage llvm.Linkage, emit 
 	return
 }
 
-func (tm *TypeMap) finalize() {
+func (tm *TypeMap) emitTypeDescInitializers() {
 	for changed := true; changed; {
 		changed = false
 		tm.types.Iterate(func(key types.Type, value interface{}) {

@@ -79,6 +79,10 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 		}
 	}
 
+	// Emit initializers for type descriptors, which may trigger
+	// the resolution of additional functions.
+	u.types.emitTypeDescInitializers()
+
 	// Define remaining functions that were resolved during
 	// runtime type mapping, but not defined.
 	for f, _ := range u.undefinedFuncs {

@@ -206,7 +206,6 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
 
-	compiler.types.finalize()
 	compiler.debug.finalize()
 
 	// Export runtime type information.
