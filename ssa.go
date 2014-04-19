@@ -5,7 +5,9 @@
 package llgo
 
 import (
+	"bytes"
 	"fmt"
+	"go/ast"
 	"go/token"
 	"sort"
 
@@ -43,9 +45,9 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 // translatePackage translates an *ssa.Package into an LLVM module, and returns
 // the translation unit information.
 func (u *unit) translatePackage(pkg *ssa.Package) {
-	// Initialize global storage for this package. We must create globals
-	// regardless of whether they're referenced, hence the duplication in
-	// frame.value.
+	// Initialize global storage and type descriptors for this package.
+	// We must create globals regardless of whether they're referenced,
+	// hence the duplication in frame.value.
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
@@ -54,6 +56,8 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			global = llvm.ConstBitCast(global, u.llvmtypes.ToLLVM(v.Type()))
 			u.globals[v] = global
+		case *ssa.Type:
+			u.types.getTypeDescriptorPointer(v.Type())
 		}
 	}
 
@@ -75,6 +79,10 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 		}
 	}
 
+	// Emit initializers for type descriptors, which may trigger
+	// the resolution of additional functions.
+	u.types.emitTypeDescInitializers()
+
 	// Define remaining functions that were resolved during
 	// runtime type mapping, but not defined.
 	for f, _ := range u.undefinedFuncs {
@@ -90,18 +98,26 @@ func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 	return newValue(llfn, m.Signature)
 }
 
+// resolveFunctionDescriptorGlobal returns a reference to the LLVM global
+// storing the function's descriptor.
+func (u *unit) resolveFunctionDescriptorGlobal(f *ssa.Function) llvm.Value {
+	llfd, ok := u.funcDescriptors[f]
+	if !ok {
+		var b bytes.Buffer
+		u.types.mc.mangleFunctionName(f, &b)
+		name := b.String() + "$descriptor"
+		llfd = llvm.AddGlobal(u.module.Module, llvm.PointerType(llvm.Int8Type(), 0), name)
+		llfd.SetGlobalConstant(true)
+		u.funcDescriptors[f] = llfd
+	}
+	return llfd
+}
+
 // resolveFunctionDescriptor returns a function's
 // first-class value representation.
 func (u *unit) resolveFunctionDescriptor(f *ssa.Function) *govalue {
-	llfd, ok := u.funcDescriptors[f]
-	if !ok {
-		llfn := u.resolveFunctionGlobal(f)
-		llfn = llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0))
-		llfd = llvm.AddGlobal(u.module.Module, llfn.Type(), f.String()+"$descriptor")
-		llfd.SetInitializer(llfn)
-		llfd = llvm.ConstBitCast(llfd, llfn.Type())
-		u.funcDescriptors[f] = llfd
-	}
+	llfd := u.resolveFunctionDescriptorGlobal(f)
+	llfd = llvm.ConstBitCast(llfd, llvm.PointerType(llvm.Int8Type(), 0))
 	return newValue(llfd, f.Signature)
 }
 
@@ -110,13 +126,9 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
-	name := f.String()
-
-	if f.Enclosing != nil {
-		// Anonymous functions are not guaranteed to
-		// have unique identifiers at the global scope.
-		name = f.Enclosing.String() + ":" + name
-	}
+	var b bytes.Buffer
+	u.types.mc.mangleFunctionName(f, &b)
+	name := b.String()
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
@@ -130,12 +142,29 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	return llvmFunction
 }
 
-func (u *unit) defineFunction(f *ssa.Function) {
-	// Nothing to do for functions without bodies.
-	if len(f.Blocks) == 0 {
-		return
-	}
+func (u *unit) getFunctionLinkage(f *ssa.Function) llvm.Linkage {
+	switch {
+	case f.Pkg == nil:
+		// Synthetic functions outside packages may appear in multiple packages.
+		return llvm.LinkOnceODRLinkage
 
+	case f.Enclosing != nil:
+		// Anonymous.
+		return llvm.InternalLinkage
+
+	case f.Signature.Recv() == nil && !ast.IsExported(f.Name()) &&
+		!(f.Name() == "main" && f.Pkg.Object.Path() == "main") &&
+		f.Name() != ".import":
+		// Unexported methods may be referenced as part of an interface method
+		// table in another package. TODO(pcc): detect when this cannot happen.
+		return llvm.InternalLinkage
+
+	default:
+		return llvm.ExternalLinkage
+	}
+}
+
+func (u *unit) defineFunction(f *ssa.Function) {
 	// Only define functions from this package.
 	if f.Pkg == nil {
 		if r := f.Signature.Recv(); r != nil {
@@ -152,9 +181,22 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
-	fr := newFrame(u, u.resolveFunctionGlobal(f))
+	llfn := u.resolveFunctionGlobal(f)
+	linkage := u.getFunctionLinkage(f)
+
+	llfd := u.resolveFunctionDescriptorGlobal(f)
+	llfd.SetInitializer(llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0)))
+	llfd.SetLinkage(linkage)
+
+	// We only need to emit a descriptor for functions without bodies.
+	if len(f.Blocks) == 0 {
+		return
+	}
+
+	fr := newFrame(u, llfn)
 	defer fr.dispose()
 	addCommonFunctionAttrs(fr.function)
+	fr.function.SetLinkage(linkage)
 
 	fr.logf("Define function: %s", f.String())
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)

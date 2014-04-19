@@ -28,6 +28,11 @@ func parseAttributes(doc *ast.CommentGroup) []Attribute {
 		return attributes
 	}
 	for _, comment := range doc.List {
+		if strings.HasPrefix(comment.Text, "//extern ") {
+			nameattr := nameAttribute(strings.TrimSpace(comment.Text[9:]))
+			attributes = append(attributes, nameattr)
+			continue
+		}
 		text := comment.Text[2:]
 		if strings.HasPrefix(comment.Text, "/*") {
 			text = text[:len(text)-2]

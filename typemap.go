@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/ssa/ssautil"
@@ -368,13 +369,17 @@ func (ctx *manglerContext) mangleSignature(s *types.Signature, recv *types.Var, 
 	}
 }
 
+func (ctx *manglerContext) manglePackagePath(pkgpath string, b *bytes.Buffer) {
+	b.WriteString(strings.Replace(pkgpath, "/", "_", -1))
+}
+
 func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 	switch t := t.(type) {
 	case *types.Basic, *types.Named:
 		var nb bytes.Buffer
 		ti := ctx.getNamedTypeInfo(t)
 		if ti.pkgpath != "" {
-			nb.WriteString(ti.pkgpath)
+			ctx.manglePackagePath(ti.pkgpath, &nb)
 			nb.WriteRune('.')
 		}
 		if ti.functionName != "" {
@@ -477,7 +482,7 @@ func (ctx *manglerContext) mangleTypeDescriptorName(t types.Type, b *bytes.Buffe
 		b.WriteString("__go_tdn_")
 		ti := ctx.getNamedTypeInfo(t)
 		if ti.pkgpath != "" {
-			b.WriteString(ti.pkgpath)
+			ctx.manglePackagePath(ti.pkgpath, b)
 			b.WriteRune('.')
 		}
 		if ti.functionName != "" {
@@ -506,6 +511,35 @@ func (ctx *manglerContext) mangleImtName(srctype types.Type, targettype *types.I
 	ctx.mangleType(targettype, b)
 	b.WriteString("__")
 	ctx.mangleType(srctype, b)
+}
+
+func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) {
+	if f.Enclosing != nil {
+		// Anonymous functions are not guaranteed to
+		// have unique identifiers at the global scope.
+		b.WriteString(f.Enclosing.String())
+		b.WriteRune(':')
+		b.WriteString(f.String())
+		return
+	}
+
+	pkg := f.Pkg
+	var pkgobj *types.Package
+	if pkg != nil {
+		pkgobj = pkg.Object
+	} else if f.Signature.Recv() != nil {
+		pkgobj = f.Signature.Recv().Pkg()
+	}
+
+	if pkg != nil {
+		ctx.manglePackagePath(pkgobj.Path(), b)
+		b.WriteRune('.')
+	}
+	b.WriteString(f.Name())
+	if f.Signature.Recv() != nil {
+		b.WriteRune('.')
+		ctx.mangleType(f.Signature.Recv().Type(), b)
+	}
 }
 
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
@@ -570,7 +604,7 @@ func (tm *TypeMap) getTypeDescLinkage(t types.Type) (linkage llvm.Linkage, emit 
 	return
 }
 
-func (tm *TypeMap) finalize() {
+func (tm *TypeMap) emitTypeDescInitializers() {
 	for changed := true; changed; {
 		changed = false
 		tm.types.Iterate(func(key types.Type, value interface{}) {
