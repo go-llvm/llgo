@@ -7,6 +7,7 @@ package llgo
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/token"
 	"sort"
 
@@ -134,6 +135,28 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	return llvmFunction
 }
 
+func (u *unit) getFunctionLinkage(f *ssa.Function) llvm.Linkage {
+	switch {
+	case f.Pkg == nil:
+		// Synthetic functions outside packages may appear in multiple packages.
+		return llvm.LinkOnceODRLinkage
+
+	case f.Enclosing != nil:
+		// Anonymous.
+		return llvm.InternalLinkage
+
+	case f.Signature.Recv() == nil && !ast.IsExported(f.Name()) &&
+		!(f.Name() == "main" && f.Pkg.Object.Path() == "main") &&
+		f.Name() != ".import":
+		// Unexported methods may be referenced as part of an interface method
+		// table in another package. TODO(pcc): detect when this cannot happen.
+		return llvm.InternalLinkage
+
+	default:
+		return llvm.ExternalLinkage
+	}
+}
+
 func (u *unit) defineFunction(f *ssa.Function) {
 	// Only define functions from this package.
 	if f.Pkg == nil {
@@ -152,9 +175,11 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	}
 
 	llfn := u.resolveFunctionGlobal(f)
+	linkage := u.getFunctionLinkage(f)
 
 	llfd := u.resolveFunctionDescriptorGlobal(f)
 	llfd.SetInitializer(llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0)))
+	llfd.SetLinkage(linkage)
 
 	// We only need to emit a descriptor for functions without bodies.
 	if len(f.Blocks) == 0 {
@@ -164,6 +189,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	fr := newFrame(u, llfn)
 	defer fr.dispose()
 	addCommonFunctionAttrs(fr.function)
+	fr.function.SetLinkage(linkage)
 
 	fr.logf("Define function: %s", f.String())
 	fti := u.llvmtypes.getSignatureInfo(f.Signature)
