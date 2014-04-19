@@ -107,6 +107,7 @@ func (u *unit) resolveFunctionDescriptorGlobal(f *ssa.Function) llvm.Value {
 		u.types.mc.mangleFunctionName(f, &b)
 		name := b.String() + "$descriptor"
 		llfd = llvm.AddGlobal(u.module.Module, llvm.PointerType(llvm.Int8Type(), 0), name)
+		llfd.SetGlobalConstant(true)
 		u.funcDescriptors[f] = llfd
 	}
 	return llfd
