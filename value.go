@@ -96,7 +96,8 @@ func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *govalue {
 	case typ == types.Typ[types.UnsafePointer]:
 		llvmtyp := fr.types.ToLLVM(typ)
 		v, _ := exact.Uint64Val(v)
-		llvmvalue := llvm.ConstInt(llvmtyp, v, false)
+		llvmvalue := llvm.ConstInt(fr.types.inttype, v, false)
+		llvmvalue = llvm.ConstIntToPtr(llvmvalue, llvmtyp)
 		return newValue(llvmvalue, typ)
 
 	case isComplex(typ):
