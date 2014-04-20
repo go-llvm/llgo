@@ -45,7 +45,7 @@ func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
 		TargetTriple:  opts.triple,
 		GenerateDebug: opts.generateDebug,
 		GccgoPath:     opts.gccgoPath,
-		ImportPaths:   opts.importPaths,
+		ImportPaths:   append(append([]string{}, opts.importPaths...), opts.libPaths...),
 	}
 	return llgo.NewCompiler(copts)
 }
@@ -56,6 +56,7 @@ const (
 	actionAssemble = actionKind(iota)
 	actionCompile
 	actionLink
+	actionPrintLibgcc
 	actionVersion
 )
 
@@ -71,11 +72,13 @@ type driverOptions struct {
 	gccgoPath     string
 	generateDebug bool
 	importPaths   []string
+	libPaths      []string
 	lto           bool
 	optLevel      int
 	pic           bool
 	pkgpath       string
 	sizeLevel     int
+	staticLibgo   bool
 	staticLink    bool
 	triple        string
 }
@@ -97,7 +100,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 				otherInputs = append(otherInputs, args[0])
 			}
 
-		case strings.HasPrefix(args[0], "-Wl,"):
+		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"):
 			// TODO(pcc): Handle these correctly.
 			otherInputs = append(otherInputs, args[0])
 
@@ -110,6 +113,16 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case strings.HasPrefix(args[0], "-I"):
 			opts.importPaths = append(opts.importPaths, args[0][2:])
+
+		case args[0] == "-L":
+			if len(args) == 1 {
+				return opts, errors.New("missing path after '-L'")
+			}
+			opts.libPaths = append(opts.libPaths, args[1])
+			consumedArgs = 2
+
+		case strings.HasPrefix(args[0], "-L"):
+			opts.libPaths = append(opts.libPaths, args[0][2:])
 
 		case args[0] == "-O0":
 			opts.optLevel = 0
@@ -142,6 +155,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-fgo-relative-import-path="):
 			// TODO(pcc): Handle this.
 
+		case args[0] == "-fno-toplevel-reorder":
+			// This is a GCC-specific code generation option. Ignore.
+
 		case args[0] == "-emit-llvm", args[0] == "-flto":
 			opts.lto = true
 
@@ -165,8 +181,14 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.output = args[1]
 			consumedArgs = 2
 
+		case args[0] == "-print-libgcc-file-name":
+			actionKind = actionPrintLibgcc
+
 		case args[0] == "-static":
 			opts.staticLink = true
+
+		case args[0] == "-static-libgo":
+			opts.staticLibgo = true
 
 		case args[0] == "--version":
 			actionKind = actionVersion
@@ -178,7 +200,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		args = args[consumedArgs:]
 	}
 
-	if actionKind != actionVersion && len(goInputs) == 0 && len(otherInputs) == 0 {
+	if actionKind != actionVersion && actionKind != actionPrintLibgcc && len(goInputs) == 0 && len(otherInputs) == 0 {
 		return opts, errors.New("no input files")
 	}
 
@@ -194,8 +216,8 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.actions = []action{action{actionKind, goInputs}}
 		}
 
-	case actionVersion:
-		opts.actions = []action{action{actionVersion, nil}}
+	case actionVersion, actionPrintLibgcc:
+		opts.actions = []action{action{actionKind, nil}}
 	}
 
 	if opts.output == "" && len(opts.actions) != 0 {
@@ -244,6 +266,12 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
+	case actionPrintLibgcc:
+		cmd := exec.Command(opts.gccgoPath, "-print-libgcc-file-name")
+		out, err := cmd.CombinedOutput()
+		os.Stdout.Write(out)
+		return err
+
 	case actionVersion:
 		displayVersion()
 		return nil
@@ -339,6 +367,12 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 		if opts.staticLink {
 			args = append(args, "-static")
+		}
+		if opts.staticLibgo {
+			args = append(args, "-static-libgo")
+		}
+		for _, p := range opts.libPaths {
+			args = append(args, "-L", p)
 		}
 		args = append(args, inputs...)
 

@@ -12,14 +12,18 @@ func test(r rune) {
 	}
 }
 
+type namedRune rune
+
 func testslice(r1 []rune) {
 	s := string(r1)
 	println(s)
 	r2 := []rune(s)
-	println(len(r1), len(r2))
-	if len(r2) == len(r1) {
+	r3 := []namedRune(s)
+	println(len(r1), len(r2), len(r3))
+	if len(r2) == len(r1) && len(r3) == len(r1) {
 		for i := range r2 {
 			println(r1[i] == r2[i])
+			println(r1[i] == rune(r3[i]))
 		}
 	}
 }

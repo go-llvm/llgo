@@ -44,3 +44,8 @@ func isUntyped(typ types.Type) bool {
 	t, ok := typ.Underlying().(*types.Basic)
 	return ok && t.Info()&types.IsUntyped != 0
 }
+
+func isSlice(typ types.Type, bkind types.BasicKind) bool {
+	t, ok := typ.Underlying().(*types.Slice)
+	return ok && types.Identical(t.Elem().Underlying(), types.Typ[bkind])
+}

@@ -96,7 +96,8 @@ func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *govalue {
 	case typ == types.Typ[types.UnsafePointer]:
 		llvmtyp := fr.types.ToLLVM(typ)
 		v, _ := exact.Uint64Val(v)
-		llvmvalue := llvm.ConstInt(llvmtyp, v, false)
+		llvmvalue := llvm.ConstInt(fr.types.inttype, v, false)
+		llvmvalue = llvm.ConstIntToPtr(llvmvalue, llvmtyp)
 		return newValue(llvmvalue, typ)
 
 	case isComplex(typ):
@@ -437,9 +438,6 @@ func (fr *frame) convert(v *govalue, dsttyp types.Type) *govalue {
 		}
 	}
 
-	byteslice := types.NewSlice(types.Typ[types.Byte])
-	runeslice := types.NewSlice(types.Typ[types.Rune])
-
 	// string ->
 	if isString(srctyp) {
 		// (untyped) string -> string
@@ -449,7 +447,7 @@ func (fr *frame) convert(v *govalue, dsttyp types.Type) *govalue {
 		}
 
 		// string -> []byte
-		if types.Identical(dsttyp, byteslice) {
+		if isSlice(dsttyp, types.Byte) {
 			value := v.value
 			strdata := fr.builder.CreateExtractValue(value, 0, "")
 			strlen := fr.builder.CreateExtractValue(value, 1, "")
@@ -459,21 +457,21 @@ func (fr *frame) convert(v *govalue, dsttyp types.Type) *govalue {
 			newdata := fr.createMalloc(strlen, false)
 			fr.memcpy(newdata, strdata, strlen)
 
-			struct_ := llvm.Undef(fr.types.ToLLVM(byteslice))
+			struct_ := llvm.Undef(fr.types.ToLLVM(dsttyp))
 			struct_ = fr.builder.CreateInsertValue(struct_, newdata, 0, "")
 			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 1, "")
 			struct_ = fr.builder.CreateInsertValue(struct_, strlen, 2, "")
-			return newValue(struct_, byteslice)
+			return newValue(struct_, origdsttyp)
 		}
 
 		// string -> []rune
-		if types.Identical(dsttyp, runeslice) {
+		if isSlice(dsttyp, types.Rune) {
 			return fr.stringToRuneSlice(v)
 		}
 	}
 
 	// []byte -> string
-	if types.Identical(srctyp, byteslice) && isString(dsttyp) {
+	if isSlice(srctyp, types.Byte) && isString(dsttyp) {
 		value := v.value
 		data := fr.builder.CreateExtractValue(value, 0, "")
 		len := fr.builder.CreateExtractValue(value, 1, "")
@@ -490,7 +488,7 @@ func (fr *frame) convert(v *govalue, dsttyp types.Type) *govalue {
 	}
 
 	// []rune -> string
-	if types.Identical(srctyp, runeslice) && isString(dsttyp) {
+	if isSlice(srctyp, types.Rune) && isString(dsttyp) {
 		return fr.runeSliceToString(v)
 	}
 
