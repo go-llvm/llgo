@@ -100,6 +100,7 @@ type runtimeInterface struct {
 	printUint64,
 	receiveBig,
 	recover,
+	registerGcRoots,
 	runtimeError,
 	selectdefault,
 	selectrecv2,
@@ -393,6 +394,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_recover",
 			rfi:  &ri.recover,
 			res:  []types.Type{EmptyInterface},
+		},
+		{
+			name: "__go_register_gc_roots",
+			rfi:  &ri.registerGcRoots,
+			args: []types.Type{UnsafePointer},
 		},
 		{
 			name:  "__go_runtime_error",

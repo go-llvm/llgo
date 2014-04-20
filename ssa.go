@@ -282,6 +282,12 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 	}
 
+	// If this is the ".import" function, we need to register the package's
+	// GC roots.
+	if f.Name() == ".import" {
+		fr.registerGcRoots()
+	}
+
 	// If the function contains any defers, we must first create
 	// an unwind block. We can short-circuit the check for defers with
 	// f.Recover != nil.
@@ -386,6 +392,34 @@ func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame
 	fr.retInf = ftiRecover.retInf
 	fr.canRecover = fr.function.Param(len(argTypes) - 1)
 	return fr
+}
+
+func (fr *frame) registerGcRoots() {
+	var roots []llvm.Value
+
+	for _, m := range fr.pkg.Members {
+		switch v := m.(type) {
+		case *ssa.Global:
+			ty := deref(v.Type())
+			if hasPointers(ty) {
+				size := llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(ty)), false)
+				root := llvm.ConstStruct([]llvm.Value{fr.globals[v], size}, false)
+				roots = append(roots, root)
+			}
+		}
+	}
+
+	if len(roots) != 0 {
+		rootty := roots[0].Type()
+		roots = append(roots, llvm.ConstNull(rootty))
+		rootsarr := llvm.ConstArray(rootty, roots)
+		rootsstruct := llvm.ConstStruct([]llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int8Type(), 0)), rootsarr}, false)
+
+		rootsglobal := llvm.AddGlobal(fr.module.Module, rootsstruct.Type(), "")
+		rootsglobal.SetInitializer(rootsstruct)
+		rootsglobal.SetLinkage(llvm.InternalLinkage)
+		fr.runtime.registerGcRoots.call(fr, llvm.ConstBitCast(rootsglobal, llvm.PointerType(llvm.Int8Type(), 0)))
+	}
 }
 
 func (fr *frame) fixupPhis() {
