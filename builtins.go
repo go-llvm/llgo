@@ -88,6 +88,7 @@ func (fr *frame) callRecover(isDeferredRecover bool) *govalue {
 	} else {
 		recovered = fr.runtime.recover.call(fr)[0]
 	}
+	recoverbb = fr.builder.GetInsertBlock()
 	fr.builder.CreateBr(contbb)
 
 	fr.builder.SetInsertPointAtEnd(contbb)
