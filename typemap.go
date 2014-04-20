@@ -367,6 +367,8 @@ func (ctx *manglerContext) mangleSignature(s *types.Signature, recv *types.Var, 
 		}
 		b.WriteRune('e')
 	}
+
+	b.WriteRune('e')
 }
 
 func (ctx *manglerContext) manglePackagePath(pkgpath string, b *bytes.Buffer) {
@@ -1012,7 +1014,9 @@ func (tm *TypeMap) makeInterfaceType(t types.Type, i *types.Interface) llvm.Valu
 		} else {
 			imvals[1] = llvm.ConstPointerNull(llvm.PointerType(tm.stringType, 0))
 		}
-		imvals[2] = tm.getTypeDescriptorPointer(method.Type())
+		mtyp := method.Type().(*types.Signature)
+		mftyp := types.NewSignature(nil, nil, mtyp.Params(), mtyp.Results(), mtyp.Variadic())
+		imvals[2] = tm.getTypeDescriptorPointer(mftyp)
 
 		imethods[index] = llvm.ConstNamedStruct(tm.imethodType, imvals[:])
 	}
@@ -1122,7 +1126,13 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 
 		// typ (function type, with receiver)
 		recvparam := types.NewParam(0, nil, "", t)
-		rftyp := types.NewSignature(nil, recvparam, ftyp.Params(), ftyp.Results(), ftyp.Variadic())
+		params := ftyp.Params()
+		rfparams := make([]*types.Var, params.Len()+1)
+		rfparams[0] = recvparam
+		for i := 0; i != ftyp.Params().Len(); i++ {
+			rfparams[i+1] = params.At(i)
+		}
+		rftyp := types.NewSignature(nil, nil, types.NewTuple(rfparams...), ftyp.Results(), ftyp.Variadic())
 		mvals[3] = tm.getTypeDescriptorPointer(rftyp)
 
 		// function

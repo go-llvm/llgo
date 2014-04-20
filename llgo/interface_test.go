@@ -10,6 +10,9 @@ func TestStaticStructInterfaceConversion(t *testing.T) {
 func TestInterfaceToInterfaceConversion(t *testing.T) {
 	checkOutputEqual(t, "interfaces/i2i_conversion.go")
 }
+func TestEmptyToInterfaceConversion(t *testing.T) {
+	checkOutputEqual(t, "interfaces/e2i_conversion.go")
+}
 func TestStaticBasicV2I(t *testing.T)    { checkOutputEqual(t, "interfaces/basic.go") }
 func TestInterfaceMethods(t *testing.T)  { checkOutputEqual(t, "interfaces/methods.go") }
 func TestInterfaceAssert(t *testing.T)   { checkOutputEqual(t, "interfaces/assert.go") }
