@@ -788,7 +788,7 @@ const (
 func hasPointers(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.Basic:
-		return t.Kind() == types.UnsafePointer
+		return t.Kind() == types.String || t.Kind() == types.UnsafePointer
 
 	case *types.Signature, *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
 		return true
