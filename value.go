@@ -246,6 +246,7 @@ func (fr *frame) binaryOp(lhs *govalue, op token.Token, rhs *govalue) *govalue {
 			imageq := b.CreateFCmp(llvm.FloatOEQ, b_, d_, "")
 			result = b.CreateAnd(realeq, imageq, "")
 			result = b.CreateZExt(result, llvm.Int8Type(), "")
+			return newValue(result, types.Typ[types.Bool])
 		default:
 			panic(fmt.Errorf("unhandled operator: %v", op))
 		}
