@@ -61,6 +61,10 @@ type CompilerOptions struct {
 	// functions in a deterministic order
 	OrderedCompilation bool
 
+	// DumpSSA is a debugging option that dumps each SSA function
+	// to stderr before generating code for it.
+	DumpSSA bool
+
 	// GccgoPath is the path to the gccgo binary whose libgo we read import
 	// data from
 	GccgoPath string

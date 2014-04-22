@@ -44,6 +44,7 @@ func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
 	copts := llgo.CompilerOptions{
 		TargetTriple:  opts.triple,
 		GenerateDebug: opts.generateDebug,
+		DumpSSA:       opts.dumpSSA,
 		GccgoPath:     opts.gccgoPath,
 		ImportPaths:   append(append([]string{}, opts.importPaths...), opts.libPaths...),
 	}
@@ -69,6 +70,7 @@ type driverOptions struct {
 	actions []action
 	output  string
 
+	dumpSSA       bool
 	gccgoPath     string
 	generateDebug bool
 	importPaths   []string
@@ -145,6 +147,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case args[0] == "-c":
 			actionKind = actionCompile
+
+		case args[0] == "-fdump-ssa":
+			opts.dumpSSA = true
 
 		case strings.HasPrefix(args[0], "-fgccgo-path="):
 			opts.gccgoPath = args[0][13:]
