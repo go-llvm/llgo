@@ -119,6 +119,7 @@ func (fr *frame) mapIterNext(iter []*govalue) []*govalue {
 
 	fr.builder.SetInsertPointAtEnd(loadbb)
 	fr.runtime.mapiter2.call(fr, mapiterbufelem0ptr, keyptr, valptr)
+	loadbb = fr.builder.GetInsertBlock()
 	loadedkey := fr.builder.CreateLoad(keybuf, "")
 	loadedval := fr.builder.CreateLoad(valbuf, "")
 	fr.builder.CreateBr(cont2bb)

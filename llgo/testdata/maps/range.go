@@ -1,6 +1,7 @@
 package main
 
 func main() {
+	defer println("done")
 	m := make(map[int]int)
 	m[0] = 3
 	m[1] = 4
