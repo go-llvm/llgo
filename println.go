@@ -41,6 +41,12 @@ func (fr *frame) printValues(println_ bool, values ...*govalue) {
 			case types.Float64:
 				fr.runtime.printDouble.call(fr, llvm_value)
 
+			case types.Complex64:
+				llvm_value = fr.convert(value, types.Typ[types.Complex128]).value
+				fallthrough
+			case types.Complex128:
+				fr.runtime.printComplex.call(fr, llvm_value)
+
 			case types.String, types.UntypedString:
 				fr.runtime.printString.call(fr, llvm_value)
 
