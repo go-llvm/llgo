@@ -400,7 +400,16 @@ func (fr *frame) unaryOp(v *govalue, op token.Token) *govalue {
 	switch op {
 	case token.SUB:
 		var value llvm.Value
-		if isFloat(v.typ) {
+		if isComplex(v.typ) {
+			realv := fr.builder.CreateExtractValue(v.value, 0, "")
+			imagv := fr.builder.CreateExtractValue(v.value, 1, "")
+			zero := llvm.ConstNull(realv.Type())
+			realv = fr.builder.CreateFSub(zero, realv, "")
+			imagv = fr.builder.CreateFSub(zero, imagv, "")
+			value = llvm.Undef(v.value.Type())
+			value = fr.builder.CreateInsertValue(value, realv, 0, "")
+			value = fr.builder.CreateInsertValue(value, imagv, 1, "")
+		} else if isFloat(v.typ) {
 			zero := llvm.ConstNull(fr.types.ToLLVM(v.Type()))
 			value = fr.builder.CreateFSub(zero, v.value, "")
 		} else {
