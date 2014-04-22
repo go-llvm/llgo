@@ -133,7 +133,7 @@ func (a nameAttribute) Apply(v llvm.Value) {
 				panic(fmt.Errorf("Want to take the name %s from a function that has a body!", name))
 			}
 			curr.SetName(name + "_llgo_replaced")
-			curr.ReplaceAllUsesWith(v)
+			curr.ReplaceAllUsesWith(llvm.ConstBitCast(v, curr.Type()))
 		}
 		v.SetName(name)
 	} else {
