@@ -98,7 +98,7 @@ type runtimeInterface struct {
 	printSpace,
 	printString,
 	printUint64,
-	receiveBig,
+	receive,
 	recover,
 	registerGcRoots,
 	runtimeError,
@@ -386,8 +386,8 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			args: []types.Type{Int64},
 		},
 		{
-			name: "__go_receive_big",
-			rfi:  &ri.receiveBig,
+			name: "__go_receive",
+			rfi:  &ri.receive,
 			args: []types.Type{UnsafePointer, UnsafePointer, UnsafePointer},
 		},
 		{
