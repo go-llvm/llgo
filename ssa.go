@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"os"
 	"sort"
 
 	"code.google.com/p/go.tools/go/ssa"
@@ -191,6 +192,10 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	// We only need to emit a descriptor for functions without bodies.
 	if len(f.Blocks) == 0 {
 		return
+	}
+
+	if u.DumpSSA {
+		f.WriteTo(os.Stderr)
 	}
 
 	fr := newFrame(u, llfn)
