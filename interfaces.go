@@ -19,8 +19,8 @@ func (fr *frame) interfaceMethod(iface *govalue, method *types.Func) (fn, recv *
 	methodset := fr.types.MethodSet(sig.Recv().Type())
 	// TODO(axw) cache ordered method index
 	var index int
-	for i := 0; i < methodset.Len(); i++ {
-		if methodset.At(i).Obj() == method {
+	for i, m := range orderedMethodSet(methodset) {
+		if m.Obj() == method {
 			index = i
 			break
 		}

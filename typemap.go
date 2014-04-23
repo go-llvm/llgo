@@ -285,6 +285,26 @@ type manglerContext struct {
 	msc *types.MethodSetCache
 }
 
+// Assembles the method set into the order that gccgo uses (unexported methods first).
+// TODO(pcc): cache this.
+func orderedMethodSet(ms *types.MethodSet) []*types.Selection {
+	oms := make([]*types.Selection, ms.Len())
+	omsi := 0
+	for i := 0; i != ms.Len(); i++ {
+		if sel := ms.At(i); !sel.Obj().Exported() {
+			oms[omsi] = sel
+			omsi++
+		}
+	}
+	for i := 0; i != ms.Len(); i++ {
+		if sel := ms.At(i); sel.Obj().Exported() {
+			oms[omsi] = sel
+			omsi++
+		}
+	}
+	return oms
+}
+
 func (ctx *manglerContext) init(prog *ssa.Program, msc *types.MethodSetCache) {
 	ctx.msc = msc
 	ctx.ti = make(map[*types.Named]localNamedTypeInfo)
@@ -455,8 +475,8 @@ func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
 	case *types.Interface:
 		b.WriteRune('I')
 		methodset := ctx.msc.MethodSet(t)
-		for index := 0; index < methodset.Len(); index++ {
-			method := methodset.At(index).Obj()
+		for _, m := range orderedMethodSet(methodset) {
+			method := m.Obj()
 			var nb bytes.Buffer
 			if !method.Exported() {
 				nb.WriteRune('.')
@@ -737,8 +757,7 @@ func (tm *TypeMap) getImtPointer(srctype types.Type, targettype *types.Interface
 
 	elems := make([]llvm.Value, targetms.Len()+1)
 	elems[0] = tm.ToRuntime(srctype)
-	for i := 0; i != targetms.Len(); i++ {
-		targetm := targetms.At(i)
+	for i, targetm := range orderedMethodSet(targetms) {
 		srcm := srcms.Lookup(targetm.Obj().Pkg(), targetm.Obj().Name())
 
 		elems[i+1] = tm.methodResolver.ResolveMethod(srcm).value
@@ -1005,8 +1024,8 @@ func (tm *TypeMap) makeInterfaceType(t types.Type, i *types.Interface) llvm.Valu
 
 	methodset := tm.MethodSet(i)
 	imethods := make([]llvm.Value, methodset.Len())
-	for index := 0; index < methodset.Len(); index++ {
-		method := methodset.At(index).Obj()
+	for index, ms := range orderedMethodSet(methodset) {
+		method := ms.Obj()
 		var imvals [3]llvm.Value
 		imvals[0] = tm.globalStringPtr(method.Name())
 		if !method.Exported() && method.Pkg() != nil {
@@ -1103,10 +1122,11 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 	// Store methods. All methods must be stored, not only exported ones;
 	// this is to allow satisfying of interfaces with non-exported methods.
 	methods := make([]llvm.Value, mset.Len())
+	omset := orderedMethodSet(&mset)
 	for i := range methods {
 		var mvals [5]llvm.Value
 
-		sel := mset.At(i)
+		sel := omset[i]
 		mname := sel.Obj().Name()
 		mfunc := tm.methodResolver.ResolveMethod(sel)
 		ftyp := mfunc.Type().(*types.Signature)
