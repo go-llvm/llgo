@@ -24,7 +24,7 @@ type MethodResolver interface {
 // llvmTypeMap is provides a means of mapping from a types.Map
 // to llgo's corresponding LLVM type representation.
 type llvmTypeMap struct {
-	*types.StdSizes
+	sizes      *types.StdSizes
 	ctx        llvm.Context
 	target     llvm.TargetData
 	inttype    llvm.Type
@@ -76,7 +76,7 @@ func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
 
 	return &llvmTypeMap{
 		ctx: ctx,
-		StdSizes: &types.StdSizes{
+		sizes: &types.StdSizes{
 			WordSize: int64(target.PointerSize()),
 			MaxAlign: 8,
 		},
@@ -261,6 +261,18 @@ func (tm *llvmTypeMap) toLLVM(t types.Type, name string) llvm.Type {
 
 func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 	return tm.getBackendType(t).ToLLVM(tm.ctx)
+}
+
+func (tm *llvmTypeMap) Sizeof(t types.Type) int64 {
+	return align(tm.sizes.Sizeof(t), tm.sizes.Alignof(t))
+}
+
+func (tm *llvmTypeMap) Alignof(t types.Type) int64 {
+	return tm.sizes.Alignof(t)
+}
+
+func (tm *llvmTypeMap) Offsetsof(fields []*types.Var) []int64 {
+	return tm.sizes.Offsetsof(fields)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
