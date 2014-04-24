@@ -836,10 +836,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.chanSend(fr.value(instr.Chan), fr.value(instr.X))
 
 	case *ssa.Slice:
-		x := fr.value(instr.X)
-		low := fr.value(instr.Low)
-		high := fr.value(instr.High)
-		fr.env[instr] = fr.slice(x, low, high, instr.Type())
+		x := fr.llvmvalue(instr.X)
+		low := fr.llvmvalue(instr.Low)
+		high := fr.llvmvalue(instr.High)
+		slice := fr.slice(x, instr.X.Type(), low, high)
+		fr.env[instr] = newValue(slice, instr.Type())
 
 	case *ssa.Store:
 		addr := fr.llvmvalue(instr.Addr)
