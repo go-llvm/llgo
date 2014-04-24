@@ -21,11 +21,21 @@ var smallPowersOfTen = [...]extFloat{
 	{0x989680 << 40, -40, false}, // 1e7
 }
 
-var arrayWithHoles = [10]int {
+var arrayWithHoles = [10]int{
 	2: 1,
 	4: 2,
 	6: 3,
 	8: 4,
+}
+
+type namedInt int32
+
+const N0 namedInt = 0
+const N1 namedInt = 1
+
+var arrayWithNamedIndices = [...]int{
+	N0: 1,
+	N1: 2,
 }
 
 func main() {
@@ -37,5 +47,8 @@ func main() {
 	for i, value := range arrayWithHoles {
 		println(i, value)
 	}
-}
 
+	for i, value := range arrayWithNamedIndices {
+		println(i, value)
+	}
+}

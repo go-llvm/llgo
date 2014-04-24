@@ -703,6 +703,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			errcode = gccgoRuntimeErrorARRAY_INDEX_OUT_OF_BOUNDS
 		}
 
+		// The index may not have been promoted to int (for example, if it
+		// came from a composite literal).
+		index = fr.createZExtOrTrunc(index, fr.types.inttype, "")
+
 		// Bounds checking: 0 <= index < len
 		zero := llvm.ConstNull(fr.types.inttype)
 		i0 := fr.builder.CreateICmp(llvm.IntSLT, index, zero, "")
