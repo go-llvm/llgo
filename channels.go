@@ -39,7 +39,7 @@ func (fr *frame) chanRecv(ch *govalue, commaOk bool) (x, ok *govalue) {
 		okval := fr.runtime.chanrecv2.call(fr, chantyp, ch.value, ptri8)[0]
 		ok = newValue(okval, types.Typ[types.Bool])
 	} else {
-		fr.runtime.receiveBig.call(fr, chantyp, ch.value, ptri8)
+		fr.runtime.receive.call(fr, chantyp, ch.value, ptri8)
 	}
 	x = newValue(fr.builder.CreateLoad(ptr, ""), elemtyp)
 	return
