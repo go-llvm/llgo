@@ -80,6 +80,18 @@ func (fr *frame) makeInterface(llv llvm.Value, vty types.Type, iface types.Type)
 	return newValue(value, iface)
 }
 
+func (fr *frame) makeInterfaceFromPointer(vptr llvm.Value, vty types.Type, iface types.Type) *govalue {
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	ptr := fr.createTypeMalloc(vty)
+	fr.memcpy(ptr, vptr, llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(vty)), false))
+	llv := fr.builder.CreateBitCast(ptr, i8ptr, "")
+	value := llvm.Undef(fr.types.ToLLVM(iface))
+	itab := fr.types.getItabPointer(vty, iface.Underlying().(*types.Interface))
+	value = fr.builder.CreateInsertValue(value, itab, 0, "")
+	value = fr.builder.CreateInsertValue(value, llv, 1, "")
+	return newValue(value, iface)
+}
+
 // Reads the type descriptor from the given interface type.
 func (fr *frame) getInterfaceTypeDescriptor(v *govalue) llvm.Value {
 	isempty := v.Type().Underlying().(*types.Interface).NumMethods() == 0

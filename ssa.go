@@ -581,6 +581,36 @@ func (fr *frame) nilCheck(v ssa.Value, llptr llvm.Value) {
 	}
 }
 
+// If this value is sufficiently large, look through referrers to see if we can
+// avoid a load.
+func (fr *frame) canAvoidLoad(instr *ssa.UnOp, op llvm.Value) bool {
+	if fr.types.Sizeof(instr.Type()) < 16 {
+		// Don't bother with small values.
+		return false
+	}
+
+	// We only know how to avoid loads if they are used to create an interface.
+	// If we see a non-MakeInterface referrer, abort.
+	for _, ref := range *instr.Referrers() {
+		if _, ok := ref.(*ssa.MakeInterface); !ok {
+			return false
+		}
+	}
+
+	// We now know that each referrer is a MakeInterface. Create the
+	// interfaces and store them in fr.env. Although the MakeInterface could
+	// be in another basic block, it is safe to create the interfaces here
+	// because the operation cannot fail. We cannot create the interface at
+	// the point where the MakeInterface instruction is because the memory
+	// might have changed in the meantime.
+	for _, ref := range *instr.Referrers() {
+		mi := ref.(*ssa.MakeInterface)
+		fr.env[mi] = fr.makeInterfaceFromPointer(op, instr.Type(), mi.Type())
+	}
+
+	return true
+}
+
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
 	if fr.GenerateDebug {
@@ -763,8 +793,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		receiver := fr.llvmvalue(instr.X)
-		fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
+		// fr.env[instr] will be set if a pointer load was elided by canAvoidLoad
+		if _, ok := fr.env[instr]; !ok {
+			receiver := fr.llvmvalue(instr.X)
+			fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
+		}
 
 	case *ssa.MakeMap:
 		fr.env[instr] = fr.makeMap(instr.Type(), fr.value(instr.Reserve))
@@ -871,9 +904,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			}
 		case token.MUL:
 			fr.nilCheck(instr.X, operand.value)
-			// The bitcast is necessary to handle recursive pointer loads.
-			llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
-			fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+			if !fr.canAvoidLoad(instr, operand.value) {
+				// The bitcast is necessary to handle recursive pointer loads.
+				llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
+				fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+			}
 		default:
 			fr.env[instr] = fr.unaryOp(operand, instr.Op)
 		}
