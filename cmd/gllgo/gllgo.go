@@ -35,7 +35,7 @@ func report(err error) {
 }
 
 func displayVersion() {
-	fmt.Printf("llgo version %s (Go %s)\n", llgo.LLGOVersion, runtime.Version())
+	fmt.Printf("llgo version %s (Go %s)\n", llgo.Version(), runtime.Version())
 	fmt.Println()
 	os.Exit(0)
 }
@@ -170,11 +170,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.pic = true
 
 		case args[0] == "-g":
-			// TODO(pcc): Turn this on once we start generating debug info
-			// in the current format, as the current output crashes the code
-			// generator. Presumably we didn't observe this before because
-			// we were serializing/deserializing the IR, which causes old
-			// debug info to be dropped.
+			opts.generateDebug = true
 
 		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations":
 			// TODO(pcc): Handle code generation options.
