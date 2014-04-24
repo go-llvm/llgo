@@ -53,6 +53,7 @@ func (fr *frame) newValueFromConst(v exact.Value, typ types.Type) *govalue {
 			init := llvm.ConstString(strval, false)
 			ptr = llvm.AddGlobal(fr.module.Module, init.Type(), "")
 			ptr.SetInitializer(init)
+			ptr.SetLinkage(llvm.InternalLinkage)
 			ptr = llvm.ConstBitCast(ptr, i8ptr)
 		} else {
 			ptr = llvm.ConstNull(i8ptr)
