@@ -152,6 +152,17 @@ func (fr *frame) binaryOp(lhs *govalue, op token.Token, rhs *govalue) *govalue {
 		}
 		return value
 
+	case *types.Array:
+		// TODO(pcc): as above.
+		value := newValue(boolLLVMValue(true), types.Typ[types.Bool])
+		t := typ.Elem()
+		for i := int64(0); i < typ.Len(); i++ {
+			lhs := newValue(b.CreateExtractValue(lhs.value, int(i), ""), t)
+			rhs := newValue(b.CreateExtractValue(rhs.value, int(i), ""), t)
+			value = fr.binaryOp(value, token.AND, fr.binaryOp(lhs, token.EQL, rhs))
+		}
+		return value
+
 	case *types.Slice:
 		// []T == nil or nil == []T
 		lhsptr := b.CreateExtractValue(lhs.value, 0, "")
