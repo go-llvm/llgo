@@ -57,7 +57,7 @@ func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg ll
 		structllptr = arg.Type()
 		for i, ssaarg := range args {
 			argptr := fr.builder.CreateStructGEP(arg, i, "")
-			fr.builder.CreateStore(fr.value(ssaarg).value, argptr)
+			fr.builder.CreateStore(fr.llvmvalue(ssaarg), argptr)
 		}
 		arg = fr.builder.CreateBitCast(arg, i8ptr, "")
 	}

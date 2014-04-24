@@ -434,7 +434,7 @@ func (fr *frame) fixupPhis() {
 		blocks := make([]llvm.BasicBlock, len(phi.ssa.Edges))
 		block := phi.ssa.Block()
 		for i, edge := range phi.ssa.Edges {
-			values[i] = fr.value(edge).value
+			values[i] = fr.llvmvalue(edge)
 			blocks[i] = fr.lastBlock(block.Preds[i])
 		}
 		phi.llvm.AddIncoming(values, blocks)
@@ -551,6 +551,14 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 	panic("Instruction not visited yet")
 }
 
+func (fr *frame) llvmvalue(v ssa.Value) llvm.Value {
+	if gv := fr.value(v); gv != nil {
+		return gv.value
+	} else {
+		return llvm.Value{nil}
+	}
+}
+
 func (fr *frame) isNonNull(v ssa.Value) bool {
 	switch v.(type) {
 	case
@@ -618,7 +626,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = x
 
 	case *ssa.ChangeType:
-		value := fr.value(instr.X).value
+		value := fr.llvmvalue(instr.X)
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
@@ -637,20 +645,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if t, ok := fr.tuples[instr.Tuple]; ok {
 			elem = t[instr.Index].value
 		} else {
-			tuple := fr.value(instr.Tuple).value
+			tuple := fr.llvmvalue(instr.Tuple)
 			elem = fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
 		}
 		elemtyp := instr.Type()
 		fr.env[instr] = newValue(elem, elemtyp)
 
 	case *ssa.Field:
-		value := fr.value(instr.X).value
+		value := fr.llvmvalue(instr.X)
 		field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
 		fieldtyp := instr.Type()
 		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
-		ptr := fr.value(instr.X).value
+		ptr := fr.llvmvalue(instr.X)
 		fr.nilCheck(instr.X, ptr)
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
@@ -665,7 +673,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
-		cond := fr.value(instr.Cond).value
+		cond := fr.llvmvalue(instr.Cond)
 		block := instr.Block()
 		trueBlock := fr.block(block.Succs[0])
 		falseBlock := fr.block(block.Succs[1])
@@ -675,17 +683,17 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Index:
 		// The optimiser will remove the alloca/store/load
 		// instructions if the array is already addressable.
-		array := fr.value(instr.X).value
+		array := fr.llvmvalue(instr.X)
 		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
-		index := fr.value(instr.Index).value
+		index := fr.llvmvalue(instr.Index)
 		zero := llvm.ConstNull(index.Type())
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
-		x := fr.value(instr.X).value
-		index := fr.value(instr.Index).value
+		x := fr.llvmvalue(instr.X)
+		index := fr.llvmvalue(instr.Index)
 		var arrayptr, arraylen llvm.Value
 		var elemtyp types.Type
 		var errcode uint64
@@ -755,7 +763,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		receiver := fr.value(instr.X).value
+		receiver := fr.llvmvalue(instr.X)
 		fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
 
 	case *ssa.MakeMap:
@@ -804,7 +812,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		vals := make([]llvm.Value, len(instr.Results))
 		for i, res := range instr.Results {
-			vals[i] = fr.value(res).value
+			vals[i] = fr.llvmvalue(res)
 		}
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
@@ -834,9 +842,9 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.slice(x, low, high, instr.Type())
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr).value
+		addr := fr.llvmvalue(instr.Addr)
 		fr.nilCheck(instr.Addr, addr)
-		value := fr.value(instr.Val).value
+		value := fr.llvmvalue(instr.Val)
 		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
 		fr.builder.CreateStore(value, addr)
