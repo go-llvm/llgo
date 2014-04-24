@@ -88,6 +88,7 @@ type runtimeInterface struct {
 	newSelect,
 	panic,
 	printBool,
+	printComplex,
 	printDouble,
 	printEmptyInterface,
 	printInterface,
@@ -122,6 +123,7 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 	var ri runtimeInterface
 
 	Bool := types.Typ[types.Bool]
+	Complex128 := types.Typ[types.Complex128]
 	Float64 := types.Typ[types.Float64]
 	Int32 := types.Typ[types.Int32]
 	Int64 := types.Typ[types.Int64]
@@ -336,6 +338,11 @@ func newRuntimeInterface(module llvm.Module, tm *llvmTypeMap) (*runtimeInterface
 			name: "__go_print_bool",
 			rfi:  &ri.printBool,
 			args: []types.Type{Bool},
+		},
+		{
+			name: "__go_print_complex",
+			rfi:  &ri.printComplex,
+			args: []types.Type{Complex128},
 		},
 		{
 			name: "__go_print_double",
