@@ -256,12 +256,24 @@ func (c *compiler) buildPackageInitData(mainPkg *ssa.Package, initmap map[*types
 	}
 	sort.Sort(byPriorityThenFunc(inits))
 
-	var uniqinits []gccgoimporter.PackageInit
-	for i, init := range inits {
-		if i == 0 || uniqinits[len(uniqinits)-1].InitFunc != init.InitFunc {
-			uniqinits = append(uniqinits, init)
+	// Deduplicate init entries. We want to preserve the entry with the highest priority.
+	// Normally a package's priorities will be consistent among its dependencies, but it is
+	// possible for them to be different. For example, if a standard library test augments a
+	// package which is a dependency of 'regexp' (which is imported by every test main package)
+	// with additional dependencies, those dependencies may cause the package under test to
+	// receive a higher priority than indicated by its init clause in 'regexp'.
+	uniqinits := make([]gccgoimporter.PackageInit, len(inits))
+	uniqinitpos := len(inits)
+	uniqinitnames := make(map[string]struct{})
+	for i, _ := range inits {
+		init := inits[len(inits)-1-i]
+		if _, ok := uniqinitnames[init.InitFunc]; !ok {
+			uniqinitnames[init.InitFunc] = struct{}{}
+			uniqinitpos--
+			uniqinits[uniqinitpos] = init
 		}
 	}
+	uniqinits = uniqinits[uniqinitpos:]
 
 	ourprio := 1
 	if len(uniqinits) != 0 {
