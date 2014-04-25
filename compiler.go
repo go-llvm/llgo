@@ -7,7 +7,6 @@ package llgo
 import (
 	"bytes"
 	"fmt"
-	"go/ast"
 	"go/token"
 	"log"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"strings"
 
 	llgobuild "github.com/go-llvm/llgo/build"
+	"github.com/go-llvm/llgo/debug"
 	"github.com/go-llvm/llvm"
 
 	"code.google.com/p/go.tools/go/gccgoimporter"
@@ -127,7 +127,7 @@ type compiler struct {
 	// compile PNaCl modules.
 	pnacl bool
 
-	debug debugInfo
+	debug *debug.DIBuilder
 }
 
 func (c *compiler) logf(format string, v ...interface{}) {
@@ -201,25 +201,19 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		MethodResolver(unit),
 	)
 
-	// Initialise debugging.
-	compiler.debug.module = compiler.module.Module
-	compiler.debug.Fset = impcfg.Fset
-	compiler.debug.Sizes = compiler.llvmtypes
+	if compiler.GenerateDebug {
+		compiler.debug = debug.NewDIBuilder(
+			types.Sizes(compiler.llvmtypes),
+			compiler.module.Module,
+			impcfg.Fset,
+		)
+		defer compiler.debug.Destroy()
+		defer compiler.debug.Finalize()
+	}
 
 	mainPkg.Build()
 	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
-
-	compiler.debug.finalize()
-
-	// Export runtime type information.
-	var exportedTypes []types.Type
-	for _, m := range mainPkg.Members {
-		if t, ok := m.(*ssa.Type); ok && ast.IsExported(t.Name()) {
-			exportedTypes = append(exportedTypes, t.Type())
-		}
-	}
-	compiler.exportRuntimeTypes(exportedTypes, importpath == "runtime")
 
 	if importpath == "main" {
 		if err = compiler.createInitMainFunction(mainPkg, initmap); err != nil {

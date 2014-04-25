@@ -208,12 +208,13 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	delete(u.undefinedFuncs, f)
 	fr.retInf = fti.retInf
 
-	// Push the function onto the debug context.
-	// TODO(axw) create a fake CU for synthetic functions
-	if u.GenerateDebug && f.Synthetic == "" {
-		u.debug.pushFunctionContext(fr.function, f.Signature, f.Pos())
-		defer u.debug.popFunctionContext()
-		u.debug.setLocation(fr.builder, f.Pos())
+	// Push the compile unit and function onto the debug context.
+	if u.GenerateDebug {
+		u.debug.PushCompileUnit(f.Pos())
+		defer u.debug.PopCompileUnit()
+		u.debug.PushFunction(fr.function, f.Signature, f.Pos())
+		defer u.debug.PopFunction()
+		u.debug.SetLocation(fr.builder, f.Pos())
 	}
 
 	// If a function calls recover, we create a separate function to
@@ -283,7 +284,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 			if !ok {
 				paramIndex = -1
 			}
-			fr.debug.declare(fr.builder, local, alloca, paramIndex)
+			fr.debug.Declare(fr.builder, local, alloca, paramIndex)
 		}
 	}
 
@@ -505,8 +506,8 @@ func (fr *frame) setupUnwindBlock(rec *ssa.BasicBlock, results *types.Tuple) {
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
 	if fr.GenerateDebug {
-		fr.debug.pushBlockContext(b.Instrs[0].Pos())
-		defer fr.debug.popBlockContext()
+		fr.debug.PushLexicalBlock(b.Instrs[0].Pos())
+		defer fr.debug.PopLexicalBlock()
 	}
 	fr.builder.SetInsertPointAtEnd(llb)
 	for _, instr := range b.Instrs {
@@ -575,7 +576,7 @@ func (fr *frame) nilCheck(v ssa.Value, llptr llvm.Value) {
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
 	if fr.GenerateDebug {
-		fr.debug.setLocation(fr.builder, instr.Pos())
+		fr.debug.SetLocation(fr.builder, instr.Pos())
 	}
 
 	switch instr := instr.(type) {

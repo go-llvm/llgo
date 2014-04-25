@@ -1,0 +1,487 @@
+// Copyright 2014 The llgo Authors.
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
+package debug
+
+import (
+	"debug/dwarf"
+	"fmt"
+	"go/token"
+	"path/filepath"
+
+	"code.google.com/p/go.tools/go/ssa"
+	"code.google.com/p/go.tools/go/types"
+	"code.google.com/p/go.tools/go/types/typeutil"
+
+	"github.com/go-llvm/llvm"
+)
+
+const (
+	// non-standard debug metadata tags
+	tagAutoVariable dwarf.Tag = 0x100
+	tagArgVariable  dwarf.Tag = 0x101
+)
+
+type compileUnit struct {
+	md      llvm.Value
+	builder *llvm.DIBuilder
+}
+
+// DIBuilder builds debug metadata for Go programs.
+type DIBuilder struct {
+	// builder is the current builder; there is one per CU.
+	builder    *llvm.DIBuilder
+	module     llvm.Module
+	files      map[*token.File]llvm.Value
+	cu         map[*token.File]compileUnit
+	debugScope []llvm.Value
+	sizes      types.Sizes
+	fset       *token.FileSet
+	types      typeutil.Map
+	voidType   llvm.Value
+}
+
+// NewDIBuilder creates a new debug information builder.
+func NewDIBuilder(sizes types.Sizes, module llvm.Module, fset *token.FileSet) *DIBuilder {
+	var d DIBuilder
+	d.module = module
+	d.files = make(map[*token.File]llvm.Value)
+	d.cu = make(map[*token.File]compileUnit)
+	d.sizes = sizes
+	d.fset = fset
+	return &d
+}
+
+// Destroy destroys the DIBuilder.
+func (d *DIBuilder) Destroy() {
+	for _, cu := range d.cu {
+		cu.builder.Destroy()
+	}
+}
+
+func (d *DIBuilder) pushScope(scope llvm.Value) {
+	d.debugScope = append(d.debugScope, scope)
+}
+
+func (d *DIBuilder) popScope() (top llvm.Value) {
+	n := len(d.debugScope)
+	top, d.debugScope = d.debugScope[n-1], d.debugScope[:n-1]
+	return top
+}
+
+func (d *DIBuilder) scope() llvm.Value {
+	if len(d.debugScope) == 0 {
+		panic("no scope set")
+	}
+	return d.debugScope[len(d.debugScope)-1]
+}
+
+func (d *DIBuilder) getFile(file *token.File) llvm.Value {
+	if d.files == nil {
+		d.files = make(map[*token.File]llvm.Value)
+	}
+	if diFile := d.files[file]; !diFile.IsNil() {
+		return diFile
+	}
+	dir, filename := filepath.Split(file.Name())
+	diFile := d.builder.CreateFile(filename, dir)
+	d.files[file] = diFile
+	return diFile
+}
+
+// PushCompileUnit creates debug metadata for the compile unit
+// whose file contains the specified source position, and pushes
+// it onto the scope stack. If an invalid position is presented,
+// the first file in the file set will be used.
+func (d *DIBuilder) PushCompileUnit(pos token.Pos) {
+	var file *token.File
+	if pos.IsValid() {
+		file = d.fset.File(pos)
+	} else {
+		d.fset.Iterate(func(f *token.File) bool {
+			file = f
+			return false
+		})
+	}
+	cu, ok := d.cu[file]
+	if ok {
+		d.builder = cu.builder
+		d.pushScope(cu.md)
+		return
+	}
+	dir, filename := filepath.Split(file.Name())
+	cu.builder = llvm.NewDIBuilder(d.module)
+	cu.md = cu.builder.CreateCompileUnit(llvm.DICompileUnit{
+		// FIXME(axw) use DW_Lang_Go when LLVM accepts it
+		//Language: llvm.DW_LANG_Go,
+		Language: 0x8000, // DW_LANG_lo_user
+		File:     filename,
+		Dir:      dir,
+		Producer: "llgo",
+	})
+	d.cu[file] = cu
+	d.builder = cu.builder
+	d.pushScope(cu.md)
+}
+
+// PopLexicalBlock pops the previously pushed compile unit off the scope stack.
+func (d *DIBuilder) PopCompileUnit() {
+	d.debugScope = nil
+	d.builder = nil
+}
+
+// PushLexicalBlock creates debug metadata for the lexical block
+// starting at the specified source position, and pushes it onto
+// the scope stack.
+func (d *DIBuilder) PushLexicalBlock(pos token.Pos) {
+	file := d.fset.File(pos)
+	var line, column int
+	var diFile llvm.Value
+	if file != nil {
+		position := file.Position(pos)
+		line = position.Line
+		column = position.Column
+		diFile = d.getFile(file)
+	}
+	d.pushScope(d.builder.CreateLexicalBlock(d.scope(), llvm.DILexicalBlock{
+		File:   diFile,
+		Line:   line,
+		Column: column,
+	}))
+}
+
+// PopLexicalBlock pops the previously pushed lexical block off the scope stack.
+func (d *DIBuilder) PopLexicalBlock() {
+	d.popScope()
+}
+
+// PushFunction creates debug metadata for the specified function,
+// and pushes it onto the scope stack.
+func (d *DIBuilder) PushFunction(fnptr llvm.Value, sig *types.Signature, pos token.Pos) {
+	var diFile llvm.Value
+	var line int
+	if file := d.fset.File(pos); file != nil {
+		diFile = d.getFile(file)
+		line = file.Line(pos)
+	}
+	d.pushScope(d.builder.CreateFunction(d.scope(), llvm.DIFunction{
+		Name:         fnptr.Name(), // TODO(axw) unmangled name?
+		LinkageName:  fnptr.Name(),
+		File:         diFile,
+		Line:         line,
+		Type:         d.DIType(sig),
+		IsDefinition: true,
+		Function:     fnptr,
+	}))
+}
+
+// PopFunction pops the previously pushed function off the scope stack.
+func (d *DIBuilder) PopFunction() {
+	d.popScope() // function
+	d.popScope() // compile unit
+}
+
+// Declare creates an llvm.dbg.declare call for the specified function
+// parameter or local variable.
+func (d *DIBuilder) Declare(b llvm.Builder, v ssa.Value, llv llvm.Value, paramIndex int) {
+	tag := tagAutoVariable
+	if paramIndex >= 0 {
+		tag = tagArgVariable
+	}
+	var diFile llvm.Value
+	var line int
+	if file := d.fset.File(v.Pos()); file != nil {
+		line = file.Line(v.Pos())
+		diFile = d.getFile(file)
+	}
+	localVar := d.builder.CreateLocalVariable(d.scope(), llvm.DILocalVariable{
+		Tag:   tag,
+		Name:  llv.Name(),
+		File:  diFile,
+		Line:  line,
+		ArgNo: paramIndex + 1,
+		Type:  d.DIType(v.Type()),
+	})
+	d.builder.InsertDeclareAtEnd(llv, localVar, b.GetInsertBlock())
+}
+
+// Value creates an llvm.dbg.value call for the specified register value.
+func (d *DIBuilder) Value(b llvm.Builder, v ssa.Value, llv llvm.Value, paramIndex int) {
+	// TODO(axw)
+}
+
+// SetLocation sets the current debug location.
+func (d *DIBuilder) SetLocation(b llvm.Builder, pos token.Pos) {
+	if !pos.IsValid() {
+		return
+	}
+	position := d.fset.Position(pos)
+	b.SetCurrentDebugLocation(llvm.MDNode([]llvm.Value{
+		llvm.ConstInt(llvm.Int32Type(), uint64(position.Line), false),
+		llvm.ConstInt(llvm.Int32Type(), uint64(position.Column), false),
+		d.scope(),
+		llvm.Value{},
+	}))
+}
+
+// Finalize must be called after all compilation units are translated,
+// generating the final debug metadata for the module.
+func (d *DIBuilder) Finalize() {
+	d.module.AddNamedMetadataOperand(
+		"llvm.module.flags",
+		llvm.MDNode([]llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), 2, false), // Warn on mismatch
+			llvm.MDString("Dwarf Version"),
+			llvm.ConstInt(llvm.Int32Type(), 4, false),
+		}),
+	)
+	d.module.AddNamedMetadataOperand(
+		"llvm.module.flags",
+		llvm.MDNode([]llvm.Value{
+			llvm.ConstInt(llvm.Int32Type(), 1, false), // Error on mismatch
+			llvm.MDString("Debug Info Version"),
+			llvm.ConstInt(llvm.Int32Type(), 1, false),
+		}),
+	)
+	for _, cu := range d.cu {
+		cu.builder.Finalize()
+	}
+}
+
+// DIType maps a Go type to DIType debug metadata value.
+func (d *DIBuilder) DIType(t types.Type) llvm.Value {
+	return d.typeDebugDescriptor(t, types.TypeString(nil, t))
+}
+
+func (d *DIBuilder) typeDebugDescriptor(t types.Type, name string) llvm.Value {
+	// Signature needs to be handled specially, to preprocess
+	// methods, moving the receiver to the parameter list.
+	if t, ok := t.(*types.Signature); ok {
+		return d.descriptorSignature(t, name)
+	}
+	if t == nil {
+		if d.voidType.IsNil() {
+			d.voidType = d.builder.CreateBasicType(llvm.DIBasicType{Name: "void"})
+		}
+		return d.voidType
+	}
+	if dt, ok := d.types.At(t).(llvm.Value); ok {
+		return dt
+	}
+	dt := d.descriptor(t, name)
+	d.types.Set(t, dt)
+	return dt
+}
+
+func (d *DIBuilder) descriptor(t types.Type, name string) llvm.Value {
+	switch t := t.(type) {
+	case *types.Basic:
+		return d.descriptorBasic(t, name)
+	case *types.Pointer:
+		return d.descriptorPointer(t)
+	case *types.Struct:
+		return d.descriptorStruct(t, name)
+	case *types.Named:
+		return d.descriptorNamed(t)
+	case *types.Array:
+		return d.descriptorArray(t, name)
+	case *types.Slice:
+		return d.descriptorSlice(t, name)
+	case *types.Map:
+		return d.descriptorMap(t, name)
+	case *types.Chan:
+		return d.descriptorChan(t, name)
+	case *types.Interface:
+		return d.descriptorInterface(t, name)
+	default:
+		panic(fmt.Sprintf("unhandled type: %T", t))
+	}
+}
+
+func (d *DIBuilder) descriptorBasic(t *types.Basic, name string) llvm.Value {
+	switch t.Kind() {
+	case types.String:
+		return d.typeDebugDescriptor(types.NewStruct([]*types.Var{
+			types.NewVar(0, nil, "ptr", types.NewPointer(types.Typ[types.Uint8])),
+			types.NewVar(0, nil, "len", types.Typ[types.Int]),
+		}, nil), name)
+	case types.UnsafePointer:
+		return d.builder.CreateBasicType(llvm.DIBasicType{
+			Name:        name,
+			SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
+			AlignInBits: uint64(d.sizes.Alignof(t) * 8),
+			Encoding:    llvm.DW_ATE_unsigned,
+		})
+	default:
+		bt := llvm.DIBasicType{
+			Name:        t.String(),
+			SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
+			AlignInBits: uint64(d.sizes.Alignof(t) * 8),
+		}
+		switch bi := t.Info(); {
+		case bi&types.IsBoolean != 0:
+			bt.Encoding = llvm.DW_ATE_boolean
+		case bi&types.IsUnsigned != 0:
+			bt.Encoding = llvm.DW_ATE_unsigned
+		case bi&types.IsInteger != 0:
+			bt.Encoding = llvm.DW_ATE_signed
+		case bi&types.IsFloat != 0:
+			bt.Encoding = llvm.DW_ATE_float
+		case bi&types.IsComplex != 0:
+			bt.Encoding = llvm.DW_ATE_imaginary_float
+		case bi&types.IsUnsigned != 0:
+			bt.Encoding = llvm.DW_ATE_unsigned
+		default:
+			panic(fmt.Sprintf("unhandled: %#v", t))
+		}
+		return d.builder.CreateBasicType(bt)
+	}
+}
+
+func (d *DIBuilder) descriptorPointer(t *types.Pointer) llvm.Value {
+	return d.builder.CreatePointerType(llvm.DIPointerType{
+		Pointee:     d.DIType(t.Elem()),
+		SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
+		AlignInBits: uint64(d.sizes.Alignof(t) * 8),
+	})
+}
+
+func (d *DIBuilder) descriptorStruct(t *types.Struct, name string) llvm.Value {
+	fields := make([]*types.Var, t.NumFields())
+	for i := range fields {
+		fields[i] = t.Field(i)
+	}
+	offsets := d.sizes.Offsetsof(fields)
+	members := make([]llvm.Value, len(fields))
+	for i, f := range fields {
+		// TODO(axw) file/line where member is defined.
+		t := f.Type()
+		members[i] = d.builder.CreateMemberType(d.scope(), llvm.DIMemberType{
+			Name:         f.Name(),
+			Type:         d.DIType(t),
+			SizeInBits:   uint64(d.sizes.Sizeof(t) * 8),
+			AlignInBits:  uint64(d.sizes.Alignof(t) * 8),
+			OffsetInBits: uint64(offsets[i] * 8),
+		})
+	}
+	// TODO(axw) file/line where struct is defined.
+	return d.builder.CreateStructType(d.scope(), llvm.DIStructType{
+		Name:        name,
+		SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
+		AlignInBits: uint64(d.sizes.Alignof(t) * 8),
+		Elements:    members,
+	})
+}
+
+func (d *DIBuilder) descriptorNamed(t *types.Named) llvm.Value {
+	// Create a placeholder for the named type, to terminate cycles.
+	placeholder := llvm.MDNode(nil)
+	d.types.Set(t, placeholder)
+	var diFile llvm.Value
+	var line int
+	if file := d.fset.File(t.Obj().Pos()); file != nil {
+		line = file.Line(t.Obj().Pos())
+		diFile = d.getFile(file)
+	}
+	typedef := d.builder.CreateTypedef(llvm.DITypedef{
+		Type: d.DIType(t.Underlying()),
+		Name: t.Obj().Name(),
+		File: diFile,
+		Line: line,
+	})
+	placeholder.ReplaceAllUsesWith(typedef)
+	return typedef
+}
+
+func (d *DIBuilder) descriptorArray(t *types.Array, name string) llvm.Value {
+	return d.builder.CreateArrayType(llvm.DIArrayType{
+		SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
+		AlignInBits: uint64(d.sizes.Alignof(t) * 8),
+		ElementType: d.DIType(t.Elem()),
+		Subscripts:  []llvm.DISubrange{{Count: t.Len()}},
+	})
+}
+
+func (d *DIBuilder) descriptorSlice(t *types.Slice, name string) llvm.Value {
+	sliceStruct := types.NewStruct([]*types.Var{
+		types.NewVar(0, nil, "ptr", types.NewPointer(t.Elem())),
+		types.NewVar(0, nil, "len", types.Typ[types.Int]),
+		types.NewVar(0, nil, "cap", types.Typ[types.Int]),
+	}, nil)
+	return d.typeDebugDescriptor(sliceStruct, name)
+}
+
+func (d *DIBuilder) descriptorMap(t *types.Map, name string) llvm.Value {
+	return d.descriptorBasic(types.Typ[types.Uintptr], name)
+}
+
+func (d *DIBuilder) descriptorChan(t *types.Chan, name string) llvm.Value {
+	return d.descriptorBasic(types.Typ[types.Uintptr], name)
+}
+
+func (d *DIBuilder) descriptorInterface(t *types.Interface, name string) llvm.Value {
+	ifaceStruct := types.NewStruct([]*types.Var{
+		types.NewVar(0, nil, "type", types.NewPointer(types.Typ[types.Uint8])),
+		types.NewVar(0, nil, "data", types.NewPointer(types.Typ[types.Uint8])),
+	}, nil)
+	return d.typeDebugDescriptor(ifaceStruct, name)
+}
+
+func (d *DIBuilder) descriptorSignature(t *types.Signature, name string) llvm.Value {
+	// If there's a receiver change the receiver to an
+	// additional (first) parameter, and take the value of
+	// the resulting signature instead.
+	if recv := t.Recv(); recv != nil {
+		params := t.Params()
+		paramvars := make([]*types.Var, int(params.Len()+1))
+		paramvars[0] = recv
+		for i := 0; i < int(params.Len()); i++ {
+			paramvars[i+1] = params.At(i)
+		}
+		params = types.NewTuple(paramvars...)
+		t := types.NewSignature(nil, nil, params, t.Results(), t.Variadic())
+		return d.typeDebugDescriptor(t, name)
+	}
+	if dt, ok := d.types.At(t).(llvm.Value); ok {
+		return dt
+	}
+
+	var returnType llvm.Value
+	results := t.Results()
+	switch n := results.Len(); n {
+	case 0:
+		returnType = d.DIType(nil) // void
+	case 1:
+		returnType = d.DIType(results.At(0).Type())
+	default:
+		fields := make([]*types.Var, results.Len())
+		for i := range fields {
+			f := results.At(i)
+			// Structs may not have multiple fields
+			// with the same name, excepting "_".
+			if f.Name() == "" {
+				f = types.NewVar(f.Pos(), f.Pkg(), "_", f.Type())
+			}
+			fields[i] = f
+		}
+		returnType = d.typeDebugDescriptor(types.NewStruct(fields, nil), "")
+	}
+
+	var paramTypes []llvm.Value
+	params := t.Params()
+	if params != nil && params.Len() > 0 {
+		paramTypes = make([]llvm.Value, params.Len()+1)
+		paramTypes[0] = returnType
+		for i := range paramTypes[1:] {
+			paramTypes[i+1] = d.DIType(params.At(i).Type())
+		}
+	} else {
+		paramTypes = []llvm.Value{returnType}
+	}
+
+	// TODO(axw) get position of type definition for File field
+	return d.builder.CreateSubroutineType(llvm.DISubroutineType{
+		Parameters: paramTypes,
+	})
+}
