@@ -989,7 +989,7 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	var fn *govalue
 	if call.IsInvoke() {
 		var recv *govalue
-		fn, recv = fr.interfaceMethod(fr.value(call.Value), call.Method)
+		fn, recv = fr.interfaceMethod(fr.llvmvalue(call.Value), call.Value.Type(), call.Method)
 		args = append([]*govalue{recv}, args...)
 	} else {
 		if ssafn, ok := call.Value.(*ssa.Function); ok {
