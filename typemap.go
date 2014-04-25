@@ -2,6 +2,11 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
+// Portions (from go/types):
+//     Copyright 2013 The Go Authors. All rights reserved.
+//     Use of this source code is governed by a BSD-style
+//     license that can be found in the LICENSE file.
+
 package llgo
 
 import (
@@ -263,16 +268,71 @@ func (tm *llvmTypeMap) makeLLVMType(t types.Type, name string) llvm.Type {
 	return tm.getBackendType(t).ToLLVM(tm.ctx)
 }
 
-func (tm *llvmTypeMap) Sizeof(t types.Type) int64 {
-	return align(tm.sizes.Sizeof(t), tm.sizes.Alignof(t))
+func (tm *llvmTypeMap) Offsetsof(fields []*types.Var) []int64 {
+	offsets := make([]int64, len(fields))
+	var o int64
+	for i, f := range fields {
+		a := tm.Alignof(f.Type())
+		o = align(o, a)
+		offsets[i] = o
+		o += tm.Sizeof(f.Type())
+	}
+	return offsets
+}
+
+var basicSizes = [...]byte{
+	types.Bool:       1,
+	types.Int8:       1,
+	types.Int16:      2,
+	types.Int32:      4,
+	types.Int64:      8,
+	types.Uint8:      1,
+	types.Uint16:     2,
+	types.Uint32:     4,
+	types.Uint64:     8,
+	types.Float32:    4,
+	types.Float64:    8,
+	types.Complex64:  8,
+	types.Complex128: 16,
+}
+
+func (tm *llvmTypeMap) Sizeof(T types.Type) int64 {
+	switch t := T.Underlying().(type) {
+	case *types.Basic:
+		k := t.Kind()
+		if int(k) < len(basicSizes) {
+			if s := basicSizes[k]; s > 0 {
+				return int64(s)
+			}
+		}
+		if k == types.String {
+			return tm.sizes.WordSize * 2
+		}
+	case *types.Array:
+		a := tm.Alignof(t.Elem())
+		z := tm.Sizeof(t.Elem())
+		return align(z, a) * t.Len() // may be 0
+	case *types.Slice:
+		return tm.sizes.WordSize * 3
+	case *types.Struct:
+		n := t.NumFields()
+		if n == 0 {
+			return 0
+		}
+		fields := make([]*types.Var, t.NumFields())
+		for i := 0; i != t.NumFields(); i++ {
+			fields[i] = t.Field(i)
+		}
+		offsets := tm.Offsetsof(fields)
+		return align(offsets[n-1]+tm.Sizeof(t.Field(n-1).Type()), tm.Alignof(t))
+	case *types.Interface:
+		return tm.sizes.WordSize * 2
+	}
+	return tm.sizes.WordSize // catch-all
 }
 
 func (tm *llvmTypeMap) Alignof(t types.Type) int64 {
 	return tm.sizes.Alignof(t)
-}
-
-func (tm *llvmTypeMap) Offsetsof(fields []*types.Var) []int64 {
-	return tm.sizes.Offsetsof(fields)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
