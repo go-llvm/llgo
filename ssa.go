@@ -30,6 +30,8 @@ type unit struct {
 	// undefinedFuncs contains functions that have been resolved
 	// (declared) but not defined.
 	undefinedFuncs map[*ssa.Function]bool
+
+	gcRoots []llvm.Value
 }
 
 func newUnit(c *compiler, pkg *ssa.Package) *unit {
@@ -52,11 +54,13 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	for _, m := range pkg.Members {
 		switch v := m.(type) {
 		case *ssa.Global:
-			llelemtyp := u.llvmtypes.ToLLVM(deref(v.Type()))
+			elemtyp := deref(v.Type())
+			llelemtyp := u.llvmtypes.ToLLVM(elemtyp)
 			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			global = llvm.ConstBitCast(global, u.llvmtypes.ToLLVM(v.Type()))
 			u.globals[v] = global
+			u.maybeAddGcRoot(global, elemtyp)
 		case *ssa.Type:
 			u.types.getTypeDescriptorPointer(v.Type())
 		}
@@ -88,6 +92,15 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	// runtime type mapping, but not defined.
 	for f, _ := range u.undefinedFuncs {
 		u.defineFunction(f)
+	}
+}
+
+func (u *unit) maybeAddGcRoot(global llvm.Value, ty types.Type) {
+	if hasPointers(ty) {
+		global = llvm.ConstBitCast(global, llvm.PointerType(llvm.Int8Type(), 0))
+		size := llvm.ConstInt(u.types.inttype, uint64(u.types.Sizeof(ty)), false)
+		root := llvm.ConstStruct([]llvm.Value{global, size}, false)
+		u.gcRoots = append(u.gcRoots, root)
 	}
 }
 
@@ -288,10 +301,9 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 	}
 
-	// If this is the ".import" function, we need to register the package's
-	// GC roots.
+	// If this is the ".import" function, enable init-specific optimizations.
 	if f.Name() == ".import" {
-		fr.registerGcRoots()
+		fr.isInit = true
 	}
 
 	// If the function contains any defers, we must first create
@@ -314,6 +326,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if !fr.unwindBlock.IsNil() {
 		fr.setupUnwindBlock(f.Recover, f.Signature.Results())
 	}
+
+	// The init function needs to register the GC roots first. We do this
+	// after generating code for it because allocations may have caused
+	// additional GC roots to be created.
+	if fr.isInit {
+		fr.builder.SetInsertPointBefore(prologueBlock.FirstInstruction())
+		fr.registerGcRoots()
+	}
 }
 
 type pendingPhi struct {
@@ -335,6 +355,7 @@ type frame struct {
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi
 	canRecover             llvm.Value
+	isInit                 bool
 }
 
 func newFrame(u *unit, fn llvm.Value) *frame {
@@ -401,30 +422,16 @@ func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame
 }
 
 func (fr *frame) registerGcRoots() {
-	var roots []llvm.Value
-
-	for _, m := range fr.pkg.Members {
-		switch v := m.(type) {
-		case *ssa.Global:
-			ty := deref(v.Type())
-			if hasPointers(ty) {
-				size := llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(ty)), false)
-				root := llvm.ConstStruct([]llvm.Value{fr.globals[v], size}, false)
-				roots = append(roots, root)
-			}
-		}
-	}
-
-	if len(roots) != 0 {
-		rootty := roots[0].Type()
-		roots = append(roots, llvm.ConstNull(rootty))
+	if len(fr.gcRoots) != 0 {
+		rootty := fr.gcRoots[0].Type()
+		roots := append(fr.gcRoots, llvm.ConstNull(rootty))
 		rootsarr := llvm.ConstArray(rootty, roots)
 		rootsstruct := llvm.ConstStruct([]llvm.Value{llvm.ConstNull(llvm.PointerType(llvm.Int8Type(), 0)), rootsarr}, false)
 
 		rootsglobal := llvm.AddGlobal(fr.module.Module, rootsstruct.Type(), "")
 		rootsglobal.SetInitializer(rootsstruct)
 		rootsglobal.SetLinkage(llvm.InternalLinkage)
-		fr.runtime.registerGcRoots.call(fr, llvm.ConstBitCast(rootsglobal, llvm.PointerType(llvm.Int8Type(), 0)))
+		fr.runtime.registerGcRoots.callOnly(fr, llvm.ConstBitCast(rootsglobal, llvm.PointerType(llvm.Int8Type(), 0)))
 	}
 }
 
@@ -611,6 +618,64 @@ func (fr *frame) canAvoidLoad(instr *ssa.UnOp, op llvm.Value) bool {
 	return true
 }
 
+// Return true iff we think it might be beneficial to turn this alloc instruction
+// into a statically allocated global.
+// Precondition: we are compiling the init function.
+func (fr *frame) shouldStaticallyAllocate(alloc *ssa.Alloc) bool {
+	// First, see if the allocated type is an array or struct, and if so determine
+	// the number of elements in the type. If the type is anything else, we
+	// statically allocate unconditionally.
+	var numElems int64
+	switch ty := deref(alloc.Type()).Underlying().(type) {
+	case *types.Array:
+		numElems = ty.Len()
+	case *types.Struct:
+		numElems = int64(ty.NumFields())
+	default:
+		return true
+	}
+
+	// We treat the number of referrers to the alloc instruction as a rough
+	// proxy for the number of elements initialized. If the data structure
+	// is densely initialized (> 1/4 elements initialized), enable the
+	// optimization.
+	return int64(len(*alloc.Referrers()))*4 > numElems
+}
+
+// If val is a constant and addr refers to a global variable which is defined in
+// this module or an element thereof, simulate the effect of storing val at addr
+// in the global variable's initializer and return true, otherwise return false.
+// Precondition: we are compiling the init function.
+func (fr *frame) maybeStoreInInitializer(val, addr llvm.Value) bool {
+	if val.IsAConstant().IsNil() {
+		return false
+	}
+
+	if !addr.IsAConstantExpr().IsNil() && addr.OperandsCount() >= 2 &&
+		// TODO(pcc): Explicitly check that this is a constant GEP.
+		// I don't think there are any other kinds of constantexpr which
+		// satisfy the conditions we test for here, so this is probably safe.
+		!addr.Operand(0).IsAGlobalVariable().IsNil() && !addr.Operand(0).Initializer().IsNil() &&
+		addr.Operand(1).IsNull() {
+		gv := addr.Operand(0)
+		indices := make([]uint32, addr.OperandsCount()-2)
+		for i := range indices {
+			op := addr.Operand(i + 2)
+			if op.IsAConstantInt().IsNil() {
+				return false
+			}
+			indices[i] = uint32(op.ZExtValue())
+		}
+		gv.SetInitializer(llvm.ConstInsertValue(gv.Initializer(), val, indices))
+		return true
+	} else if !addr.IsAGlobalVariable().IsNil() && !addr.Initializer().IsNil() {
+		addr.SetInitializer(val)
+		return true
+	} else {
+		return false
+	}
+}
+
 func (fr *frame) instruction(instr ssa.Instruction) {
 	fr.logf("[%T] %v @ %s\n", instr, instr, fr.pkg.Prog.Fset.Position(instr.Pos()))
 	if fr.GenerateDebug {
@@ -622,14 +687,25 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		typ := deref(instr.Type())
 		llvmtyp := fr.llvmtypes.ToLLVM(typ)
 		var value llvm.Value
-		if instr.Heap {
+		if !instr.Heap {
+			value = fr.env[instr].value
+			fr.memsetZero(value, llvm.SizeOf(llvmtyp))
+		} else if fr.isInit && fr.shouldStaticallyAllocate(instr) {
+			// If this is the init function and we think it may be beneficial,
+			// allocate memory statically in the object file rather than on the
+			// heap. This allows us to optimize constant stores into such
+			// variables as static initializations.
+			global := llvm.AddGlobal(fr.module.Module, llvmtyp, "")
+			global.SetLinkage(llvm.InternalLinkage)
+			global.SetInitializer(llvm.ConstNull(llvmtyp))
+			fr.maybeAddGcRoot(global, typ)
+			ptr := llvm.ConstBitCast(global, llvm.PointerType(llvm.Int8Type(), 0))
+			fr.env[instr] = newValue(ptr, instr.Type())
+		} else {
 			value = fr.createTypeMalloc(typ)
 			value.SetName(instr.Comment)
 			value = fr.builder.CreateBitCast(value, llvm.PointerType(llvm.Int8Type(), 0), "")
 			fr.env[instr] = newValue(value, instr.Type())
-		} else {
-			value = fr.env[instr].value
-			fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 		}
 
 	case *ssa.BinOp:
@@ -877,11 +953,15 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 
 	case *ssa.Store:
 		addr := fr.llvmvalue(instr.Addr)
-		fr.nilCheck(instr.Addr, addr)
 		value := fr.llvmvalue(instr.Val)
-		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
-		fr.builder.CreateStore(value, addr)
+		// If this is the init function, see if we can simulate the effect
+		// of the store in a global's initializer, in which case we can avoid
+		// generating code for it.
+		if !fr.isInit || !fr.maybeStoreInInitializer(value, addr) {
+			fr.nilCheck(instr.Addr, addr)
+			fr.builder.CreateStore(value, addr)
+		}
 
 	case *ssa.TypeAssert:
 		x := fr.value(instr.X)
