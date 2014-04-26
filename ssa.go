@@ -629,8 +629,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			fr.env[instr] = newValue(value, instr.Type())
 		} else {
 			value = fr.env[instr].value
+			fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 		}
-		fr.memsetZero(value, llvm.SizeOf(llvmtyp))
 
 	case *ssa.BinOp:
 		lhs, rhs := fr.value(instr.X), fr.value(instr.Y)
