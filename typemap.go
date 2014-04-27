@@ -12,6 +12,7 @@ package llgo
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -698,9 +699,28 @@ func (tm *TypeMap) getTypeDescLinkage(t types.Type) (linkage llvm.Linkage, emit 
 	return
 }
 
+type typeAndInfo struct {
+	typ        types.Type
+	typeString string
+	tdi        *typeDescInfo
+}
+
+type byTypeName []typeAndInfo
+
+func (ts byTypeName) Len() int { return len(ts) }
+func (ts byTypeName) Swap(i, j int) {
+	ts[i], ts[j] = ts[j], ts[i]
+}
+func (ts byTypeName) Less(i, j int) bool {
+	return ts[i].typeString < ts[j].typeString
+}
+
 func (tm *TypeMap) emitTypeDescInitializers() {
 	for changed := true; changed; {
 		changed = false
+
+		var ts []typeAndInfo
+
 		tm.types.Iterate(func(key types.Type, value interface{}) {
 			tdi := value.(*typeDescInfo)
 			if tdi.global.Initializer().C == nil {
@@ -708,10 +728,17 @@ func (tm *TypeMap) emitTypeDescInitializers() {
 				tdi.global.SetLinkage(linkage)
 				if emit {
 					changed = true
-					tdi.global.SetInitializer(tm.makeTypeDescInitializer(key))
+					ts = append(ts, typeAndInfo{key, key.String(), tdi})
 				}
 			}
 		})
+
+		if changed {
+			sort.Sort(byTypeName(ts))
+			for _, t := range ts {
+				t.tdi.global.SetInitializer(tm.makeTypeDescInitializer(t.typ))
+			}
+		}
 	}
 }
 

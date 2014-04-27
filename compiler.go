@@ -57,10 +57,6 @@ type CompilerOptions struct {
 	// Logger is a logger used for tracing compilation.
 	Logger *log.Logger
 
-	// OrderedCompilation attempts to do some sorting to compile
-	// functions in a deterministic order
-	OrderedCompilation bool
-
 	// DumpSSA is a debugging option that dumps each SSA function
 	// to stderr before generating code for it.
 	DumpSSA bool
