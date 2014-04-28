@@ -113,9 +113,7 @@ func (d *DIBuilder) PushCompileUnit(pos token.Pos) {
 	dir, filename := filepath.Split(file.Name())
 	cu.builder = llvm.NewDIBuilder(d.module)
 	cu.md = cu.builder.CreateCompileUnit(llvm.DICompileUnit{
-		// FIXME(axw) use DW_Lang_Go when LLVM accepts it
-		//Language: llvm.DW_LANG_Go,
-		Language: 0x8000, // DW_LANG_lo_user
+		Language: llvm.DW_LANG_Go,
 		File:     filename,
 		Dir:      dir,
 		Producer: "llgo",
