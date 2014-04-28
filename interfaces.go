@@ -11,19 +11,20 @@ import (
 
 // interfaceMethod returns a function and receiver pointer for the specified
 // interface and method pair.
-func (fr *frame) interfaceMethod(iface *govalue, method *types.Func) (fn, recv *govalue) {
-	lliface := iface.value
+func (fr *frame) interfaceMethod(lliface llvm.Value, ifacety types.Type, method *types.Func) (fn, recv *govalue) {
 	llitab := fr.builder.CreateExtractValue(lliface, 0, "")
 	recv = newValue(fr.builder.CreateExtractValue(lliface, 1, ""), types.Typ[types.UnsafePointer])
-	sig := method.Type().(*types.Signature)
-	methodset := fr.types.MethodSet(sig.Recv().Type())
+	methodset := fr.types.MethodSet(ifacety)
 	// TODO(axw) cache ordered method index
-	var index int
+	index := -1
 	for i, m := range orderedMethodSet(methodset) {
 		if m.Obj() == method {
 			index = i
 			break
 		}
+	}
+	if index == -1 {
+		panic("could not find method index")
 	}
 	llitab = fr.builder.CreateBitCast(llitab, llvm.PointerType(llvm.PointerType(llvm.Int8Type(), 0), 0), "")
 	// Skip runtime type pointer.
@@ -34,6 +35,7 @@ func (fr *frame) interfaceMethod(iface *govalue, method *types.Func) (fn, recv *
 	llifn := fr.builder.CreateLoad(llifnptr, "")
 	// Replace receiver type with unsafe.Pointer.
 	recvparam := types.NewParam(0, nil, "", types.Typ[types.UnsafePointer])
+	sig := method.Type().(*types.Signature)
 	sig = types.NewSignature(nil, recvparam, sig.Params(), sig.Results(), sig.Variadic())
 	fn = newValue(llifn, sig)
 	return
@@ -73,6 +75,18 @@ func (fr *frame) makeInterface(llv llvm.Value, vty types.Type, iface types.Type)
 		fr.builder.CreateStore(llv, ptr)
 		llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
 	}
+	value := llvm.Undef(fr.types.ToLLVM(iface))
+	itab := fr.types.getItabPointer(vty, iface.Underlying().(*types.Interface))
+	value = fr.builder.CreateInsertValue(value, itab, 0, "")
+	value = fr.builder.CreateInsertValue(value, llv, 1, "")
+	return newValue(value, iface)
+}
+
+func (fr *frame) makeInterfaceFromPointer(vptr llvm.Value, vty types.Type, iface types.Type) *govalue {
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	ptr := fr.createTypeMalloc(vty)
+	fr.memcpy(ptr, vptr, llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(vty)), false))
+	llv := fr.builder.CreateBitCast(ptr, i8ptr, "")
 	value := llvm.Undef(fr.types.ToLLVM(iface))
 	itab := fr.types.getItabPointer(vty, iface.Underlying().(*types.Interface))
 	value = fr.builder.CreateInsertValue(value, itab, 0, "")

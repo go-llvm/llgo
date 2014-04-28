@@ -13,13 +13,14 @@ func TestInterfaceToInterfaceConversion(t *testing.T) {
 func TestEmptyToInterfaceConversion(t *testing.T) {
 	checkOutputEqual(t, "interfaces/e2i_conversion.go")
 }
-func TestStaticBasicV2I(t *testing.T)    { checkOutputEqual(t, "interfaces/basic.go") }
-func TestInterfaceMethods(t *testing.T)  { checkOutputEqual(t, "interfaces/methods.go") }
-func TestInterfaceAssert(t *testing.T)   { checkOutputEqual(t, "interfaces/assert.go") }
-func TestError(t *testing.T)             { checkOutputEqual(t, "interfaces/error.go") }
-func TestInterfaceWordSize(t *testing.T) { checkOutputEqual(t, "interfaces/wordsize.go") }
-func TestCompareI2V(t *testing.T)        { checkOutputEqual(t, "interfaces/comparei2v.go") }
-func TestCompareI2I(t *testing.T)        { checkOutputEqual(t, "interfaces/comparei2i.go") }
+func TestStaticBasicV2I(t *testing.T)     { checkOutputEqual(t, "interfaces/basic.go") }
+func TestEmbeddedInterfaces(t *testing.T) { checkOutputEqual(t, "interfaces/embedded.go") }
+func TestInterfaceMethods(t *testing.T)   { checkOutputEqual(t, "interfaces/methods.go") }
+func TestInterfaceAssert(t *testing.T)    { checkOutputEqual(t, "interfaces/assert.go") }
+func TestError(t *testing.T)              { checkOutputEqual(t, "interfaces/error.go") }
+func TestInterfaceWordSize(t *testing.T)  { checkOutputEqual(t, "interfaces/wordsize.go") }
+func TestCompareI2V(t *testing.T)         { checkOutputEqual(t, "interfaces/comparei2v.go") }
+func TestCompareI2I(t *testing.T)         { checkOutputEqual(t, "interfaces/comparei2i.go") }
 
 //func TestInterfaceImport(t *testing.T) { checkOutputEqual(t, "interfaces/import.go") }
 

@@ -434,7 +434,7 @@ func (fr *frame) fixupPhis() {
 		blocks := make([]llvm.BasicBlock, len(phi.ssa.Edges))
 		block := phi.ssa.Block()
 		for i, edge := range phi.ssa.Edges {
-			values[i] = fr.value(edge).value
+			values[i] = fr.llvmvalue(edge)
 			blocks[i] = fr.lastBlock(block.Preds[i])
 		}
 		phi.llvm.AddIncoming(values, blocks)
@@ -551,6 +551,14 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 	panic("Instruction not visited yet")
 }
 
+func (fr *frame) llvmvalue(v ssa.Value) llvm.Value {
+	if gv := fr.value(v); gv != nil {
+		return gv.value
+	} else {
+		return llvm.Value{nil}
+	}
+}
+
 func (fr *frame) isNonNull(v ssa.Value) bool {
 	switch v.(type) {
 	case
@@ -571,6 +579,36 @@ func (fr *frame) nilCheck(v ssa.Value, llptr llvm.Value) {
 		ptrnull := fr.builder.CreateIsNull(llptr, "")
 		fr.condBrRuntimeError(ptrnull, gccgoRuntimeErrorNIL_DEREFERENCE)
 	}
+}
+
+// If this value is sufficiently large, look through referrers to see if we can
+// avoid a load.
+func (fr *frame) canAvoidLoad(instr *ssa.UnOp, op llvm.Value) bool {
+	if fr.types.Sizeof(instr.Type()) < 16 {
+		// Don't bother with small values.
+		return false
+	}
+
+	// We only know how to avoid loads if they are used to create an interface.
+	// If we see a non-MakeInterface referrer, abort.
+	for _, ref := range *instr.Referrers() {
+		if _, ok := ref.(*ssa.MakeInterface); !ok {
+			return false
+		}
+	}
+
+	// We now know that each referrer is a MakeInterface. Create the
+	// interfaces and store them in fr.env. Although the MakeInterface could
+	// be in another basic block, it is safe to create the interfaces here
+	// because the operation cannot fail. We cannot create the interface at
+	// the point where the MakeInterface instruction is because the memory
+	// might have changed in the meantime.
+	for _, ref := range *instr.Referrers() {
+		mi := ref.(*ssa.MakeInterface)
+		fr.env[mi] = fr.makeInterfaceFromPointer(op, instr.Type(), mi.Type())
+	}
+
+	return true
 }
 
 func (fr *frame) instruction(instr ssa.Instruction) {
@@ -618,7 +656,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = x
 
 	case *ssa.ChangeType:
-		value := fr.value(instr.X).value
+		value := fr.llvmvalue(instr.X)
 		if _, ok := instr.Type().Underlying().(*types.Pointer); ok {
 			value = fr.builder.CreateBitCast(value, fr.llvmtypes.ToLLVM(instr.Type()), "")
 		}
@@ -637,20 +675,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		if t, ok := fr.tuples[instr.Tuple]; ok {
 			elem = t[instr.Index].value
 		} else {
-			tuple := fr.value(instr.Tuple).value
+			tuple := fr.llvmvalue(instr.Tuple)
 			elem = fr.builder.CreateExtractValue(tuple, instr.Index, instr.Name())
 		}
 		elemtyp := instr.Type()
 		fr.env[instr] = newValue(elem, elemtyp)
 
 	case *ssa.Field:
-		value := fr.value(instr.X).value
+		value := fr.llvmvalue(instr.X)
 		field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
 		fieldtyp := instr.Type()
 		fr.env[instr] = newValue(field, fieldtyp)
 
 	case *ssa.FieldAddr:
-		ptr := fr.value(instr.X).value
+		ptr := fr.llvmvalue(instr.X)
 		fr.nilCheck(instr.X, ptr)
 		xtyp := instr.X.Type().Underlying().(*types.Pointer).Elem()
 		ptrtyp := llvm.PointerType(fr.llvmtypes.ToLLVM(xtyp), 0)
@@ -665,7 +703,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.runtime.Go.call(fr, fn, arg)
 
 	case *ssa.If:
-		cond := fr.value(instr.Cond).value
+		cond := fr.llvmvalue(instr.Cond)
 		block := instr.Block()
 		trueBlock := fr.block(block.Succs[0])
 		falseBlock := fr.block(block.Succs[1])
@@ -675,17 +713,17 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Index:
 		// The optimiser will remove the alloca/store/load
 		// instructions if the array is already addressable.
-		array := fr.value(instr.X).value
+		array := fr.llvmvalue(instr.X)
 		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
 		fr.builder.CreateStore(array, arrayptr)
-		index := fr.value(instr.Index).value
+		index := fr.llvmvalue(instr.Index)
 		zero := llvm.ConstNull(index.Type())
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
 	case *ssa.IndexAddr:
-		x := fr.value(instr.X).value
-		index := fr.value(instr.Index).value
+		x := fr.llvmvalue(instr.X)
+		index := fr.llvmvalue(instr.Index)
 		var arrayptr, arraylen llvm.Value
 		var elemtyp types.Type
 		var errcode uint64
@@ -755,8 +793,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		receiver := fr.value(instr.X).value
-		fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
+		// fr.env[instr] will be set if a pointer load was elided by canAvoidLoad
+		if _, ok := fr.env[instr]; !ok {
+			receiver := fr.llvmvalue(instr.X)
+			fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
+		}
 
 	case *ssa.MakeMap:
 		fr.env[instr] = fr.makeMap(instr.Type(), fr.value(instr.Reserve))
@@ -804,7 +845,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	case *ssa.Return:
 		vals := make([]llvm.Value, len(instr.Results))
 		for i, res := range instr.Results {
-			vals[i] = fr.value(res).value
+			vals[i] = fr.llvmvalue(res)
 		}
 		fr.retInf.encode(llvm.GlobalContext(), fr.allocaBuilder, fr.builder, vals)
 
@@ -828,15 +869,16 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.chanSend(fr.value(instr.Chan), fr.value(instr.X))
 
 	case *ssa.Slice:
-		x := fr.value(instr.X)
-		low := fr.value(instr.Low)
-		high := fr.value(instr.High)
-		fr.env[instr] = fr.slice(x, low, high, instr.Type())
+		x := fr.llvmvalue(instr.X)
+		low := fr.llvmvalue(instr.Low)
+		high := fr.llvmvalue(instr.High)
+		slice := fr.slice(x, instr.X.Type(), low, high)
+		fr.env[instr] = newValue(slice, instr.Type())
 
 	case *ssa.Store:
-		addr := fr.value(instr.Addr).value
+		addr := fr.llvmvalue(instr.Addr)
 		fr.nilCheck(instr.Addr, addr)
-		value := fr.value(instr.Val).value
+		value := fr.llvmvalue(instr.Val)
 		// The bitcast is necessary to handle recursive pointer stores.
 		addr = fr.builder.CreateBitCast(addr, llvm.PointerType(value.Type(), 0), "")
 		fr.builder.CreateStore(value, addr)
@@ -862,9 +904,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			}
 		case token.MUL:
 			fr.nilCheck(instr.X, operand.value)
-			// The bitcast is necessary to handle recursive pointer loads.
-			llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
-			fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+			if !fr.canAvoidLoad(instr, operand.value) {
+				// The bitcast is necessary to handle recursive pointer loads.
+				llptr := fr.builder.CreateBitCast(operand.value, llvm.PointerType(fr.llvmtypes.ToLLVM(instr.Type()), 0), "")
+				fr.env[instr] = newValue(fr.builder.CreateLoad(llptr, ""), instr.Type())
+			}
 		default:
 			fr.env[instr] = fr.unaryOp(operand, instr.Op)
 		}
@@ -945,7 +989,7 @@ func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	var fn *govalue
 	if call.IsInvoke() {
 		var recv *govalue
-		fn, recv = fr.interfaceMethod(fr.value(call.Value), call.Method)
+		fn, recv = fr.interfaceMethod(fr.llvmvalue(call.Value), call.Value.Type(), call.Method)
 		args = append([]*govalue{recv}, args...)
 	} else {
 		if ssafn, ok := call.Value.(*ssa.Function); ok {
