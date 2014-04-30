@@ -5,8 +5,14 @@
 package llgo
 
 const (
-	version = "0.1"
+	goVersion = "go1.3"
+	version   = "0.1"
 )
+
+// GoVersion returns the version of Go that we are targeting.
+func GoVersion() string {
+	return goVersion
+}
 
 // Version returns the version of the llgo compiler.
 func Version() string {
