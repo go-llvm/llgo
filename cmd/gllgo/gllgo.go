@@ -56,8 +56,7 @@ const (
 	actionAssemble = actionKind(iota)
 	actionCompile
 	actionLink
-	actionPrintLibgcc
-	actionVersion
+	actionPrint
 )
 
 type action struct {
@@ -182,17 +181,17 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.output = args[1]
 			consumedArgs = 2
 
-		case args[0] == "-print-libgcc-file-name":
-			actionKind = actionPrintLibgcc
+		case args[0] == "-print-libgcc-file-name",
+			args[0] == "-print-multi-os-directory",
+			args[0] == "--version":
+			actionKind = actionPrint
+			opts.output = args[0]
 
 		case args[0] == "-static":
 			opts.staticLink = true
 
 		case args[0] == "-static-libgo":
 			opts.staticLibgo = true
-
-		case args[0] == "--version":
-			actionKind = actionVersion
 
 		default:
 			return opts, fmt.Errorf("unrecognized command line option '%s'", args[0])
@@ -201,7 +200,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		args = args[consumedArgs:]
 	}
 
-	if actionKind != actionVersion && actionKind != actionPrintLibgcc && len(goInputs) == 0 && !hasOtherNonFlagInputs {
+	if actionKind != actionPrint && len(goInputs) == 0 && !hasOtherNonFlagInputs {
 		return opts, errors.New("no input files")
 	}
 
@@ -217,7 +216,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.actions = []action{action{actionKind, goInputs}}
 		}
 
-	case actionVersion, actionPrintLibgcc:
+	case actionPrint:
 		opts.actions = []action{action{actionKind, nil}}
 	}
 
@@ -267,15 +266,23 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
-	case actionPrintLibgcc:
-		cmd := exec.Command("gcc", "-print-libgcc-file-name")
-		out, err := cmd.CombinedOutput()
-		os.Stdout.Write(out)
-		return err
-
-	case actionVersion:
-		displayVersion()
-		return nil
+	case actionPrint:
+		switch opts.output {
+		case "-print-libgcc-file-name":
+			cmd := exec.Command("gcc", "-print-libgcc-file-name")
+			out, err := cmd.CombinedOutput()
+			os.Stdout.Write(out)
+			return err
+		case "-print-multi-os-directory":
+			// TODO(pcc): Vary this for cross-compilation.
+			fmt.Println(".")
+			return nil
+		case "--version":
+			displayVersion()
+			return nil
+		default:
+			panic("unexpected print command")
+		}
 
 	case actionCompile, actionAssemble:
 		compiler, err := initCompiler(opts)
