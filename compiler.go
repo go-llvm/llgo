@@ -62,7 +62,8 @@ type CompilerOptions struct {
 	DumpSSA bool
 
 	// GccgoPath is the path to the gccgo binary whose libgo we read import
-	// data from
+	// data from. If blank, the caller is expected to supply an import
+	// path in ImportPaths.
 	GccgoPath string
 
 	// ImportPaths is the list of additional import paths
@@ -137,16 +138,25 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	var inst gccgoimporter.GccgoInstallation
-	err = inst.InitFromDriver(compiler.GccgoPath)
-	if err != nil {
-		return nil, err
-	}
+
 	initmap := make(map[*types.Package]gccgoimporter.InitData)
+	var importer types.Importer
+	if compiler.GccgoPath == "" {
+		paths := append(append([]string{}, compiler.ImportPaths...), ".")
+		importer = gccgoimporter.GetImporter(paths, initmap)
+	} else {
+		var inst gccgoimporter.GccgoInstallation
+		err = inst.InitFromDriver(compiler.GccgoPath)
+		if err != nil {
+			return nil, err
+		}
+		importer = inst.GetImporter(compiler.ImportPaths, initmap)
+	}
+
 	impcfg := &loader.Config{
 		Fset: token.NewFileSet(),
 		TypeChecker: types.Config{
-			Import: inst.GetImporter(compiler.ImportPaths, initmap),
+			Import: importer,
 			Sizes:  compiler.llvmtypes,
 		},
 		Build: &buildctx.Context,

@@ -89,7 +89,6 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 	var goInputs, otherInputs []string
 	hasOtherNonFlagInputs := false
 	actionKind := actionLink
-	opts.gccgoPath = "gccgo"
 	opts.triple = llvm.DefaultTargetTriple()
 
 	for len(args) > 0 {
@@ -270,7 +269,7 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
 	case actionPrintLibgcc:
-		cmd := exec.Command(opts.gccgoPath, "-print-libgcc-file-name")
+		cmd := exec.Command("gcc", "-print-libgcc-file-name")
 		out, err := cmd.CombinedOutput()
 		os.Stdout.Write(out)
 		return err
@@ -363,7 +362,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 
 	case actionLink:
-		// TODO(pcc): Teach this to link without depending on gccgo, and to do LTO.
+		// TODO(pcc): Teach this to do LTO.
 		args := []string{"-o", output}
 		if opts.pic {
 			args = append(args, "-fPIC")
@@ -371,15 +370,29 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		if opts.staticLink {
 			args = append(args, "-static")
 		}
-		if opts.staticLibgo {
-			args = append(args, "-static-libgo")
-		}
 		for _, p := range opts.libPaths {
 			args = append(args, "-L", p)
 		}
 		args = append(args, inputs...)
+		var linkerPath string
+		if opts.gccgoPath == "" {
+			// TODO(pcc): See if we can avoid calling gcc here.
+			// We currently rely on it to find crt*.o.
+			linkerPath = "gcc"
+			args = append(args, "-lgobegin")
+			if opts.staticLibgo {
+				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic")
+			} else {
+				args = append(args, "-lgo")
+			}
+		} else {
+			linkerPath = "gccgo"
+			if opts.staticLibgo {
+				args = append(args, "-static-libgo")
+			}
+		}
 
-		cmd := exec.Command(opts.gccgoPath, args...)
+		cmd := exec.Command(linkerPath, args...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			os.Stderr.Write(out)
