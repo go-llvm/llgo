@@ -87,6 +87,7 @@ type driverOptions struct {
 
 func parseArguments(args []string) (opts driverOptions, err error) {
 	var goInputs, otherInputs []string
+	hasOtherNonFlagInputs := false
 	actionKind := actionLink
 	opts.gccgoPath = "gccgo"
 	opts.triple = llvm.DefaultTargetTriple()
@@ -99,6 +100,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			if strings.HasSuffix(args[0], ".go") {
 				goInputs = append(goInputs, args[0])
 			} else {
+				hasOtherNonFlagInputs = true
 				otherInputs = append(otherInputs, args[0])
 			}
 
@@ -201,7 +203,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		args = args[consumedArgs:]
 	}
 
-	if actionKind != actionVersion && actionKind != actionPrintLibgcc && len(goInputs) == 0 && len(otherInputs) == 0 {
+	if actionKind != actionVersion && actionKind != actionPrintLibgcc && len(goInputs) == 0 && !hasOtherNonFlagInputs {
 		return opts, errors.New("no input files")
 	}
 
