@@ -7,31 +7,20 @@ llgo is under active development, but is still considered experimental. It is no
 
 # Installation
 
-To install llgo, use llgo-dist:
+To install llgo, use make:
 
-    go get github.com/go-llvm/llgo/cmd/llgo-dist
-    llgo-dist
+    go get github.com/go-llvm/llgo
+    cd $GOPATH/src/github.com/go-llvm/llgo
+    make install prefix=/path/to/prefix
 
-You should have the latest version of LLVM in your $PATH (3.3 has been confirmed to be compatible). If LLVM is not in $PATH, llgo-dist also has a flag that can specified to point at the LLVM installation: `-llvm-config=<path/to/llvm-config>`.
+You may need to build LLVM. See GoLLVM's README.md for more information.
 
-llgo requires Go 1.2+.
+llgo requires Go 1.3, or Go 1.2 with a [bug fix](https://codereview.appspot.com/96790047/) applied. See also README.patches for a list of additional patches to apply.
 
 # Running
 
-llgo-dist builds two binaries: there's `llgo`, the compiler; and there's `llgo-build`, which is a poor man's `go build` for llgo.
+We install two binaries to `$prefix/bin`: `llgo` and `llgo-go`.
 
-The compiler is comparable with `6g`: it takes a set of Go source files as arguments, and produces an object file. The output is an LLVM bitcode module. There are several flags that alter the behaviour: `-triple=<triple>` specifies the target LLVM triple to compile for; `-dump` causes llgo to dump the module in its textual IR form instead of generating bitcode.
+`llgo` is the compiler binary. It has a command line interface that is intended to be compatible to a large extent with `gccgo`.
 
-The `llgo-build` tool accepts either Go filenames, or package names, just like `go build`. If the package is a command, then `llgo-build` will compile it, link in its dependencies, and translate the LLVM bitcode to a native binary. If you want an untranslated module, specify the `-emit-llvm` flag.
-
-`llgo-build` has some additional flags for testing: `-run` causes `llgo-build` to execute and dispose of the resultant binary. Passing `-test` causes `llgo-build` to generate a test program for the specified package, just like `go test -c`.
-
-# Testing
-
-First install llgo using `llgo-dist`, as described above. Then you can run the functional tests like so:
-
-	go test -v github.com/go-llvm/llgo/llgo
-
-You can also run the compiler tests from gc's source tree ($GOROOT/test) by specifying the build tag `go_test`:
-
-	go test -v -tags go_test github.com/go-llvm/llgo/llgo -run StandardTests
+`llgo-go` is a command line wrapper for `go`. It works like the regular `go` command except that it uses llgo to build.
