@@ -55,6 +55,9 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 			llelemtyp := u.llvmtypes.ToLLVM(deref(v.Type()))
 			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
+			if !v.Object().Exported() {
+				global.SetLinkage(llvm.InternalLinkage)
+			}
 			global = llvm.ConstBitCast(global, u.llvmtypes.ToLLVM(v.Type()))
 			u.globals[v] = global
 		case *ssa.Type:
