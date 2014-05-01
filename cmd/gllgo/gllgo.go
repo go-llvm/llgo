@@ -40,12 +40,18 @@ func displayVersion() {
 }
 
 func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
+	importPaths := make([]string, len(opts.importPaths)+len(opts.libPaths))
+	copy(importPaths, opts.importPaths)
+	copy(importPaths[len(opts.importPaths):], opts.libPaths)
+	if opts.prefix != "" {
+		importPaths = append(importPaths, filepath.Join(opts.prefix, "lib", "go"))
+	}
 	copts := llgo.CompilerOptions{
 		TargetTriple:  opts.triple,
 		GenerateDebug: opts.generateDebug,
 		DumpSSA:       opts.dumpSSA,
 		GccgoPath:     opts.gccgoPath,
-		ImportPaths:   append(append([]string{}, opts.importPaths...), opts.libPaths...),
+		ImportPaths:   importPaths,
 	}
 	return llgo.NewCompiler(copts)
 }
@@ -77,15 +83,32 @@ type driverOptions struct {
 	optLevel      int
 	pic           bool
 	pkgpath       string
+	prefix        string
 	sizeLevel     int
 	staticLibgo   bool
 	staticLink    bool
 	triple        string
 }
 
+func getInstPrefix() (string, error) {
+	path, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		return "", err
+	}
+
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	prefix := filepath.Join(path, "..", "..")
+	return prefix, nil
+}
+
 func parseArguments(args []string) (opts driverOptions, err error) {
 	var goInputs, otherInputs []string
 	hasOtherNonFlagInputs := false
+	noPrefix := false
 	actionKind := actionLink
 	opts.triple = llvm.DefaultTargetTriple()
 
@@ -174,6 +197,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations":
 			// TODO(pcc): Handle code generation options.
 
+		case args[0] == "-no-prefix":
+			noPrefix = true
+
 		case args[0] == "-o":
 			if len(args) == 1 {
 				return opts, errors.New("missing path after '-o'")
@@ -202,6 +228,13 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 	if actionKind != actionPrint && len(goInputs) == 0 && !hasOtherNonFlagInputs {
 		return opts, errors.New("no input files")
+	}
+
+	if !noPrefix {
+		opts.prefix, err = getInstPrefix()
+		if err != nil {
+			return opts, err
+		}
 	}
 
 	switch actionKind {
@@ -385,6 +418,15 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			// TODO(pcc): See if we can avoid calling gcc here.
 			// We currently rely on it to find crt*.o.
 			linkerPath = "gcc"
+
+			if opts.prefix != "" {
+				libdir := filepath.Join(opts.prefix, "lib")
+				args = append(args, "-L", libdir)
+				if !opts.staticLibgo {
+					args = append(args, "-Wl,-rpath,"+libdir)
+				}
+			}
+
 			args = append(args, "-lgobegin")
 			if opts.staticLibgo {
 				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic")
