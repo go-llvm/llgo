@@ -254,7 +254,7 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 	pmb.SetSizeLevel(opts.sizeLevel)
 
 	pmb.Populate(mpm)
-	pmb.PopulateFunc(mpm)
+	pmb.PopulateFunc(fpm)
 
 	fpm.InitializeFunc()
 	for fn := m.FirstFunction(); !fn.IsNil(); fn = llvm.NextFunction(fn) {
