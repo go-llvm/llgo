@@ -45,13 +45,55 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 	return u
 }
 
+type byMemberName []ssa.Member
+
+func (ms byMemberName) Len() int { return len(ms) }
+func (ms byMemberName) Swap(i, j int) {
+	ms[i], ms[j] = ms[j], ms[i]
+}
+func (ms byMemberName) Less(i, j int) bool {
+	return ms[i].Name() < ms[j].Name()
+}
+
+type byFunctionString []*ssa.Function
+
+func (fns byFunctionString) Len() int { return len(fns) }
+func (fns byFunctionString) Swap(i, j int) {
+	fns[i], fns[j] = fns[j], fns[i]
+}
+func (fns byFunctionString) Less(i, j int) bool {
+	return fns[i].String() < fns[j].String()
+}
+
+// Emit functions in order of their fully qualified names. This is so that a
+// bootstrap build can be verified by comparing the stage2 and stage3 binaries.
+func (u *unit) defineFunctionsInOrder(functions map[*ssa.Function]bool) {
+	fns := []*ssa.Function{}
+	for f, _ := range functions {
+		fns = append(fns, f)
+	}
+	sort.Sort(byFunctionString(fns))
+	for _, f := range fns {
+		u.defineFunction(f)
+	}
+}
+
 // translatePackage translates an *ssa.Package into an LLVM module, and returns
 // the translation unit information.
 func (u *unit) translatePackage(pkg *ssa.Package) {
+	ms := make([]ssa.Member, len(pkg.Members))
+	i := 0
+	for _, m := range pkg.Members {
+		ms[i] = m
+		i++
+	}
+
+	sort.Sort(byMemberName(ms))
+
 	// Initialize global storage and type descriptors for this package.
 	// We must create globals regardless of whether they're referenced,
 	// hence the duplication in frame.value.
-	for _, m := range pkg.Members {
+	for _, m := range ms {
 		switch v := m.(type) {
 		case *ssa.Global:
 			elemtyp := deref(v.Type())
@@ -70,22 +112,7 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	}
 
 	// Define functions.
-	// Sort if flag is set for deterministic behaviour (for debugging)
-	functions := ssautil.AllFunctions(pkg.Prog)
-	if !u.compiler.OrderedCompilation {
-		for f, _ := range functions {
-			u.defineFunction(f)
-		}
-	} else {
-		fns := []*ssa.Function{}
-		for f, _ := range functions {
-			fns = append(fns, f)
-		}
-		sort.Sort(byName(fns))
-		for _, f := range fns {
-			u.defineFunction(f)
-		}
-	}
+	u.defineFunctionsInOrder(ssautil.AllFunctions(pkg.Prog))
 
 	// Emit initializers for type descriptors, which may trigger
 	// the resolution of additional functions.
@@ -93,9 +120,7 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 
 	// Define remaining functions that were resolved during
 	// runtime type mapping, but not defined.
-	for f, _ := range u.undefinedFuncs {
-		u.defineFunction(f)
-	}
+	u.defineFunctionsInOrder(u.undefinedFuncs)
 }
 
 func (u *unit) maybeAddGcRoot(global llvm.Value, ty types.Type) {

@@ -194,9 +194,6 @@ func initCompiler() (*llgo.Compiler, error) {
 	if *trace || os.Getenv("LLGO_TRACE") == "1" {
 		opts.Logger = log.New(os.Stderr, "", 0)
 	}
-	if os.Getenv("LLGO_ORDERED_COMPILATION") == "1" {
-		opts.OrderedCompilation = true
-	}
 	opts.GenerateDebug = *generateDebug
 	opts.GccgoPath = *gccgoPath
 	opts.ImportPaths = []string(importpaths)
