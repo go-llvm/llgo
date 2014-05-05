@@ -623,6 +623,9 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) 
 		pkgobj = pkg.Object
 	} else if f.Signature.Recv() != nil {
 		pkgobj = f.Signature.Recv().Pkg()
+	} else {
+		b.WriteString(f.String())
+		return
 	}
 
 	if pkg != nil {

@@ -169,19 +169,9 @@ func (u *unit) getFunctionLinkage(f *ssa.Function) llvm.Linkage {
 }
 
 func (u *unit) defineFunction(f *ssa.Function) {
-	// Only define functions from this package.
-	if f.Pkg == nil {
-		if r := f.Signature.Recv(); r != nil {
-			if r.Pkg() != nil && r.Pkg() != u.pkg.Object {
-				return
-			} else if named, ok := r.Type().(*types.Named); ok && named.Obj().Parent() == types.Universe {
-				// This condition is true iff f is error.Error.
-				if u.pkg.Object.Path() != "runtime" {
-					return
-				}
-			}
-		}
-	} else if f.Pkg != u.pkg {
+	// Only define functions from this package, or synthetic
+	// wrappers (which do not have a package).
+	if f.Pkg != nil && f.Pkg != u.pkg {
 		return
 	}
 
