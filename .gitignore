@@ -10,3 +10,4 @@ cmd/llgo-dist/llgo-dist
 cmd/llgo-build/llgo-build
 llgo/llgo
 llgo/gotest.out*
+workdir

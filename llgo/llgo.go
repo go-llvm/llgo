@@ -92,7 +92,7 @@ func writeObjectFile(m *llgo.Module) error {
 }
 
 func displayVersion() {
-	fmt.Printf("llgo version %s (Go %s)\n", llgo.Version(), runtime.Version())
+	fmt.Printf("llgo version %s (%s)\n", llgo.Version(), llgo.GoVersion())
 	fmt.Println()
 
 	fmt.Println("  Available targets:")

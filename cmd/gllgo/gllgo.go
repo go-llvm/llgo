@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/go-llvm/llgo"
@@ -35,18 +34,24 @@ func report(err error) {
 }
 
 func displayVersion() {
-	fmt.Printf("llgo version %s (Go %s)\n", llgo.Version(), runtime.Version())
+	fmt.Printf("llgo version %s (%s)\n", llgo.Version(), llgo.GoVersion())
 	fmt.Println()
 	os.Exit(0)
 }
 
 func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
+	importPaths := make([]string, len(opts.importPaths)+len(opts.libPaths))
+	copy(importPaths, opts.importPaths)
+	copy(importPaths[len(opts.importPaths):], opts.libPaths)
+	if opts.prefix != "" {
+		importPaths = append(importPaths, filepath.Join(opts.prefix, "lib", "go"))
+	}
 	copts := llgo.CompilerOptions{
 		TargetTriple:  opts.triple,
 		GenerateDebug: opts.generateDebug,
 		DumpSSA:       opts.dumpSSA,
 		GccgoPath:     opts.gccgoPath,
-		ImportPaths:   append(append([]string{}, opts.importPaths...), opts.libPaths...),
+		ImportPaths:   importPaths,
 	}
 	return llgo.NewCompiler(copts)
 }
@@ -57,8 +62,7 @@ const (
 	actionAssemble = actionKind(iota)
 	actionCompile
 	actionLink
-	actionPrintLibgcc
-	actionVersion
+	actionPrint
 )
 
 type action struct {
@@ -79,16 +83,33 @@ type driverOptions struct {
 	optLevel      int
 	pic           bool
 	pkgpath       string
+	prefix        string
 	sizeLevel     int
 	staticLibgo   bool
 	staticLink    bool
 	triple        string
 }
 
+func getInstPrefix() (string, error) {
+	path, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		return "", err
+	}
+
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	prefix := filepath.Join(path, "..", "..")
+	return prefix, nil
+}
+
 func parseArguments(args []string) (opts driverOptions, err error) {
 	var goInputs, otherInputs []string
+	hasOtherNonFlagInputs := false
+	noPrefix := false
 	actionKind := actionLink
-	opts.gccgoPath = "gccgo"
 	opts.triple = llvm.DefaultTargetTriple()
 
 	for len(args) > 0 {
@@ -99,6 +120,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			if strings.HasSuffix(args[0], ".go") {
 				goInputs = append(goInputs, args[0])
 			} else {
+				hasOtherNonFlagInputs = true
 				otherInputs = append(otherInputs, args[0])
 			}
 
@@ -175,6 +197,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations":
 			// TODO(pcc): Handle code generation options.
 
+		case args[0] == "-no-prefix":
+			noPrefix = true
+
 		case args[0] == "-o":
 			if len(args) == 1 {
 				return opts, errors.New("missing path after '-o'")
@@ -182,17 +207,17 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.output = args[1]
 			consumedArgs = 2
 
-		case args[0] == "-print-libgcc-file-name":
-			actionKind = actionPrintLibgcc
+		case args[0] == "-print-libgcc-file-name",
+			args[0] == "-print-multi-os-directory",
+			args[0] == "--version":
+			actionKind = actionPrint
+			opts.output = args[0]
 
 		case args[0] == "-static":
 			opts.staticLink = true
 
 		case args[0] == "-static-libgo":
 			opts.staticLibgo = true
-
-		case args[0] == "--version":
-			actionKind = actionVersion
 
 		default:
 			return opts, fmt.Errorf("unrecognized command line option '%s'", args[0])
@@ -201,8 +226,15 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		args = args[consumedArgs:]
 	}
 
-	if actionKind != actionVersion && actionKind != actionPrintLibgcc && len(goInputs) == 0 && len(otherInputs) == 0 {
+	if actionKind != actionPrint && len(goInputs) == 0 && !hasOtherNonFlagInputs {
 		return opts, errors.New("no input files")
+	}
+
+	if !noPrefix {
+		opts.prefix, err = getInstPrefix()
+		if err != nil {
+			return opts, err
+		}
 	}
 
 	switch actionKind {
@@ -217,7 +249,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.actions = []action{action{actionKind, goInputs}}
 		}
 
-	case actionVersion, actionPrintLibgcc:
+	case actionPrint:
 		opts.actions = []action{action{actionKind, nil}}
 	}
 
@@ -267,15 +299,23 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
-	case actionPrintLibgcc:
-		cmd := exec.Command(opts.gccgoPath, "-print-libgcc-file-name")
-		out, err := cmd.CombinedOutput()
-		os.Stdout.Write(out)
-		return err
-
-	case actionVersion:
-		displayVersion()
-		return nil
+	case actionPrint:
+		switch opts.output {
+		case "-print-libgcc-file-name":
+			cmd := exec.Command("gcc", "-print-libgcc-file-name")
+			out, err := cmd.CombinedOutput()
+			os.Stdout.Write(out)
+			return err
+		case "-print-multi-os-directory":
+			// TODO(pcc): Vary this for cross-compilation.
+			fmt.Println(".")
+			return nil
+		case "--version":
+			displayVersion()
+			return nil
+		default:
+			panic("unexpected print command")
+		}
 
 	case actionCompile, actionAssemble:
 		compiler, err := initCompiler(opts)
@@ -361,7 +401,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 
 	case actionLink:
-		// TODO(pcc): Teach this to link without depending on gccgo, and to do LTO.
+		// TODO(pcc): Teach this to do LTO.
 		args := []string{"-o", output}
 		if opts.pic {
 			args = append(args, "-fPIC")
@@ -369,15 +409,38 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		if opts.staticLink {
 			args = append(args, "-static")
 		}
-		if opts.staticLibgo {
-			args = append(args, "-static-libgo")
-		}
 		for _, p := range opts.libPaths {
 			args = append(args, "-L", p)
 		}
 		args = append(args, inputs...)
+		var linkerPath string
+		if opts.gccgoPath == "" {
+			// TODO(pcc): See if we can avoid calling gcc here.
+			// We currently rely on it to find crt*.o.
+			linkerPath = "gcc"
 
-		cmd := exec.Command(opts.gccgoPath, args...)
+			if opts.prefix != "" {
+				libdir := filepath.Join(opts.prefix, "lib")
+				args = append(args, "-L", libdir)
+				if !opts.staticLibgo {
+					args = append(args, "-Wl,-rpath,"+libdir)
+				}
+			}
+
+			args = append(args, "-lgobegin")
+			if opts.staticLibgo {
+				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic")
+			} else {
+				args = append(args, "-lgo")
+			}
+		} else {
+			linkerPath = "gccgo"
+			if opts.staticLibgo {
+				args = append(args, "-static-libgo")
+			}
+		}
+
+		cmd := exec.Command(linkerPath, args...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			os.Stderr.Write(out)
