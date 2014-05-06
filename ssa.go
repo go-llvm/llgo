@@ -216,9 +216,14 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	llfn := u.resolveFunctionGlobal(f)
 	linkage := u.getFunctionLinkage(f)
 
-	llfd := u.resolveFunctionDescriptorGlobal(f)
-	llfd.SetInitializer(llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0)))
-	llfd.SetLinkage(linkage)
+	isMethod := f.Signature.Recv() != nil
+
+	// Methods cannot be referred to via a descriptor.
+	if !isMethod {
+		llfd := u.resolveFunctionDescriptorGlobal(f)
+		llfd.SetInitializer(llvm.ConstBitCast(llfn, llvm.PointerType(llvm.Int8Type(), 0)))
+		llfd.SetLinkage(linkage)
+	}
 
 	// We only need to emit a descriptor for functions without bodies.
 	if len(f.Blocks) == 0 {
@@ -264,8 +269,6 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	prologueBlock := llvm.InsertBasicBlock(fr.blocks[0], "prologue")
 	fr.builder.SetInsertPointAtEnd(prologueBlock)
-
-	isMethod := f.Signature.Recv() != nil
 
 	// Map parameter positions to indices. We use this
 	// when processing locals to map back to parameters
