@@ -31,7 +31,7 @@ mkdir -p $gofrontenddir/include
 mkdir -p $gofrontenddir/libgcc
 for f in config.guess config-ml.in config.sub depcomp \
   install-sh ltmain.sh missing move-if-change \
-  include/dwarf2.{def,h} libgcc/unwind-pe.h ; do
+  include/dwarf2.def include/dwarf2.h libgcc/unwind-pe.h ; do
   svn cat -r $gccrev $gccrepo/$f > $gofrontenddir/$f
 done
 
