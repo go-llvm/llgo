@@ -812,9 +812,25 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		// instructions if the array is already addressable.
 		array := fr.llvmvalue(instr.X)
 		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
+		arraytyp := instr.X.Type().Underlying().(*types.Array)
+		arraylen := llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
+
 		fr.builder.CreateStore(array, arrayptr)
 		index := fr.llvmvalue(instr.Index)
-		zero := llvm.ConstNull(index.Type())
+
+		// The index may not have been promoted to int (for example, if it
+		// came from a composite literal).
+		index = fr.createZExtOrTrunc(index, fr.types.inttype, "")
+
+		// Bounds checking: 0 <= index < len
+		zero := llvm.ConstNull(fr.types.inttype)
+		i0 := fr.builder.CreateICmp(llvm.IntSLT, index, zero, "")
+		li := fr.builder.CreateICmp(llvm.IntSLE, arraylen, index, "")
+
+		cond := fr.builder.CreateOr(i0, li, "")
+
+		fr.condBrRuntimeError(cond, gccgoRuntimeErrorARRAY_INDEX_OUT_OF_BOUNDS)
+
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
 		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
 
