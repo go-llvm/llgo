@@ -194,7 +194,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-g":
 			opts.generateDebug = true
 
-		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations":
+		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations", args[0] == "-ffp-contract=off":
 			// TODO(pcc): Handle code generation options.
 
 		case args[0] == "-no-prefix":
