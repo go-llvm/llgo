@@ -20,6 +20,13 @@ quick | full)
   ;;
 esac
 
+configure_flags="--disable-multilib --without-libatomic"
+
+# Wrap Clang in a program that understands -fgo-dump-spec and -fplan9-extensions.
+(cd $llgodir/cmd/cc-wrapper && go build -o $workdir/cc-wrapper)
+libgo_wrapped_cc="$(echo "${LIBGO_CC:-$workdir/clang_build/bin/clang}" | sed -e 's/ /@SPACE@/g')"
+libgo_cc="env REAL_CC=${libgo_wrapped_cc} $workdir/cc-wrapper"
+
 # Clean up any previous libgo stages.
 rm -rf $gofrontend_builddir/libgo*
 
@@ -28,7 +35,7 @@ rm -rf $gofrontend_builddir/libgo*
 
 # Build libgo with the stage1 compiler.
 mkdir -p $gofrontend_builddir/libgo-stage1
-(cd $gofrontend_builddir/libgo-stage1 && $gofrontenddir/libgo/configure GOC="$workdir/gllgo-stage1 -no-prefix")
+(cd $gofrontend_builddir/libgo-stage1 && $gofrontenddir/libgo/configure $configure_flags CC="$libgo_cc" GOC="$workdir/gllgo-stage1 -no-prefix")
 make -C $gofrontend_builddir/libgo-stage1 "$@"
 
 # Set up a directory which when added to $PATH causes "gccgo" to resolve
@@ -47,7 +54,7 @@ gllgoflags="-no-prefix -L$gofrontend_builddir/libgo-stage1 -L$gofrontend_builddi
 if [ "$bootstrap_type" == "full" ] ; then
   # Build libgo with the stage2 compiler.
   mkdir -p $gofrontend_builddir/libgo-stage2
-  (cd $gofrontend_builddir/libgo-stage2 && $gofrontenddir/libgo/configure GOC="$workdir/gllgo-stage2 -no-prefix")
+  (cd $gofrontend_builddir/libgo-stage2 && $gofrontenddir/libgo/configure $configure_flags CC="$libgo_cc" GOC="$workdir/gllgo-stage2 -no-prefix")
   make -C $gofrontend_builddir/libgo-stage2 "$@"
 
   # Set up $gllgoflags to use the stage2 libgo.
