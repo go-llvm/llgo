@@ -194,7 +194,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-g":
 			opts.generateDebug = true
 
-		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations":
+		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations", args[0] == "-ffp-contract=off":
 			// TODO(pcc): Handle code generation options.
 
 		case args[0] == "-no-prefix":
@@ -429,12 +429,12 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 			args = append(args, "-lgobegin")
 			if opts.staticLibgo {
-				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic")
+				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic", "-lpthread", "-lm")
 			} else {
 				args = append(args, "-lgo")
 			}
 		} else {
-			linkerPath = "gccgo"
+			linkerPath = opts.gccgoPath
 			if opts.staticLibgo {
 				args = append(args, "-static-libgo")
 			}
