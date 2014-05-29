@@ -633,7 +633,11 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) 
 		ctx.manglePackagePath(pkgobj.Path(), b)
 		b.WriteRune('.')
 	}
-	b.WriteString(f.Name())
+	if f.Signature.Recv() == nil && f.Name() == "init" {
+		b.WriteString(".import")
+	} else {
+		b.WriteString(f.Name())
+	}
 	if f.Signature.Recv() != nil {
 		b.WriteRune('.')
 		ctx.mangleType(f.Signature.Recv().Type(), b)

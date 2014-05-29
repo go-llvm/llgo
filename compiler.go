@@ -178,7 +178,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	program := ssa.Create(iprog, ssa.GccgoImport)
+	program := ssa.Create(iprog, ssa.BareInits)
 	mainPkginfo := iprog.InitialPackages()[0]
 	mainPkg := program.CreatePackage(mainPkginfo)
 
@@ -280,7 +280,7 @@ func (c *compiler) buildPackageInitData(mainPkg *ssa.Package, initmap map[*types
 		ourprio = uniqinits[len(uniqinits)-1].Priority + 1
 	}
 
-	if imp := mainPkg.Func(".import"); imp != nil {
+	if imp := mainPkg.Func("init"); imp != nil {
 		var b bytes.Buffer
 		c.types.mc.mangleFunctionName(imp, &b)
 		uniqinits = append(uniqinits, gccgoimporter.PackageInit{mainPkg.Object.Name(), b.String(), ourprio})
