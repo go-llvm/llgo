@@ -196,7 +196,7 @@ func (u *unit) getFunctionLinkage(f *ssa.Function) llvm.Linkage {
 
 	case f.Signature.Recv() == nil && !ast.IsExported(f.Name()) &&
 		!(f.Name() == "main" && f.Pkg.Object.Path() == "main") &&
-		f.Name() != ".import":
+		f.Name() != "init":
 		// Unexported methods may be referenced as part of an interface method
 		// table in another package. TODO(pcc): detect when this cannot happen.
 		return llvm.InternalLinkage
@@ -322,8 +322,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		}
 	}
 
-	// If this is the ".import" function, enable init-specific optimizations.
-	if f.Name() == ".import" {
+	// If this is the "init" function, enable init-specific optimizations.
+	if !isMethod && f.Name() == "init" {
 		fr.isInit = true
 	}
 
