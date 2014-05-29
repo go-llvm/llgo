@@ -429,7 +429,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 			args = append(args, "-lgobegin")
 			if opts.staticLibgo {
-				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic")
+				args = append(args, "-Wl,-Bstatic", "-lgo", "-Wl,-Bdynamic", "-lpthread", "-lm")
 			} else {
 				args = append(args, "-lgo")
 			}
