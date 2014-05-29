@@ -434,7 +434,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 				args = append(args, "-lgo")
 			}
 		} else {
-			linkerPath = "gccgo"
+			linkerPath = opts.gccgoPath
 			if opts.staticLibgo {
 				args = append(args, "-static-libgo")
 			}
