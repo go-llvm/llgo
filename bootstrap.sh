@@ -64,8 +64,8 @@ ln -sf $workdir/gllgo-stage2 $gofrontend_builddir/stage2-path/gccgo
 
 # Strip the compiler binaries. The binaries are currently only
 # expected to compare equal modulo debug info.
-strip -o $workdir/gllgo-stage2.stripped $workdir/gllgo-stage2
-strip -o $workdir/gllgo-stage3.stripped $workdir/gllgo-stage3
+strip -R .note.gnu.build-id -o $workdir/gllgo-stage2.stripped $workdir/gllgo-stage2
+strip -R .note.gnu.build-id -o $workdir/gllgo-stage3.stripped $workdir/gllgo-stage3
 
 cmp $workdir/gllgo-stage2.stripped $workdir/gllgo-stage3.stripped && \
 echo "Bootstrap completed successfully" && touch $workdir/.bootstrap-stamp && exit 0 || \
