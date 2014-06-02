@@ -302,7 +302,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		for i, fv := range f.FreeVars {
 			ptr := fr.builder.CreateStructGEP(closure, i+1, "")
 			ptr = fr.builder.CreateLoad(ptr, "")
-			fr.env[fv] = newValue(ptr, types.NewPointer(fv.Type()))
+			fr.env[fv] = newValue(ptr, fv.Type())
 		}
 	}
 
