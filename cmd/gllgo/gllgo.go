@@ -80,10 +80,12 @@ type driverOptions struct {
 	generateDebug bool
 	importPaths   []string
 	libPaths      []string
+	llvmArgs      []string
 	lto           bool
 	optLevel      int
 	pic           bool
 	pkgpath       string
+	plugins       []string
 	prefix        string
 	sizeLevel     int
 	staticLibgcc  bool
@@ -195,6 +197,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-fgo-relative-import-path="):
 			// TODO(pcc): Handle this.
 
+		case args[0] == "-fload-plugin":
+			opts.plugins = append(opts.plugins, args[1])
+			consumedArgs = 2
+
 		case args[0] == "-fno-toplevel-reorder":
 			// This is a GCC-specific code generation option. Ignore.
 
@@ -206,6 +212,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case args[0] == "-g":
 			opts.generateDebug = true
+
+		case args[0] == "-mllvm":
+			opts.llvmArgs = append(opts.llvmArgs, args[1])
+			consumedArgs = 2
 
 		case strings.HasPrefix(args[0], "-m"), args[0] == "-funsafe-math-optimizations", args[0] == "-ffp-contract=off":
 			// TODO(pcc): Handle code generation options.
@@ -476,6 +486,15 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 func performActions(opts *driverOptions) error {
 	var extraInput string
+
+	for _, plugin := range opts.plugins {
+		err := llvm.LoadLibraryPermanently(plugin)
+		if err != nil {
+			return err
+		}
+	}
+
+	llvm.ParseCommandLineOptions(append([]string{"llgo"}, opts.llvmArgs...), "llgo (LLVM option parsing)\n")
 
 	for i, action := range opts.actions {
 		var output string
