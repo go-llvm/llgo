@@ -10,6 +10,7 @@ func TestMethodSelectors(t *testing.T)   { checkOutputEqual(t, "methods/selector
 func TestNilReceiverMethod(t *testing.T) { checkOutputEqual(t, "methods/nilrecv.go") }
 func TestMethodValues(t *testing.T)      { checkOutputEqual(t, "methods/methodvalues.go") }
 func TestClosure(t *testing.T)           { checkOutputEqual(t, "closures/basic.go") }
+func TestClosureIssue176(t *testing.T)   { checkOutputEqual(t, "closures/issue176.go") }
 func TestCompare(t *testing.T)           { checkOutputEqual(t, "functions/compare.go") }
 func TestMultiValueCall(t *testing.T)    { checkOutputEqual(t, "functions/multivalue.go") }
 func TestUnreachableCode(t *testing.T)   { checkOutputEqual(t, "functions/unreachable.go") }
