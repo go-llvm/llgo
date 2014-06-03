@@ -97,7 +97,8 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 		case *ssa.Global:
 			elemtyp := deref(v.Type())
 			llelemtyp := u.llvmtypes.ToLLVM(elemtyp)
-			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
+			vname := u.types.mc.mangleGlobalName(v)
+			global := llvm.AddGlobal(u.module.Module, llelemtyp, vname)
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			if !v.Object().Exported() {
 				global.SetLinkage(llvm.InternalLinkage)
@@ -562,7 +563,8 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
 		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
-		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
+		vname := fr.types.mc.mangleGlobalName(v)
+		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, vname)
 		llglobal = llvm.ConstBitCast(llglobal, fr.llvmtypes.ToLLVM(v.Type()))
 		fr.globals[v] = llglobal
 		return newValue(llglobal, v.Type())

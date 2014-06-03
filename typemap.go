@@ -648,6 +648,16 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function) string {
 	return b.String()
 }
 
+func (ctx *manglerContext) mangleGlobalName(g *ssa.Global) string {
+	var b bytes.Buffer
+
+	ctx.manglePackagePath(g.Pkg.Object.Path(), &b)
+	b.WriteRune('.')
+	b.WriteString(g.Name())
+
+	return b.String()
+}
+
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	switch t.Underlying().(type) {
 	case *types.Basic:
