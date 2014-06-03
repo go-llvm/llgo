@@ -74,6 +74,7 @@ type driverOptions struct {
 	actions []action
 	output  string
 
+	bprefix       string
 	dumpSSA       bool
 	gccgoPath     string
 	generateDebug bool
@@ -127,6 +128,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"):
 			// TODO(pcc): Handle these correctly.
 			otherInputs = append(otherInputs, args[0])
+
+		case args[0] == "-B":
+			opts.bprefix = args[1]
+			consumedArgs = 2
 
 		case args[0] == "-I":
 			if len(args) == 1 {
@@ -302,7 +307,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 	case actionPrint:
 		switch opts.output {
 		case "-print-libgcc-file-name":
-			cmd := exec.Command("gcc", "-print-libgcc-file-name")
+			cmd := exec.Command(opts.bprefix+"gcc", "-print-libgcc-file-name")
 			out, err := cmd.CombinedOutput()
 			os.Stdout.Write(out)
 			return err
@@ -417,7 +422,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		if opts.gccgoPath == "" {
 			// TODO(pcc): See if we can avoid calling gcc here.
 			// We currently rely on it to find crt*.o.
-			linkerPath = "gcc"
+			linkerPath = opts.bprefix + "gcc"
 
 			if opts.prefix != "" {
 				libdir := filepath.Join(opts.prefix, "lib")
