@@ -5,7 +5,6 @@
 package llgo
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -145,9 +144,7 @@ func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 func (u *unit) resolveFunctionDescriptorGlobal(f *ssa.Function) llvm.Value {
 	llfd, ok := u.funcDescriptors[f]
 	if !ok {
-		var b bytes.Buffer
-		u.types.mc.mangleFunctionName(f, &b)
-		name := b.String() + "$descriptor"
+		name := u.types.mc.mangleFunctionName(f) + "$descriptor"
 		llfd = llvm.AddGlobal(u.module.Module, llvm.PointerType(llvm.Int8Type(), 0), name)
 		llfd.SetGlobalConstant(true)
 		u.funcDescriptors[f] = llfd
@@ -168,9 +165,7 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
-	var b bytes.Buffer
-	u.types.mc.mangleFunctionName(f, &b)
-	name := b.String()
+	name := u.types.mc.mangleFunctionName(f)
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
