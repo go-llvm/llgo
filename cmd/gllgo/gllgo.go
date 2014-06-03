@@ -86,6 +86,7 @@ type driverOptions struct {
 	pkgpath       string
 	prefix        string
 	sizeLevel     int
+	staticLibgcc  bool
 	staticLibgo   bool
 	staticLink    bool
 	triple        string
@@ -220,6 +221,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case args[0] == "-static":
 			opts.staticLink = true
+
+		case args[0] == "-static-libgcc":
+			opts.staticLibgcc = true
 
 		case args[0] == "-static-libgo":
 			opts.staticLibgo = true
@@ -413,6 +417,9 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 		if opts.staticLink {
 			args = append(args, "-static")
+		}
+		if opts.staticLibgcc {
+			args = append(args, "-static-libgcc")
 		}
 		for _, p := range opts.libPaths {
 			args = append(args, "-L", p)
