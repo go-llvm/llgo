@@ -126,7 +126,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 				otherInputs = append(otherInputs, args[0])
 			}
 
-		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"):
+		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"), strings.HasPrefix(args[0], "--sysroot="):
 			// TODO(pcc): Handle these correctly.
 			otherInputs = append(otherInputs, args[0])
 
