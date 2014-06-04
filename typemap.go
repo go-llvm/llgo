@@ -608,14 +608,16 @@ func (ctx *manglerContext) mangleImtName(srctype types.Type, targettype *types.I
 	ctx.mangleType(srctype, b)
 }
 
-func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) {
+func (ctx *manglerContext) mangleFunctionName(f *ssa.Function) string {
+	var b bytes.Buffer
+
 	if f.Enclosing != nil {
 		// Anonymous functions are not guaranteed to
 		// have unique identifiers at the global scope.
 		b.WriteString(f.Enclosing.String())
 		b.WriteRune(':')
 		b.WriteString(f.String())
-		return
+		return b.String()
 	}
 
 	pkg := f.Pkg
@@ -626,11 +628,11 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) 
 		pkgobj = f.Signature.Recv().Pkg()
 	} else {
 		b.WriteString(f.String())
-		return
+		return b.String()
 	}
 
 	if pkg != nil {
-		ctx.manglePackagePath(pkgobj.Path(), b)
+		ctx.manglePackagePath(pkgobj.Path(), &b)
 		b.WriteRune('.')
 	}
 	if f.Signature.Recv() == nil && f.Name() == "init" {
@@ -640,8 +642,20 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function, b *bytes.Buffer) 
 	}
 	if f.Signature.Recv() != nil {
 		b.WriteRune('.')
-		ctx.mangleType(f.Signature.Recv().Type(), b)
+		ctx.mangleType(f.Signature.Recv().Type(), &b)
 	}
+
+	return b.String()
+}
+
+func (ctx *manglerContext) mangleGlobalName(g *ssa.Global) string {
+	var b bytes.Buffer
+
+	ctx.manglePackagePath(g.Pkg.Object.Path(), &b)
+	b.WriteRune('.')
+	b.WriteString(g.Name())
+
+	return b.String()
 }
 
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {

@@ -281,9 +281,8 @@ func (c *compiler) buildPackageInitData(mainPkg *ssa.Package, initmap map[*types
 	}
 
 	if imp := mainPkg.Func("init"); imp != nil {
-		var b bytes.Buffer
-		c.types.mc.mangleFunctionName(imp, &b)
-		uniqinits = append(uniqinits, gccgoimporter.PackageInit{mainPkg.Object.Name(), b.String(), ourprio})
+		impname := c.types.mc.mangleFunctionName(imp)
+		uniqinits = append(uniqinits, gccgoimporter.PackageInit{mainPkg.Object.Name(), impname, ourprio})
 	}
 
 	return gccgoimporter.InitData{ourprio, uniqinits}

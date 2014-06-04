@@ -5,7 +5,6 @@
 package llgo
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -98,7 +97,8 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 		case *ssa.Global:
 			elemtyp := deref(v.Type())
 			llelemtyp := u.llvmtypes.ToLLVM(elemtyp)
-			global := llvm.AddGlobal(u.module.Module, llelemtyp, v.String())
+			vname := u.types.mc.mangleGlobalName(v)
+			global := llvm.AddGlobal(u.module.Module, llelemtyp, vname)
 			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			if !v.Object().Exported() {
 				global.SetLinkage(llvm.InternalLinkage)
@@ -145,9 +145,7 @@ func (u *unit) ResolveMethod(s *types.Selection) *govalue {
 func (u *unit) resolveFunctionDescriptorGlobal(f *ssa.Function) llvm.Value {
 	llfd, ok := u.funcDescriptors[f]
 	if !ok {
-		var b bytes.Buffer
-		u.types.mc.mangleFunctionName(f, &b)
-		name := b.String() + "$descriptor"
+		name := u.types.mc.mangleFunctionName(f) + "$descriptor"
 		llfd = llvm.AddGlobal(u.module.Module, llvm.PointerType(llvm.Int8Type(), 0), name)
 		llfd.SetGlobalConstant(true)
 		u.funcDescriptors[f] = llfd
@@ -168,9 +166,7 @@ func (u *unit) resolveFunctionGlobal(f *ssa.Function) llvm.Value {
 	if v, ok := u.globals[f]; ok {
 		return v
 	}
-	var b bytes.Buffer
-	u.types.mc.mangleFunctionName(f, &b)
-	name := b.String()
+	name := u.types.mc.mangleFunctionName(f)
 	// It's possible that the function already exists in the module;
 	// for example, if it's a runtime intrinsic that the compiler
 	// has already referenced.
@@ -567,7 +563,8 @@ func (fr *frame) value(v ssa.Value) (result *govalue) {
 		// Create an external global. Globals for this package are defined
 		// on entry to translatePackage, and have initialisers.
 		llelemtyp := fr.llvmtypes.ToLLVM(deref(v.Type()))
-		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, v.String())
+		vname := fr.types.mc.mangleGlobalName(v)
+		llglobal := llvm.AddGlobal(fr.module.Module, llelemtyp, vname)
 		llglobal = llvm.ConstBitCast(llglobal, fr.llvmtypes.ToLLVM(v.Type()))
 		fr.globals[v] = llglobal
 		return newValue(llglobal, v.Type())
