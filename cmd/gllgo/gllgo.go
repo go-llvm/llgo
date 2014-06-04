@@ -74,6 +74,7 @@ type driverOptions struct {
 	actions []action
 	output  string
 
+	bprefix       string
 	dumpSSA       bool
 	gccgoPath     string
 	generateDebug bool
@@ -85,6 +86,7 @@ type driverOptions struct {
 	pkgpath       string
 	prefix        string
 	sizeLevel     int
+	staticLibgcc  bool
 	staticLibgo   bool
 	staticLink    bool
 	triple        string
@@ -124,8 +126,19 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 				otherInputs = append(otherInputs, args[0])
 			}
 
-		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"):
+		case strings.HasPrefix(args[0], "-Wl,"), strings.HasPrefix(args[0], "-l"), strings.HasPrefix(args[0], "--sysroot="):
 			// TODO(pcc): Handle these correctly.
+			otherInputs = append(otherInputs, args[0])
+
+		case args[0] == "-B":
+			opts.bprefix = args[1]
+			consumedArgs = 2
+
+		case args[0] == "-D":
+			otherInputs = append(otherInputs, args[0], args[1])
+			consumedArgs = 2
+
+		case strings.HasPrefix(args[0], "-D"):
 			otherInputs = append(otherInputs, args[0])
 
 		case args[0] == "-I":
@@ -216,6 +229,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-static":
 			opts.staticLink = true
 
+		case args[0] == "-static-libgcc":
+			opts.staticLibgcc = true
+
 		case args[0] == "-static-libgo":
 			opts.staticLibgo = true
 
@@ -302,7 +318,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 	case actionPrint:
 		switch opts.output {
 		case "-print-libgcc-file-name":
-			cmd := exec.Command("gcc", "-print-libgcc-file-name")
+			cmd := exec.Command(opts.bprefix+"gcc", "-print-libgcc-file-name")
 			out, err := cmd.CombinedOutput()
 			os.Stdout.Write(out)
 			return err
@@ -409,15 +425,21 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		if opts.staticLink {
 			args = append(args, "-static")
 		}
+		if opts.staticLibgcc {
+			args = append(args, "-static-libgcc")
+		}
 		for _, p := range opts.libPaths {
 			args = append(args, "-L", p)
+		}
+		for _, p := range opts.importPaths {
+			args = append(args, "-I", p)
 		}
 		args = append(args, inputs...)
 		var linkerPath string
 		if opts.gccgoPath == "" {
 			// TODO(pcc): See if we can avoid calling gcc here.
 			// We currently rely on it to find crt*.o.
-			linkerPath = "gcc"
+			linkerPath = opts.bprefix + "gcc"
 
 			if opts.prefix != "" {
 				libdir := filepath.Join(opts.prefix, "lib")
