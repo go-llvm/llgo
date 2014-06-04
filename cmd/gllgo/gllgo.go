@@ -134,6 +134,13 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			opts.bprefix = args[1]
 			consumedArgs = 2
 
+		case args[0] == "-D":
+			otherInputs = append(otherInputs, args[0], args[1])
+			consumedArgs = 2
+
+		case strings.HasPrefix(args[0], "-D"):
+			otherInputs = append(otherInputs, args[0])
+
 		case args[0] == "-I":
 			if len(args) == 1 {
 				return opts, errors.New("missing path after '-I'")
@@ -423,6 +430,9 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 		for _, p := range opts.libPaths {
 			args = append(args, "-L", p)
+		}
+		for _, p := range opts.importPaths {
+			args = append(args, "-I", p)
 		}
 		args = append(args, inputs...)
 		var linkerPath string
