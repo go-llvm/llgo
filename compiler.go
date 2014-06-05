@@ -167,11 +167,10 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 	if err != nil {
 		return nil, err
 	}
-	// If no import path is specified, or the package's
-	// name (not path) is "main", then set the import
+	// If no import path is specified, then set the import
 	// path to be the same as the package's name.
-	if pkgname := astFiles[0].Name.String(); importpath == "" || pkgname == "main" {
-		importpath = pkgname
+	if importpath == "" {
+		importpath = astFiles[0].Name.String()
 	}
 	impcfg.CreateFromFiles(importpath, astFiles...)
 	iprog, err := impcfg.Load()
