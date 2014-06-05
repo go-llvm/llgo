@@ -418,6 +418,7 @@ func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame
 	ftiRecover.functionType = llvm.FunctionType(returnType, argTypes, false)
 	llfnRecover := ftiRecover.declare(fr.module.Module, llfn.Name()+"$recover")
 	addCommonFunctionAttrs(llfnRecover)
+	llfnRecover.SetLinkage(llvm.InternalLinkage)
 	args := make([]llvm.Value, len(argTypes)-1, len(argTypes))
 	for i := range args {
 		args[i] = llfn.Param(i)
