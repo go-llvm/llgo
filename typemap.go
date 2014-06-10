@@ -350,8 +350,8 @@ type localNamedTypeInfo struct {
 }
 
 type namedTypeInfo struct {
-	pkgpath string
-	name    string
+	pkgname, pkgpath string
+	name             string
 	localNamedTypeInfo
 }
 
@@ -416,6 +416,7 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 		case types.Rune:
 			nti.name = "int32"
 		case types.UnsafePointer:
+			nti.pkgname = "unsafe"
 			nti.pkgpath = "unsafe"
 			nti.name = "Pointer"
 		default:
@@ -425,6 +426,7 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 	case *types.Named:
 		obj := t.Obj()
 		if pkg := obj.Pkg(); pkg != nil {
+			nti.pkgname = obj.Pkg().Name()
 			nti.pkgpath = obj.Pkg().Path()
 		}
 		nti.name = obj.Name()
@@ -765,6 +767,181 @@ func (tm *TypeMap) getTypeHash(t types.Type) uint32 {
 	default:
 		panic(fmt.Sprintf("unhandled type: %#v", t))
 	}
+}
+
+func (tm *TypeMap) writeType(typ types.Type, b *bytes.Buffer) {
+	switch t := typ.(type) {
+	case *types.Basic, *types.Named:
+		ti := tm.mc.getNamedTypeInfo(t)
+		if ti.pkgpath != "" {
+			b.WriteByte('\t')
+			tm.mc.manglePackagePath(ti.pkgpath, b)
+			b.WriteByte('\t')
+			b.WriteString(ti.pkgname)
+			b.WriteByte('.')
+		}
+		if ti.functionName != "" {
+			b.WriteByte('\t')
+			b.WriteString(ti.functionName)
+			b.WriteByte('$')
+			if ti.scopeNum != 0 {
+				b.WriteString(strconv.Itoa(ti.scopeNum))
+				b.WriteByte('$')
+			}
+			b.WriteByte('\t')
+		}
+		b.WriteString(ti.name)
+
+	case *types.Array:
+		fmt.Fprintf(b, "[%d]", t.Len())
+		tm.writeType(t.Elem(), b)
+
+	case *types.Slice:
+		b.WriteString("[]")
+		tm.writeType(t.Elem(), b)
+
+	case *types.Struct:
+		if t.NumFields() == 0 {
+			b.WriteString("struct {}")
+			return
+		}
+		b.WriteString("struct { ")
+		for i := 0; i != t.NumFields(); i++ {
+			f := t.Field(i)
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			if !f.Anonymous() {
+				b.WriteString(f.Name())
+				b.WriteByte(' ')
+			}
+			tm.writeType(f.Type(), b)
+			if tag := t.Tag(i); tag != "" {
+				fmt.Fprintf(b, " %q", tag)
+			}
+		}
+		b.WriteString(" }")
+
+	case *types.Pointer:
+		b.WriteByte('*')
+		tm.writeType(t.Elem(), b)
+
+	case *types.Signature:
+		b.WriteString("func")
+		tm.writeSignature(t, b)
+
+	case *types.Interface:
+		if t.NumMethods() == 0 && t.NumEmbeddeds() == 0 {
+			b.WriteString("interface {}")
+			return
+		}
+		// We write the source-level methods and embedded types rather
+		// than the actual method set since resolved method signatures
+		// may have non-printable cycles if parameters have anonymous
+		// interface types that (directly or indirectly) embed the
+		// current interface. For instance, consider the result type
+		// of m:
+		//
+		//     type T interface{
+		//         m() interface{ T }
+		//     }
+		//
+		b.WriteString("interface { ")
+		// print explicit interface methods and embedded types
+		for i := 0; i != t.NumMethods(); i++ {
+			m := t.Method(i)
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			if !m.Exported() {
+				b.WriteString(m.Pkg().Path())
+				b.WriteByte('.')
+			}
+			b.WriteString(m.Name())
+			tm.writeSignature(m.Type().(*types.Signature), b)
+		}
+		for i := 0; i != t.NumEmbeddeds(); i++ {
+			typ := t.Embedded(i)
+			if i > 0 || t.NumMethods() > 0 {
+				b.WriteString("; ")
+			}
+			tm.writeType(typ, b)
+		}
+		b.WriteString(" }")
+
+	case *types.Map:
+		b.WriteString("map[")
+		tm.writeType(t.Key(), b)
+		b.WriteByte(']')
+		tm.writeType(t.Elem(), b)
+
+	case *types.Chan:
+		var s string
+		var parens bool
+		switch t.Dir() {
+		case types.SendRecv:
+			s = "chan "
+			// chan (<-chan T) requires parentheses
+			if c, _ := t.Elem().(*types.Chan); c != nil && c.Dir() == types.RecvOnly {
+				parens = true
+			}
+		case types.SendOnly:
+			s = "chan<- "
+		case types.RecvOnly:
+			s = "<-chan "
+		default:
+			panic("unreachable")
+		}
+		b.WriteString(s)
+		if parens {
+			b.WriteByte('(')
+		}
+		tm.writeType(t.Elem(), b)
+		if parens {
+			b.WriteByte(')')
+		}
+
+	default:
+		panic(fmt.Sprintf("unhandled type: %#v", t))
+	}
+}
+
+func (tm *TypeMap) writeTuple(tup *types.Tuple, variadic bool, b *bytes.Buffer) {
+	b.WriteByte('(')
+	if tup != nil {
+		for i := 0; i != tup.Len(); i++ {
+			v := tup.At(i)
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			typ := v.Type()
+			if variadic && i == tup.Len()-1 {
+				b.WriteString("...")
+				typ = typ.(*types.Slice).Elem()
+			}
+			tm.writeType(typ, b)
+		}
+	}
+	b.WriteByte(')')
+}
+
+func (tm *TypeMap) writeSignature(sig *types.Signature, b *bytes.Buffer) {
+	tm.writeTuple(sig.Params(), sig.Variadic(), b)
+
+	n := sig.Results().Len()
+	if n == 0 {
+		// no result
+		return
+	}
+
+	b.WriteByte(' ')
+	if n == 1 {
+		tm.writeType(sig.Results().At(0).Type(), b)
+		return
+	}
+
+	// multiple results
+	tm.writeTuple(sig.Results(), false, b)
 }
 
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
@@ -1147,7 +1324,9 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
-	vals[7] = tm.globalStringPtr(t.String())
+	var b bytes.Buffer
+	tm.writeType(t, &b)
+	vals[7] = tm.globalStringPtr(b.String())
 	vals[8] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
 		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
