@@ -67,8 +67,8 @@ type TypeMap struct {
 
 	hashFnType, equalFnType llvm.Type
 
-	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity       llvm.Value
-	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity llvm.Value
+	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity, hashFnError        llvm.Value
+	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity, equalFnError llvm.Value
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
@@ -120,6 +120,7 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.hashFnComplex = llvm.AddFunction(tm.module, "__go_type_hash_complex", tm.hashFnType)
 	tm.hashFnString = llvm.AddFunction(tm.module, "__go_type_hash_string", tm.hashFnType)
 	tm.hashFnIdentity = llvm.AddFunction(tm.module, "__go_type_hash_identity", tm.hashFnType)
+	tm.hashFnError = llvm.AddFunction(tm.module, "__go_type_hash_error", tm.hashFnType)
 
 	tm.equalFnEmptyInterface = llvm.AddFunction(tm.module, "__go_type_equal_empty_interface", tm.equalFnType)
 	tm.equalFnInterface = llvm.AddFunction(tm.module, "__go_type_equal_interface", tm.equalFnType)
@@ -127,6 +128,7 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.equalFnComplex = llvm.AddFunction(tm.module, "__go_type_equal_complex", tm.equalFnType)
 	tm.equalFnString = llvm.AddFunction(tm.module, "__go_type_equal_string", tm.equalFnType)
 	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
+	tm.equalFnError = llvm.AddFunction(tm.module, "__go_type_equal_error", tm.equalFnType)
 
 	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
@@ -813,6 +815,9 @@ func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal l
 			hash = tm.hashFnIdentity
 			equal = tm.equalFnIdentity
 		}
+	case *types.Signature:
+		hash = tm.hashFnError
+		equal = tm.equalFnError
 	default: // FIXME
 		hash = tm.hashFnIdentity
 		equal = tm.equalFnIdentity
