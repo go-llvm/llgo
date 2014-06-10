@@ -1506,14 +1506,16 @@ func (tm *TypeMap) makeChanType(t types.Type, c *types.Chan) llvm.Value {
 }
 
 func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
-	nt, _ := t.(*types.Named)
+	_, isbasic := t.(*types.Basic)
+	_, isnamed := t.(*types.Named)
+
 	var mset types.MethodSet
 	// We store interface methods on the interface type.
 	if _, ok := t.Underlying().(*types.Interface); !ok {
 		mset = *tm.MethodSet(t)
 	}
 
-	if nt == nil && mset.Len() == 0 {
+	if !isbasic && !isnamed && mset.Len() == 0 {
 		return llvm.ConstPointerNull(llvm.PointerType(tm.uncommonTypeType, 0))
 	}
 
@@ -1523,10 +1525,18 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 	vals[0] = nullStringPtr
 	vals[1] = nullStringPtr
 
-	if nt != nil {
-		vals[0] = tm.globalStringPtr(nt.Obj().Name())
-		if pkg := nt.Obj().Pkg(); pkg != nil {
-			vals[1] = tm.globalStringPtr(pkg.Path())
+	if isbasic || isnamed {
+		nti := tm.mc.getNamedTypeInfo(t)
+		vals[0] = tm.globalStringPtr(nti.name)
+		if nti.pkgpath != "" {
+			path := nti.pkgpath
+			if nti.functionName != "" {
+				path += "." + nti.functionName
+				if nti.scopeNum != 0 {
+					path += "$" + strconv.Itoa(nti.scopeNum)
+				}
+			}
+			vals[1] = tm.globalStringPtr(path)
 		}
 	}
 
