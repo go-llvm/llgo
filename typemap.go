@@ -401,8 +401,8 @@ func (ctx *manglerContext) init(prog *ssa.Program, msc *types.MethodSetCache) {
 				addNamedTypesToMap(scope.Child(i))
 			}
 		}
-		if f.Synthetic == "" {
-			addNamedTypesToMap(f.Object().(*types.Func).Scope())
+		if fobj, ok := f.Object().(*types.Func); ok && fobj.Scope() != nil {
+			addNamedTypesToMap(fobj.Scope())
 		}
 	}
 }
