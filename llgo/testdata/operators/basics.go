@@ -1,9 +1,15 @@
 package main
 
+import "unsafe"
+
 var global string
 
 var hi = 0xFF00
 var lo = 0xFF00
+
+// borrowed from math package to avoid dependency on standard library
+func float32bits(f float32) uint32 { return *(*uint32)(unsafe.Pointer(&f)) }
+func float64bits(f float64) uint64 { return *(*uint64)(unsafe.Pointer(&f)) }
 
 func main() {
 	println(hi & 0x1000)
@@ -71,4 +77,18 @@ func main() {
 
 	// compare global to non-global
 	println(new(string) == &global)
+
+	// negative zero
+	var f32 float32
+	var f64 float64
+	var c64 complex64
+	var c128 complex128
+	f32 = -f32
+	f64 = -f64
+	c64 = -c64
+	c128 = -c128
+	println(float32bits(f32))
+	println(float64bits(f64))
+	println(float32bits(real(c64)), float32bits(imag(c64)))
+	println(float64bits(real(c128)), float64bits(imag(c128)))
 }
