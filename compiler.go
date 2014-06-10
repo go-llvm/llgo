@@ -196,6 +196,8 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		return nil, err
 	}
 
+	mainPkg.Build()
+
 	// Create a struct responsible for mapping static types to LLVM types,
 	// and to runtime/dynamic type values.
 	compiler.types = NewTypeMap(
@@ -216,7 +218,6 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 		defer compiler.debug.Finalize()
 	}
 
-	mainPkg.Build()
 	unit.translatePackage(mainPkg)
 	compiler.processAnnotations(unit, mainPkginfo)
 

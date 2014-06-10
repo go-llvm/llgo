@@ -67,8 +67,8 @@ type TypeMap struct {
 
 	hashFnType, equalFnType llvm.Type
 
-	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity       llvm.Value
-	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity llvm.Value
+	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity, hashFnError        llvm.Value
+	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity, equalFnError llvm.Value
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
@@ -120,6 +120,7 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.hashFnComplex = llvm.AddFunction(tm.module, "__go_type_hash_complex", tm.hashFnType)
 	tm.hashFnString = llvm.AddFunction(tm.module, "__go_type_hash_string", tm.hashFnType)
 	tm.hashFnIdentity = llvm.AddFunction(tm.module, "__go_type_hash_identity", tm.hashFnType)
+	tm.hashFnError = llvm.AddFunction(tm.module, "__go_type_hash_error", tm.hashFnType)
 
 	tm.equalFnEmptyInterface = llvm.AddFunction(tm.module, "__go_type_equal_empty_interface", tm.equalFnType)
 	tm.equalFnInterface = llvm.AddFunction(tm.module, "__go_type_equal_interface", tm.equalFnType)
@@ -127,6 +128,7 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.equalFnComplex = llvm.AddFunction(tm.module, "__go_type_equal_complex", tm.equalFnType)
 	tm.equalFnString = llvm.AddFunction(tm.module, "__go_type_equal_string", tm.equalFnType)
 	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
+	tm.equalFnError = llvm.AddFunction(tm.module, "__go_type_equal_error", tm.equalFnType)
 
 	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
@@ -348,8 +350,8 @@ type localNamedTypeInfo struct {
 }
 
 type namedTypeInfo struct {
-	pkgpath string
-	name    string
+	pkgname, pkgpath string
+	name             string
 	localNamedTypeInfo
 }
 
@@ -399,8 +401,8 @@ func (ctx *manglerContext) init(prog *ssa.Program, msc *types.MethodSetCache) {
 				addNamedTypesToMap(scope.Child(i))
 			}
 		}
-		if f.Synthetic == "" {
-			addNamedTypesToMap(f.Object().(*types.Func).Scope())
+		if fobj, ok := f.Object().(*types.Func); ok && fobj.Scope() != nil {
+			addNamedTypesToMap(fobj.Scope())
 		}
 	}
 }
@@ -414,6 +416,7 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 		case types.Rune:
 			nti.name = "int32"
 		case types.UnsafePointer:
+			nti.pkgname = "unsafe"
 			nti.pkgpath = "unsafe"
 			nti.name = "Pointer"
 		default:
@@ -423,6 +426,7 @@ func (ctx *manglerContext) getNamedTypeInfo(t types.Type) (nti namedTypeInfo) {
 	case *types.Named:
 		obj := t.Obj()
 		if pkg := obj.Pkg(); pkg != nil {
+			nti.pkgname = obj.Pkg().Name()
 			nti.pkgpath = obj.Pkg().Path()
 		}
 		nti.name = obj.Name()
@@ -658,6 +662,288 @@ func (ctx *manglerContext) mangleGlobalName(g *ssa.Global) string {
 	return b.String()
 }
 
+const (
+	// From gofrontend/types.h
+	gccgoTypeClassERROR = iota
+	gccgoTypeClassVOID
+	gccgoTypeClassBOOLEAN
+	gccgoTypeClassINTEGER
+	gccgoTypeClassFLOAT
+	gccgoTypeClassCOMPLEX
+	gccgoTypeClassSTRING
+	gccgoTypeClassSINK
+	gccgoTypeClassFUNCTION
+	gccgoTypeClassPOINTER
+	gccgoTypeClassNIL
+	gccgoTypeClassCALL_MULTIPLE_RESULT
+	gccgoTypeClassSTRUCT
+	gccgoTypeClassARRAY
+	gccgoTypeClassMAP
+	gccgoTypeClassCHANNEL
+	gccgoTypeClassINTERFACE
+	gccgoTypeClassNAMED
+	gccgoTypeClassFORWARD
+)
+
+func getStringHash(s string, h uint32) uint32 {
+	for _, c := range []byte(s) {
+		h ^= uint32(c)
+		h += 16777619
+	}
+	return h
+}
+
+func (tm *TypeMap) getTypeHash(t types.Type) uint32 {
+	switch t := t.(type) {
+	case *types.Basic, *types.Named:
+		nti := tm.mc.getNamedTypeInfo(t)
+		h := getStringHash(nti.functionName+nti.name+nti.pkgpath, 0)
+		h ^= uint32(nti.scopeNum)
+		return gccgoTypeClassNAMED + h
+
+	case *types.Signature:
+		var h uint32
+
+		p := t.Params()
+		for i := 0; i != p.Len(); i++ {
+			h += tm.getTypeHash(p.At(i).Type()) << uint32(i+1)
+		}
+
+		r := t.Results()
+		for i := 0; i != r.Len(); i++ {
+			h += tm.getTypeHash(r.At(i).Type()) << uint32(i+2)
+		}
+
+		if t.Variadic() {
+			h += 1
+		}
+		h <<= 4
+		return gccgoTypeClassFUNCTION + h
+
+	case *types.Pointer:
+		return gccgoTypeClassPOINTER + (tm.getTypeHash(t.Elem()) << 4)
+
+	case *types.Struct:
+		var h uint32
+		for i := 0; i != t.NumFields(); i++ {
+			h = (h << 1) + tm.getTypeHash(t.Field(i).Type())
+		}
+		h <<= 2
+		return gccgoTypeClassSTRUCT + h
+
+	case *types.Array:
+		return gccgoTypeClassARRAY + tm.getTypeHash(t.Elem()) + 1
+
+	case *types.Slice:
+		return gccgoTypeClassARRAY + tm.getTypeHash(t.Elem()) + 1
+
+	case *types.Map:
+		return gccgoTypeClassMAP + tm.getTypeHash(t.Key()) + tm.getTypeHash(t.Elem()) + 2
+
+	case *types.Chan:
+		var h uint32
+
+		switch t.Dir() {
+		case types.SendOnly:
+			h = 1
+		case types.RecvOnly:
+			h = 2
+		case types.SendRecv:
+			h = 3
+		}
+
+		h += tm.getTypeHash(t.Elem()) << 2
+		h <<= 3
+		return gccgoTypeClassCHANNEL + h
+
+	case *types.Interface:
+		var h uint32
+		for _, m := range orderedMethodSet(tm.MethodSet(t)) {
+			h = getStringHash(m.Obj().Name(), h)
+			h <<= 1
+		}
+		return gccgoTypeClassINTERFACE + h
+
+	default:
+		panic(fmt.Sprintf("unhandled type: %#v", t))
+	}
+}
+
+func (tm *TypeMap) writeType(typ types.Type, b *bytes.Buffer) {
+	switch t := typ.(type) {
+	case *types.Basic, *types.Named:
+		ti := tm.mc.getNamedTypeInfo(t)
+		if ti.pkgpath != "" {
+			b.WriteByte('\t')
+			tm.mc.manglePackagePath(ti.pkgpath, b)
+			b.WriteByte('\t')
+			b.WriteString(ti.pkgname)
+			b.WriteByte('.')
+		}
+		if ti.functionName != "" {
+			b.WriteByte('\t')
+			b.WriteString(ti.functionName)
+			b.WriteByte('$')
+			if ti.scopeNum != 0 {
+				b.WriteString(strconv.Itoa(ti.scopeNum))
+				b.WriteByte('$')
+			}
+			b.WriteByte('\t')
+		}
+		b.WriteString(ti.name)
+
+	case *types.Array:
+		fmt.Fprintf(b, "[%d]", t.Len())
+		tm.writeType(t.Elem(), b)
+
+	case *types.Slice:
+		b.WriteString("[]")
+		tm.writeType(t.Elem(), b)
+
+	case *types.Struct:
+		if t.NumFields() == 0 {
+			b.WriteString("struct {}")
+			return
+		}
+		b.WriteString("struct { ")
+		for i := 0; i != t.NumFields(); i++ {
+			f := t.Field(i)
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			if !f.Anonymous() {
+				b.WriteString(f.Name())
+				b.WriteByte(' ')
+			}
+			tm.writeType(f.Type(), b)
+			if tag := t.Tag(i); tag != "" {
+				fmt.Fprintf(b, " %q", tag)
+			}
+		}
+		b.WriteString(" }")
+
+	case *types.Pointer:
+		b.WriteByte('*')
+		tm.writeType(t.Elem(), b)
+
+	case *types.Signature:
+		b.WriteString("func")
+		tm.writeSignature(t, b)
+
+	case *types.Interface:
+		if t.NumMethods() == 0 && t.NumEmbeddeds() == 0 {
+			b.WriteString("interface {}")
+			return
+		}
+		// We write the source-level methods and embedded types rather
+		// than the actual method set since resolved method signatures
+		// may have non-printable cycles if parameters have anonymous
+		// interface types that (directly or indirectly) embed the
+		// current interface. For instance, consider the result type
+		// of m:
+		//
+		//     type T interface{
+		//         m() interface{ T }
+		//     }
+		//
+		b.WriteString("interface { ")
+		// print explicit interface methods and embedded types
+		for i := 0; i != t.NumMethods(); i++ {
+			m := t.Method(i)
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			if !m.Exported() {
+				b.WriteString(m.Pkg().Path())
+				b.WriteByte('.')
+			}
+			b.WriteString(m.Name())
+			tm.writeSignature(m.Type().(*types.Signature), b)
+		}
+		for i := 0; i != t.NumEmbeddeds(); i++ {
+			typ := t.Embedded(i)
+			if i > 0 || t.NumMethods() > 0 {
+				b.WriteString("; ")
+			}
+			tm.writeType(typ, b)
+		}
+		b.WriteString(" }")
+
+	case *types.Map:
+		b.WriteString("map[")
+		tm.writeType(t.Key(), b)
+		b.WriteByte(']')
+		tm.writeType(t.Elem(), b)
+
+	case *types.Chan:
+		var s string
+		var parens bool
+		switch t.Dir() {
+		case types.SendRecv:
+			s = "chan "
+			// chan (<-chan T) requires parentheses
+			if c, _ := t.Elem().(*types.Chan); c != nil && c.Dir() == types.RecvOnly {
+				parens = true
+			}
+		case types.SendOnly:
+			s = "chan<- "
+		case types.RecvOnly:
+			s = "<-chan "
+		default:
+			panic("unreachable")
+		}
+		b.WriteString(s)
+		if parens {
+			b.WriteByte('(')
+		}
+		tm.writeType(t.Elem(), b)
+		if parens {
+			b.WriteByte(')')
+		}
+
+	default:
+		panic(fmt.Sprintf("unhandled type: %#v", t))
+	}
+}
+
+func (tm *TypeMap) writeTuple(tup *types.Tuple, variadic bool, b *bytes.Buffer) {
+	b.WriteByte('(')
+	if tup != nil {
+		for i := 0; i != tup.Len(); i++ {
+			v := tup.At(i)
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			typ := v.Type()
+			if variadic && i == tup.Len()-1 {
+				b.WriteString("...")
+				typ = typ.(*types.Slice).Elem()
+			}
+			tm.writeType(typ, b)
+		}
+	}
+	b.WriteByte(')')
+}
+
+func (tm *TypeMap) writeSignature(sig *types.Signature, b *bytes.Buffer) {
+	tm.writeTuple(sig.Params(), sig.Variadic(), b)
+
+	n := sig.Results().Len()
+	if n == 0 {
+		// no result
+		return
+	}
+
+	b.WriteByte(' ')
+	if n == 1 {
+		tm.writeType(sig.Results().At(0).Type(), b)
+		return
+	}
+
+	// multiple results
+	tm.writeTuple(sig.Results(), false, b)
+}
+
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	switch t.Underlying().(type) {
 	case *types.Basic:
@@ -813,6 +1099,9 @@ func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal l
 			hash = tm.hashFnIdentity
 			equal = tm.equalFnIdentity
 		}
+	case *types.Signature:
+		hash = tm.hashFnError
+		equal = tm.equalFnError
 	default: // FIXME
 		hash = tm.hashFnIdentity
 		equal = tm.equalFnIdentity
@@ -1031,11 +1320,13 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	vals[1] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(tm.Alignof(t)), false)
 	vals[2] = vals[1]
 	vals[3] = llvm.ConstInt(tm.inttype, uint64(tm.Sizeof(t)), false)
-	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), 42, false) // FIXME
+	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), uint64(tm.getTypeHash(t)), false)
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
-	vals[7] = tm.globalStringPtr(t.String())
+	var b bytes.Buffer
+	tm.writeType(t, &b)
+	vals[7] = tm.globalStringPtr(b.String())
 	vals[8] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
 		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
@@ -1215,14 +1506,16 @@ func (tm *TypeMap) makeChanType(t types.Type, c *types.Chan) llvm.Value {
 }
 
 func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
-	nt, _ := t.(*types.Named)
+	_, isbasic := t.(*types.Basic)
+	_, isnamed := t.(*types.Named)
+
 	var mset types.MethodSet
 	// We store interface methods on the interface type.
 	if _, ok := t.Underlying().(*types.Interface); !ok {
 		mset = *tm.MethodSet(t)
 	}
 
-	if nt == nil && mset.Len() == 0 {
+	if !isbasic && !isnamed && mset.Len() == 0 {
 		return llvm.ConstPointerNull(llvm.PointerType(tm.uncommonTypeType, 0))
 	}
 
@@ -1232,10 +1525,18 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 	vals[0] = nullStringPtr
 	vals[1] = nullStringPtr
 
-	if nt != nil {
-		vals[0] = tm.globalStringPtr(nt.Obj().Name())
-		if pkg := nt.Obj().Pkg(); pkg != nil {
-			vals[1] = tm.globalStringPtr(pkg.Path())
+	if isbasic || isnamed {
+		nti := tm.mc.getNamedTypeInfo(t)
+		vals[0] = tm.globalStringPtr(nti.name)
+		if nti.pkgpath != "" {
+			path := nti.pkgpath
+			if nti.functionName != "" {
+				path += "." + nti.functionName
+				if nti.scopeNum != 0 {
+					path += "$" + strconv.Itoa(nti.scopeNum)
+				}
+			}
+			vals[1] = tm.globalStringPtr(path)
 		}
 	}
 
