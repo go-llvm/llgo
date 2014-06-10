@@ -660,6 +660,113 @@ func (ctx *manglerContext) mangleGlobalName(g *ssa.Global) string {
 	return b.String()
 }
 
+const (
+	// From gofrontend/types.h
+	gccgoTypeClassERROR = iota
+	gccgoTypeClassVOID
+	gccgoTypeClassBOOLEAN
+	gccgoTypeClassINTEGER
+	gccgoTypeClassFLOAT
+	gccgoTypeClassCOMPLEX
+	gccgoTypeClassSTRING
+	gccgoTypeClassSINK
+	gccgoTypeClassFUNCTION
+	gccgoTypeClassPOINTER
+	gccgoTypeClassNIL
+	gccgoTypeClassCALL_MULTIPLE_RESULT
+	gccgoTypeClassSTRUCT
+	gccgoTypeClassARRAY
+	gccgoTypeClassMAP
+	gccgoTypeClassCHANNEL
+	gccgoTypeClassINTERFACE
+	gccgoTypeClassNAMED
+	gccgoTypeClassFORWARD
+)
+
+func getStringHash(s string, h uint32) uint32 {
+	for _, c := range []byte(s) {
+		h ^= uint32(c)
+		h += 16777619
+	}
+	return h
+}
+
+func (tm *TypeMap) getTypeHash(t types.Type) uint32 {
+	switch t := t.(type) {
+	case *types.Basic, *types.Named:
+		nti := tm.mc.getNamedTypeInfo(t)
+		h := getStringHash(nti.functionName+nti.name+nti.pkgpath, 0)
+		h ^= uint32(nti.scopeNum)
+		return gccgoTypeClassNAMED + h
+
+	case *types.Signature:
+		var h uint32
+
+		p := t.Params()
+		for i := 0; i != p.Len(); i++ {
+			h += tm.getTypeHash(p.At(i).Type()) << uint32(i+1)
+		}
+
+		r := t.Results()
+		for i := 0; i != r.Len(); i++ {
+			h += tm.getTypeHash(r.At(i).Type()) << uint32(i+2)
+		}
+
+		if t.Variadic() {
+			h += 1
+		}
+		h <<= 4
+		return gccgoTypeClassFUNCTION + h
+
+	case *types.Pointer:
+		return gccgoTypeClassPOINTER + (tm.getTypeHash(t.Elem()) << 4)
+
+	case *types.Struct:
+		var h uint32
+		for i := 0; i != t.NumFields(); i++ {
+			h = (h << 1) + tm.getTypeHash(t.Field(i).Type())
+		}
+		h <<= 2
+		return gccgoTypeClassSTRUCT + h
+
+	case *types.Array:
+		return gccgoTypeClassARRAY + tm.getTypeHash(t.Elem()) + 1
+
+	case *types.Slice:
+		return gccgoTypeClassARRAY + tm.getTypeHash(t.Elem()) + 1
+
+	case *types.Map:
+		return gccgoTypeClassMAP + tm.getTypeHash(t.Key()) + tm.getTypeHash(t.Elem()) + 2
+
+	case *types.Chan:
+		var h uint32
+
+		switch t.Dir() {
+		case types.SendOnly:
+			h = 1
+		case types.RecvOnly:
+			h = 2
+		case types.SendRecv:
+			h = 3
+		}
+
+		h += tm.getTypeHash(t.Elem()) << 2
+		h <<= 3
+		return gccgoTypeClassCHANNEL + h
+
+	case *types.Interface:
+		var h uint32
+		for _, m := range orderedMethodSet(tm.MethodSet(t)) {
+			h = getStringHash(m.Obj().Name(), h)
+			h <<= 1
+		}
+		return gccgoTypeClassINTERFACE + h
+
+	default:
+		panic(fmt.Sprintf("unhandled type: %#v", t))
+	}
+}
+
 func (tm *TypeMap) getTypeDescType(t types.Type) llvm.Type {
 	switch t.Underlying().(type) {
 	case *types.Basic:
@@ -1036,7 +1143,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	vals[1] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(tm.Alignof(t)), false)
 	vals[2] = vals[1]
 	vals[3] = llvm.ConstInt(tm.inttype, uint64(tm.Sizeof(t)), false)
-	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), 42, false) // FIXME
+	vals[4] = llvm.ConstInt(tm.ctx.Int32Type(), uint64(tm.getTypeHash(t)), false)
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
