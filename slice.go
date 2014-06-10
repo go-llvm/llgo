@@ -19,7 +19,7 @@ func (fr *frame) makeSlice(sliceType types.Type, length, capacity *govalue) *gov
 	return newValue(llslice[0], sliceType)
 }
 
-func (fr *frame) slice(x llvm.Value, xtyp types.Type, low, high llvm.Value) llvm.Value {
+func (fr *frame) slice(x llvm.Value, xtyp types.Type, low, high, max llvm.Value) llvm.Value {
 	if !low.IsNil() {
 		low = fr.createZExtOrTrunc(low, fr.types.inttype, "")
 	} else {
@@ -27,6 +27,9 @@ func (fr *frame) slice(x llvm.Value, xtyp types.Type, low, high llvm.Value) llvm
 	}
 	if !high.IsNil() {
 		high = fr.createZExtOrTrunc(high, fr.types.inttype, "")
+	}
+	if !max.IsNil() {
+		max = fr.createZExtOrTrunc(max, fr.types.inttype, "")
 	}
 
 	var arrayptr, arraylen, arraycap llvm.Value
@@ -59,20 +62,25 @@ func (fr *frame) slice(x llvm.Value, xtyp types.Type, low, high llvm.Value) llvm
 	if high.IsNil() {
 		high = arraylen
 	}
+	if max.IsNil() {
+		max = arraycap
+	}
 
-	// Bounds checking: 0 <= low <= high <= cap
+	// Bounds checking: 0 <= low <= high <= max <= cap
 	zero := llvm.ConstNull(fr.types.inttype)
 	l0 := fr.builder.CreateICmp(llvm.IntSLT, low, zero, "")
 	hl := fr.builder.CreateICmp(llvm.IntSLT, high, low, "")
-	zh := fr.builder.CreateICmp(llvm.IntSLT, arraycap, high, "")
+	mh := fr.builder.CreateICmp(llvm.IntSLT, max, high, "")
+	cm := fr.builder.CreateICmp(llvm.IntSLT, arraycap, max, "")
 
 	cond := fr.builder.CreateOr(l0, hl, "")
-	cond = fr.builder.CreateOr(cond, zh, "")
+	cond = fr.builder.CreateOr(cond, mh, "")
+	cond = fr.builder.CreateOr(cond, cm, "")
 
 	fr.condBrRuntimeError(cond, errcode)
 
 	slicelen := fr.builder.CreateSub(high, low, "")
-	slicecap := fr.builder.CreateSub(arraycap, low, "")
+	slicecap := fr.builder.CreateSub(max, low, "")
 
 	elemsize := llvm.ConstInt(fr.llvmtypes.inttype, uint64(fr.llvmtypes.Sizeof(elemtyp)), false)
 	offset := fr.builder.CreateMul(low, elemsize, "")

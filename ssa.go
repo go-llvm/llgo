@@ -983,7 +983,8 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		x := fr.llvmvalue(instr.X)
 		low := fr.llvmvalue(instr.Low)
 		high := fr.llvmvalue(instr.High)
-		slice := fr.slice(x, instr.X.Type(), low, high)
+		max := fr.llvmvalue(instr.Max)
+		slice := fr.slice(x, instr.X.Type(), low, high, max)
 		fr.env[instr] = newValue(slice, instr.Type())
 
 	case *ssa.Store:

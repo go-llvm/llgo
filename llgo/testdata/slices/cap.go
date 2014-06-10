@@ -29,5 +29,7 @@ func main() {
 	println(len(s2), cap(s2))
 	println(s2[2])
 	println(s[3])
-}
 
+	s3 := s1[0:1:2]
+	println(len(s3), cap(s3))
+}
