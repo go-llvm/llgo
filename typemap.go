@@ -53,7 +53,7 @@ type TypeMap struct {
 
 	module         llvm.Module
 	pkgpath        string
-	types          typeutil.Map
+	types, algs    typeutil.Map
 	runtime        *runtimeInterface
 	methodResolver MethodResolver
 	types.MethodSetCache
@@ -612,6 +612,20 @@ func (ctx *manglerContext) mangleImtName(srctype types.Type, targettype *types.I
 	ctx.mangleType(srctype, b)
 }
 
+func (ctx *manglerContext) mangleHashFunctionName(t types.Type) string {
+	var b bytes.Buffer
+	b.WriteString("__go_type_hash_")
+	ctx.mangleType(t, &b)
+	return b.String()
+}
+
+func (ctx *manglerContext) mangleEqualFunctionName(t types.Type) string {
+	var b bytes.Buffer
+	b.WriteString("__go_type_equal_")
+	ctx.mangleType(t, &b)
+	return b.String()
+}
+
 func (ctx *manglerContext) mangleFunctionName(f *ssa.Function) string {
 	var b bytes.Buffer
 
@@ -1074,7 +1088,214 @@ func (tm *TypeMap) makeTypeDescInitializer(t types.Type) llvm.Value {
 	}
 }
 
-func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal llvm.Value) {
+type algorithmFns struct {
+	hash, equal llvm.Value
+}
+
+func (tm *TypeMap) getStructAlgorithmFunctions(st *types.Struct) (hash, equal llvm.Value) {
+	if algs, ok := tm.algs.At(st).(algorithmFns); ok {
+		return algs.hash, algs.equal
+	}
+
+	hashes := make([]llvm.Value, st.NumFields())
+	equals := make([]llvm.Value, st.NumFields())
+
+	for i := range hashes {
+		fhash, fequal := tm.getAlgorithmFunctions(st.Field(i).Type())
+		if fhash == tm.hashFnError {
+			return fhash, fequal
+		}
+		hashes[i], equals[i] = fhash, fequal
+	}
+
+	i8ptr := llvm.PointerType(tm.ctx.Int8Type(), 0)
+	llsptrty := llvm.PointerType(tm.ToLLVM(st), 0)
+
+	builder := tm.ctx.NewBuilder()
+	defer builder.Dispose()
+
+	hash = llvm.AddFunction(tm.module, tm.mc.mangleHashFunctionName(st), tm.hashFnType)
+	hash.SetLinkage(llvm.LinkOnceODRLinkage)
+	builder.SetInsertPointAtEnd(llvm.AddBasicBlock(hash, "entry"))
+	sptr := builder.CreateBitCast(hash.Param(0), llsptrty, "")
+
+	hashval := llvm.ConstNull(tm.inttype)
+	i33 := llvm.ConstInt(tm.inttype, 33, false)
+
+	for i, fhash := range hashes {
+		fptr := builder.CreateStructGEP(sptr, i, "")
+		fptr = builder.CreateBitCast(fptr, i8ptr, "")
+
+		fsize := llvm.ConstInt(tm.inttype, uint64(tm.sizes.Sizeof(st.Field(i).Type())), false)
+
+		hashcall := builder.CreateCall(fhash, []llvm.Value{fptr, fsize}, "")
+		hashval = builder.CreateMul(hashval, i33, "")
+		hashval = builder.CreateAdd(hashval, hashcall, "")
+	}
+
+	builder.CreateRet(hashval)
+
+	equal = llvm.AddFunction(tm.module, tm.mc.mangleEqualFunctionName(st), tm.equalFnType)
+	equal.SetLinkage(llvm.LinkOnceODRLinkage)
+	eqentrybb := llvm.AddBasicBlock(equal, "entry")
+	eqretzerobb := llvm.AddBasicBlock(equal, "retzero")
+
+	builder.SetInsertPointAtEnd(eqentrybb)
+	s1ptr := builder.CreateBitCast(equal.Param(0), llsptrty, "")
+	s2ptr := builder.CreateBitCast(equal.Param(1), llsptrty, "")
+
+	zerobool := llvm.ConstNull(tm.ctx.Int8Type())
+	onebool := llvm.ConstInt(tm.ctx.Int8Type(), 1, false)
+
+	for i, fequal := range equals {
+		f1ptr := builder.CreateStructGEP(s1ptr, i, "")
+		f1ptr = builder.CreateBitCast(f1ptr, i8ptr, "")
+		f2ptr := builder.CreateStructGEP(s2ptr, i, "")
+		f2ptr = builder.CreateBitCast(f2ptr, i8ptr, "")
+
+		fsize := llvm.ConstInt(tm.inttype, uint64(tm.sizes.Sizeof(st.Field(i).Type())), false)
+
+		equalcall := builder.CreateCall(fequal, []llvm.Value{f1ptr, f2ptr, fsize}, "")
+		equaleqzero := builder.CreateICmp(llvm.IntEQ, equalcall, zerobool, "")
+
+		contbb := llvm.AddBasicBlock(equal, "cont")
+		builder.CreateCondBr(equaleqzero, eqretzerobb, contbb)
+
+		builder.SetInsertPointAtEnd(contbb)
+	}
+
+	builder.CreateRet(onebool)
+
+	builder.SetInsertPointAtEnd(eqretzerobb)
+	builder.CreateRet(zerobool)
+
+	tm.algs.Set(st, algorithmFns{hash, equal})
+	return
+}
+
+func (tm *TypeMap) getArrayAlgorithmFunctions(at *types.Array) (hash, equal llvm.Value) {
+	if algs, ok := tm.algs.At(at).(algorithmFns); ok {
+		return algs.hash, algs.equal
+	}
+
+	ehash, eequal := tm.getAlgorithmFunctions(at.Elem())
+	if ehash == tm.hashFnError {
+		return ehash, eequal
+	}
+
+	i8ptr := llvm.PointerType(tm.ctx.Int8Type(), 0)
+	llelemty := llvm.PointerType(tm.ToLLVM(at.Elem()), 0)
+
+	i1 := llvm.ConstInt(tm.inttype, 1, false)
+	alen := llvm.ConstInt(tm.inttype, uint64(at.Len()), false)
+	esize := llvm.ConstInt(tm.inttype, uint64(tm.sizes.Sizeof(at.Elem())), false)
+
+	builder := tm.ctx.NewBuilder()
+	defer builder.Dispose()
+
+	hash = llvm.AddFunction(tm.module, tm.mc.mangleHashFunctionName(at), tm.hashFnType)
+	hash.SetLinkage(llvm.LinkOnceODRLinkage)
+	hashentrybb := llvm.AddBasicBlock(hash, "entry")
+	builder.SetInsertPointAtEnd(hashentrybb)
+	if at.Len() == 0 {
+		builder.CreateRet(llvm.ConstNull(tm.inttype))
+	} else {
+		i33 := llvm.ConstInt(tm.inttype, 33, false)
+
+		aptr := builder.CreateBitCast(hash.Param(0), llelemty, "")
+		loopbb := llvm.AddBasicBlock(hash, "loop")
+		builder.CreateBr(loopbb)
+
+		exitbb := llvm.AddBasicBlock(hash, "exit")
+
+		builder.SetInsertPointAtEnd(loopbb)
+		indexphi := builder.CreatePHI(tm.inttype, "")
+		index := indexphi
+		hashvalphi := builder.CreatePHI(tm.inttype, "")
+		hashval := hashvalphi
+
+		eptr := builder.CreateGEP(aptr, []llvm.Value{index}, "")
+		eptr = builder.CreateBitCast(eptr, i8ptr, "")
+
+		hashcall := builder.CreateCall(ehash, []llvm.Value{eptr, esize}, "")
+		hashval = builder.CreateMul(hashval, i33, "")
+		hashval = builder.CreateAdd(hashval, hashcall, "")
+
+		index = builder.CreateAdd(index, i1, "")
+
+		indexphi.AddIncoming(
+			[]llvm.Value{llvm.ConstNull(tm.inttype), index},
+			[]llvm.BasicBlock{hashentrybb, loopbb},
+		)
+		hashvalphi.AddIncoming(
+			[]llvm.Value{llvm.ConstNull(tm.inttype), hashval},
+			[]llvm.BasicBlock{hashentrybb, loopbb},
+		)
+
+		exit := builder.CreateICmp(llvm.IntEQ, index, alen, "")
+		builder.CreateCondBr(exit, exitbb, loopbb)
+
+		builder.SetInsertPointAtEnd(exitbb)
+		builder.CreateRet(hashval)
+	}
+
+	zerobool := llvm.ConstNull(tm.ctx.Int8Type())
+	onebool := llvm.ConstInt(tm.ctx.Int8Type(), 1, false)
+
+	equal = llvm.AddFunction(tm.module, tm.mc.mangleEqualFunctionName(at), tm.equalFnType)
+	equal.SetLinkage(llvm.LinkOnceODRLinkage)
+	eqentrybb := llvm.AddBasicBlock(equal, "entry")
+	builder.SetInsertPointAtEnd(eqentrybb)
+	if at.Len() == 0 {
+		builder.CreateRet(onebool)
+	} else {
+		a1ptr := builder.CreateBitCast(equal.Param(0), llelemty, "")
+		a2ptr := builder.CreateBitCast(equal.Param(1), llelemty, "")
+		loopbb := llvm.AddBasicBlock(equal, "loop")
+		builder.CreateBr(loopbb)
+
+		exitbb := llvm.AddBasicBlock(equal, "exit")
+		retzerobb := llvm.AddBasicBlock(equal, "retzero")
+
+		builder.SetInsertPointAtEnd(loopbb)
+		indexphi := builder.CreatePHI(tm.inttype, "")
+		index := indexphi
+
+		e1ptr := builder.CreateGEP(a1ptr, []llvm.Value{index}, "")
+		e1ptr = builder.CreateBitCast(e1ptr, i8ptr, "")
+		e2ptr := builder.CreateGEP(a2ptr, []llvm.Value{index}, "")
+		e2ptr = builder.CreateBitCast(e2ptr, i8ptr, "")
+
+		equalcall := builder.CreateCall(eequal, []llvm.Value{e1ptr, e2ptr, esize}, "")
+		equaleqzero := builder.CreateICmp(llvm.IntEQ, equalcall, zerobool, "")
+
+		contbb := llvm.AddBasicBlock(equal, "cont")
+		builder.CreateCondBr(equaleqzero, retzerobb, contbb)
+
+		builder.SetInsertPointAtEnd(contbb)
+
+		index = builder.CreateAdd(index, i1, "")
+
+		indexphi.AddIncoming(
+			[]llvm.Value{llvm.ConstNull(tm.inttype), index},
+			[]llvm.BasicBlock{eqentrybb, contbb},
+		)
+
+		exit := builder.CreateICmp(llvm.IntEQ, index, alen, "")
+		builder.CreateCondBr(exit, exitbb, loopbb)
+
+		builder.SetInsertPointAtEnd(exitbb)
+		builder.CreateRet(onebool)
+
+		builder.SetInsertPointAtEnd(retzerobb)
+		builder.CreateRet(zerobool)
+	}
+
+	tm.algs.Set(at, algorithmFns{hash, equal})
+	return
+}
+
+func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash, equal llvm.Value) {
 	switch t := t.Underlying().(type) {
 	case *types.Interface:
 		if t.NumMethods() == 0 {
@@ -1099,10 +1320,14 @@ func (tm *TypeMap) getAlgorithmFunctions(t types.Type) (hash llvm.Value, equal l
 			hash = tm.hashFnIdentity
 			equal = tm.equalFnIdentity
 		}
-	case *types.Signature:
+	case *types.Signature, *types.Map, *types.Slice:
 		hash = tm.hashFnError
 		equal = tm.equalFnError
-	default: // FIXME
+	case *types.Struct:
+		hash, equal = tm.getStructAlgorithmFunctions(t)
+	case *types.Array:
+		hash, equal = tm.getArrayAlgorithmFunctions(t)
+	default:
 		hash = tm.hashFnIdentity
 		equal = tm.equalFnIdentity
 	}
