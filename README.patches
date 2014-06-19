@@ -1,9 +1,4 @@
-We currently depend on a number of patches to go.tools which are either under
-review or cannot land because of the current tree freeze. The following need
-to be patched into your copy of go.tools:
+We currently depend on a patch to go.tools which is under review. The
+following need to be patched into your copy of go.tools:
 
-https://codereview.appspot.com/78740043
-https://codereview.appspot.com/78780043
-https://codereview.appspot.com/92780043
 https://codereview.appspot.com/92780044
-https://codereview.appspot.com/93780044

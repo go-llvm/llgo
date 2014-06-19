@@ -629,10 +629,10 @@ func (ctx *manglerContext) mangleEqualFunctionName(t types.Type) string {
 func (ctx *manglerContext) mangleFunctionName(f *ssa.Function) string {
 	var b bytes.Buffer
 
-	if f.Enclosing != nil {
+	if f.Parent() != nil {
 		// Anonymous functions are not guaranteed to
 		// have unique identifiers at the global scope.
-		b.WriteString(f.Enclosing.String())
+		b.WriteString(f.Parent().String())
 		b.WriteRune(':')
 		b.WriteString(f.String())
 		return b.String()
