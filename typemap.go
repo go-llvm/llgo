@@ -1344,6 +1344,7 @@ func (tm *TypeMap) getTypeDescInfo(t types.Type) *typeDescInfo {
 	tm.mc.mangleTypeDescriptorName(t, &b)
 
 	global := llvm.AddGlobal(tm.module, tm.getTypeDescType(t), b.String())
+	global.SetGlobalConstant(true)
 	ptr := llvm.ConstBitCast(global, llvm.PointerType(tm.commonTypeType, 0))
 
 	var mapDescPtr llvm.Value
@@ -1352,6 +1353,7 @@ func (tm *TypeMap) getTypeDescInfo(t types.Type) *typeDescInfo {
 		tm.mc.mangleMapDescriptorName(t, &mapb)
 
 		mapDescPtr = llvm.AddGlobal(tm.module, tm.mapDescType, mapb.String())
+		mapDescPtr.SetGlobalConstant(true)
 		mapDescPtr.SetLinkage(llvm.LinkOnceODRLinkage)
 		mapDescPtr.SetInitializer(tm.makeMapDesc(ptr, m))
 	}
@@ -1401,6 +1403,7 @@ func (tm *TypeMap) getImtPointer(srctype types.Type, targettype *types.Interface
 	var b bytes.Buffer
 	tm.mc.mangleImtName(srctype, targettype, &b)
 	imt := llvm.AddGlobal(tm.module, imtinit.Type(), b.String())
+	imt.SetGlobalConstant(true)
 	imt.SetInitializer(imtinit)
 	imt.SetLinkage(llvm.LinkOnceODRLinkage)
 
@@ -1812,6 +1815,7 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 	uncommonType := llvm.ConstNamedStruct(tm.uncommonTypeType, vals[:])
 
 	uncommonTypePtr := llvm.AddGlobal(tm.module, tm.uncommonTypeType, "")
+	uncommonTypePtr.SetGlobalConstant(true)
 	uncommonTypePtr.SetInitializer(uncommonType)
 	uncommonTypePtr.SetLinkage(llvm.InternalLinkage)
 	return uncommonTypePtr
@@ -1821,12 +1825,14 @@ func (tm *TypeMap) makeUncommonTypePtr(t types.Type) llvm.Value {
 func (tm *TypeMap) globalStringPtr(value string) llvm.Value {
 	strval := llvm.ConstString(value, false)
 	strglobal := llvm.AddGlobal(tm.module, strval.Type(), "")
+	strglobal.SetGlobalConstant(true)
 	strglobal.SetLinkage(llvm.InternalLinkage)
 	strglobal.SetInitializer(strval)
 	strglobal = llvm.ConstBitCast(strglobal, llvm.PointerType(llvm.Int8Type(), 0))
 	strlen := llvm.ConstInt(tm.inttype, uint64(len(value)), false)
 	str := llvm.ConstStruct([]llvm.Value{strglobal, strlen}, false)
 	g := llvm.AddGlobal(tm.module, str.Type(), "")
+	g.SetGlobalConstant(true)
 	g.SetLinkage(llvm.InternalLinkage)
 	g.SetInitializer(str)
 	return g
@@ -1848,6 +1854,7 @@ func (tm *TypeMap) makeSlice(values []llvm.Value, slicetyp llvm.Type) llvm.Value
 	if len(values) > 0 {
 		array := llvm.ConstArray(ptrtyp.ElementType(), values)
 		globalptr = llvm.AddGlobal(tm.module, array.Type(), "")
+		globalptr.SetGlobalConstant(true)
 		globalptr.SetLinkage(llvm.InternalLinkage)
 		globalptr.SetInitializer(array)
 		globalptr = llvm.ConstBitCast(globalptr, ptrtyp)
