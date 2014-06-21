@@ -8,7 +8,7 @@ import (
 	"debug/dwarf"
 	"fmt"
 	"go/token"
-	"path/filepath"
+	"os"
 
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
@@ -23,18 +23,13 @@ const (
 	tagArgVariable  dwarf.Tag = 0x101
 )
 
-type compileUnit struct {
-	md      llvm.Value
-	builder *llvm.DIBuilder
-}
-
 // DIBuilder builds debug metadata for Go programs.
 type DIBuilder struct {
 	// builder is the current builder; there is one per CU.
 	builder    *llvm.DIBuilder
 	module     llvm.Module
 	files      map[*token.File]llvm.Value
-	cu         map[*token.File]compileUnit
+	cu         llvm.Value
 	debugScope []llvm.Value
 	sizes      types.Sizes
 	fset       *token.FileSet
@@ -47,17 +42,17 @@ func NewDIBuilder(sizes types.Sizes, module llvm.Module, fset *token.FileSet) *D
 	var d DIBuilder
 	d.module = module
 	d.files = make(map[*token.File]llvm.Value)
-	d.cu = make(map[*token.File]compileUnit)
 	d.sizes = sizes
 	d.fset = fset
+	d.builder = llvm.NewDIBuilder(d.module)
+	d.cu = d.createCompileUnit()
+	d.pushScope(d.cu)
 	return &d
 }
 
 // Destroy destroys the DIBuilder.
 func (d *DIBuilder) Destroy() {
-	for _, cu := range d.cu {
-		cu.builder.Destroy()
-	}
+	d.builder.Destroy()
 }
 
 func (d *DIBuilder) pushScope(scope llvm.Value) {
@@ -78,80 +73,33 @@ func (d *DIBuilder) scope() llvm.Value {
 }
 
 func (d *DIBuilder) getFile(file *token.File) llvm.Value {
-	if d.files == nil {
-		d.files = make(map[*token.File]llvm.Value)
-	}
 	if diFile := d.files[file]; !diFile.IsNil() {
 		return diFile
 	}
-	dir, filename := filepath.Split(file.Name())
-	diFile := d.builder.CreateFile(filename, dir)
+	diFile := d.builder.CreateFile(file.Name(), "")
 	d.files[file] = diFile
 	return diFile
 }
 
-// PushCompileUnit creates debug metadata for the compile unit
-// whose file contains the specified source position, and pushes
-// it onto the scope stack. If an invalid position is presented,
-// the first file in the file set will be used.
-func (d *DIBuilder) PushCompileUnit(pos token.Pos) {
+// createCompileUnit creates and returns debug metadata for the compile
+// unit as a whole, using the first file in the file set as a representative
+// (the choice of file is arbitrary).
+func (d *DIBuilder) createCompileUnit() llvm.Value {
 	var file *token.File
-	if pos.IsValid() {
-		file = d.fset.File(pos)
-	} else {
-		d.fset.Iterate(func(f *token.File) bool {
-			file = f
-			return false
-		})
+	d.fset.Iterate(func(f *token.File) bool {
+		file = f
+		return false
+	})
+	dir, err := os.Getwd()
+	if err != nil {
+		panic("could not get current directory: " + err.Error())
 	}
-	cu, ok := d.cu[file]
-	if ok {
-		d.builder = cu.builder
-		d.pushScope(cu.md)
-		return
-	}
-	dir, filename := filepath.Split(file.Name())
-	cu.builder = llvm.NewDIBuilder(d.module)
-	cu.md = cu.builder.CreateCompileUnit(llvm.DICompileUnit{
+	return d.builder.CreateCompileUnit(llvm.DICompileUnit{
 		Language: llvm.DW_LANG_Go,
-		File:     filename,
+		File:     file.Name(),
 		Dir:      dir,
 		Producer: "llgo",
 	})
-	d.cu[file] = cu
-	d.builder = cu.builder
-	d.pushScope(cu.md)
-}
-
-// PopLexicalBlock pops the previously pushed compile unit off the scope stack.
-func (d *DIBuilder) PopCompileUnit() {
-	d.debugScope = nil
-	d.builder = nil
-}
-
-// PushLexicalBlock creates debug metadata for the lexical block
-// starting at the specified source position, and pushes it onto
-// the scope stack.
-func (d *DIBuilder) PushLexicalBlock(pos token.Pos) {
-	file := d.fset.File(pos)
-	var line, column int
-	var diFile llvm.Value
-	if file != nil {
-		position := file.Position(pos)
-		line = position.Line
-		column = position.Column
-		diFile = d.getFile(file)
-	}
-	d.pushScope(d.builder.CreateLexicalBlock(d.scope(), llvm.DILexicalBlock{
-		File:   diFile,
-		Line:   line,
-		Column: column,
-	}))
-}
-
-// PopLexicalBlock pops the previously pushed lexical block off the scope stack.
-func (d *DIBuilder) PopLexicalBlock() {
-	d.popScope()
 }
 
 // PushFunction creates debug metadata for the specified function,
@@ -176,8 +124,7 @@ func (d *DIBuilder) PushFunction(fnptr llvm.Value, sig *types.Signature, pos tok
 
 // PopFunction pops the previously pushed function off the scope stack.
 func (d *DIBuilder) PopFunction() {
-	d.popScope() // function
-	d.popScope() // compile unit
+	d.popScope()
 }
 
 // Declare creates an llvm.dbg.declare call for the specified function
@@ -242,9 +189,7 @@ func (d *DIBuilder) Finalize() {
 			llvm.ConstInt(llvm.Int32Type(), 1, false),
 		}),
 	)
-	for _, cu := range d.cu {
-		cu.builder.Finalize()
-	}
+	d.builder.Finalize()
 }
 
 // DIType maps a Go type to DIType debug metadata value.
