@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/token"
 	"os"
+	"strings"
 
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
@@ -23,6 +24,10 @@ const (
 	tagArgVariable  dwarf.Tag = 0x101
 )
 
+type PrefixMap struct {
+	Source, Replacement string
+}
+
 // DIBuilder builds debug metadata for Go programs.
 type DIBuilder struct {
 	// builder is the current builder; there is one per CU.
@@ -33,17 +38,19 @@ type DIBuilder struct {
 	debugScope []llvm.Value
 	sizes      types.Sizes
 	fset       *token.FileSet
+	prefixMaps []PrefixMap
 	types      typeutil.Map
 	voidType   llvm.Value
 }
 
 // NewDIBuilder creates a new debug information builder.
-func NewDIBuilder(sizes types.Sizes, module llvm.Module, fset *token.FileSet) *DIBuilder {
+func NewDIBuilder(sizes types.Sizes, module llvm.Module, fset *token.FileSet, prefixMaps []PrefixMap) *DIBuilder {
 	var d DIBuilder
 	d.module = module
 	d.files = make(map[*token.File]llvm.Value)
 	d.sizes = sizes
 	d.fset = fset
+	d.prefixMaps = prefixMaps
 	d.builder = llvm.NewDIBuilder(d.module)
 	d.cu = d.createCompileUnit()
 	d.pushScope(d.cu)
@@ -72,11 +79,20 @@ func (d *DIBuilder) scope() llvm.Value {
 	return d.debugScope[len(d.debugScope)-1]
 }
 
+func (d *DIBuilder) remapFilePath(path string) string {
+	for _, pm := range d.prefixMaps {
+		if strings.HasPrefix(path, pm.Source) {
+			return pm.Replacement + path[len(pm.Source):]
+		}
+	}
+	return path
+}
+
 func (d *DIBuilder) getFile(file *token.File) llvm.Value {
 	if diFile := d.files[file]; !diFile.IsNil() {
 		return diFile
 	}
-	diFile := d.builder.CreateFile(file.Name(), "")
+	diFile := d.builder.CreateFile(d.remapFilePath(file.Name()), "")
 	d.files[file] = diFile
 	return diFile
 }
@@ -96,7 +112,7 @@ func (d *DIBuilder) createCompileUnit() llvm.Value {
 	}
 	return d.builder.CreateCompileUnit(llvm.DICompileUnit{
 		Language: llvm.DW_LANG_Go,
-		File:     file.Name(),
+		File:     d.remapFilePath(file.Name()),
 		Dir:      dir,
 		Producer: "llgo",
 	})
