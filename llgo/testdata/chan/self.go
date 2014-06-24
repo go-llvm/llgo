@@ -1,7 +1,7 @@
 package main
 
 func main() {
-	ch := make(chan int, 1)
+	ch := make(chan int, uint8(1))
 
 	ch <- 1
 	println(<-ch)

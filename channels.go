@@ -13,6 +13,7 @@ import (
 func (fr *frame) makeChan(chantyp types.Type, size *govalue) *govalue {
 	// TODO(pcc): call __go_new_channel_big here if needed
 	dyntyp := fr.types.ToRuntime(chantyp)
+	size = fr.convert(size, types.Typ[types.Uintptr])
 	ch := fr.runtime.newChannel.call(fr, dyntyp, size.value)[0]
 	return newValue(ch, chantyp)
 }
