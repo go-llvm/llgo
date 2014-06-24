@@ -186,7 +186,7 @@ func (u *unit) getFunctionLinkage(f *ssa.Function) llvm.Linkage {
 		// Synthetic functions outside packages may appear in multiple packages.
 		return llvm.LinkOnceODRLinkage
 
-	case f.Enclosing != nil:
+	case f.Parent() != nil:
 		// Anonymous.
 		return llvm.InternalLinkage
 
@@ -1034,52 +1034,61 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 	}
 }
 
-func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*govalue) []*govalue {
+func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []ssa.Value) []*govalue {
 	switch builtin.Name() {
 	case "print", "println":
-		fr.printValues(builtin.Name() == "println", args...)
+		llargs := make([]*govalue, len(args))
+		for i, arg := range args {
+			llargs[i] = fr.value(arg)
+		}
+		fr.printValues(builtin.Name() == "println", llargs...)
 		return nil
 
 	case "panic":
-		fr.callPanic(args[0])
+		fr.callPanic(fr.value(args[0]))
 		return nil
 
 	case "recover":
 		return []*govalue{fr.callRecover(false)}
 
 	case "append":
-		return []*govalue{fr.callAppend(args[0], args[1])}
+		return []*govalue{fr.callAppend(fr.value(args[0]), fr.value(args[1]))}
 
 	case "close":
-		fr.chanClose(args[0])
+		fr.chanClose(fr.value(args[0]))
 		return nil
 
 	case "cap":
-		return []*govalue{fr.callCap(args[0])}
+		return []*govalue{fr.callCap(fr.value(args[0]))}
 
 	case "len":
-		return []*govalue{fr.callLen(args[0])}
+		return []*govalue{fr.callLen(fr.value(args[0]))}
 
 	case "copy":
-		return []*govalue{fr.callCopy(args[0], args[1])}
+		return []*govalue{fr.callCopy(fr.value(args[0]), fr.value(args[1]))}
 
 	case "delete":
-		fr.mapDelete(args[0], args[1])
+		fr.mapDelete(fr.value(args[0]), fr.value(args[1]))
 		return nil
 
 	case "real":
-		return []*govalue{fr.extractRealValue(args[0])}
+		return []*govalue{fr.extractRealValue(fr.value(args[0]))}
 
 	case "imag":
-		return []*govalue{fr.extractImagValue(args[0])}
+		return []*govalue{fr.extractImagValue(fr.value(args[0]))}
 
 	case "complex":
-		r := args[0].value
-		i := args[1].value
+		r := fr.llvmvalue(args[0])
+		i := fr.llvmvalue(args[1])
 		cmplx := llvm.Undef(fr.llvmtypes.ToLLVM(typ))
 		cmplx = fr.builder.CreateInsertValue(cmplx, r, 0, "")
 		cmplx = fr.builder.CreateInsertValue(cmplx, i, 1, "")
 		return []*govalue{newValue(cmplx, typ)}
+
+	case "ssa:wrapnilchk":
+		ptr := fr.value(args[0])
+		fr.nilCheck(args[0], ptr.value)
+		return []*govalue{ptr}
 
 	default:
 		panic("unimplemented: " + builtin.Name())
@@ -1089,17 +1098,17 @@ func (fr *frame) callBuiltin(typ types.Type, builtin *ssa.Builtin, args []*goval
 // callInstruction translates function call instructions.
 func (fr *frame) callInstruction(instr ssa.CallInstruction) []*govalue {
 	call := instr.Common()
-	args := make([]*govalue, len(call.Args))
-	for i, arg := range call.Args {
-		args[i] = fr.value(arg)
-	}
-
 	if builtin, ok := call.Value.(*ssa.Builtin); ok {
 		var typ types.Type
 		if v := instr.Value(); v != nil {
 			typ = v.Type()
 		}
-		return fr.callBuiltin(typ, builtin, args)
+		return fr.callBuiltin(typ, builtin, call.Args)
+	}
+
+	args := make([]*govalue, len(call.Args))
+	for i, arg := range call.Args {
+		args[i] = fr.value(arg)
 	}
 
 	var fn *govalue
