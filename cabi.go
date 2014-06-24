@@ -199,8 +199,13 @@ func (tm *llvmTypeMap) getBackendOffsets(bt backendType) (offsets []offsetedType
 	return
 }
 
-func (tm *llvmTypeMap) classifyEightbyte(offsets []offsetedType) llvm.Type {
+func (tm *llvmTypeMap) classifyEightbyte(offsets []offsetedType, numInt, numSSE *int) llvm.Type {
 	if len(offsets) == 1 {
+		if _, ok := offsets[0].typ.(*floatBType); ok {
+			*numSSE++
+		} else {
+			*numInt++
+		}
 		return offsets[0].typ.ToLLVM(tm.ctx)
 	}
 	// This implements classification for the basic types and step 4 of the
@@ -215,14 +220,18 @@ func (tm *llvmTypeMap) classifyEightbyte(offsets []offsetedType) llvm.Type {
 	}
 	if sse {
 		// This can only be (float, float), which uses an SSE vector.
+		*numSSE++
 		return llvm.VectorType(tm.ctx.FloatType(), 2)
 	} else {
+		*numInt++
 		width := offsets[len(offsets)-1].offset + tm.target.TypeAllocSize(offsets[len(offsets)-1].typ.ToLLVM(tm.ctx)) - offsets[0].offset
 		return tm.ctx.IntType(int(width) * 8)
 	}
 }
 
-func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribute, bt backendType) ([]llvm.Type, []llvm.Attribute) {
+func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribute, bt backendType) ([]llvm.Type, []llvm.Attribute, int, int) {
+	var numInt, numSSE int
+
 	switch bt := bt.(type) {
 	case *structBType, *arrayBType:
 		bo := tm.getBackendOffsets(bt)
@@ -233,19 +242,19 @@ func (tm *llvmTypeMap) expandType(argTypes []llvm.Type, argAttrs []llvm.Attribut
 		eb1 := bo[0:sp]
 		eb2 := bo[sp:]
 		if len(eb2) > 0 {
-			argTypes = append(argTypes, tm.classifyEightbyte(eb1), tm.classifyEightbyte(eb2))
+			argTypes = append(argTypes, tm.classifyEightbyte(eb1, &numInt, &numSSE), tm.classifyEightbyte(eb2, &numInt, &numSSE))
 			argAttrs = append(argAttrs, 0, 0)
 		} else {
-			argTypes = append(argTypes, tm.classifyEightbyte(eb1))
+			argTypes = append(argTypes, tm.classifyEightbyte(eb1, &numInt, &numSSE))
 			argAttrs = append(argAttrs, 0)
 		}
 
 	default:
-		argTypes = append(argTypes, bt.ToLLVM(tm.ctx))
+		argTypes = append(argTypes, tm.classifyEightbyte([]offsetedType{{bt, 0}}, &numInt, &numSSE))
 		argAttrs = append(argAttrs, 0)
 	}
 
-	return argTypes, argAttrs
+	return argTypes, argAttrs, numInt, numSSE
 }
 
 type argInfo interface {
@@ -549,7 +558,7 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 			}
 			bt := &structBType{retFields}
 
-			retTypes, retAttrs := tm.expandType(nil, nil, bt)
+			retTypes, retAttrs, _, _ := tm.expandType(nil, nil, bt)
 			switch len(retTypes) {
 			case 0: // e.g., empty struct
 				returnType = llvm.VoidType()
@@ -571,18 +580,36 @@ func (tm *llvmTypeMap) getFunctionTypeInfo(args []types.Type, results []types.Ty
 		}
 	}
 
+	// Keep track of the number of INTEGER/SSE class registers remaining.
+	remainingInt := 6
+	remainingSSE := 8
+
 	for _, arg := range args {
 		aik := tm.classify(arg)
 
-		switch aik {
-		case AIK_Direct:
+		isDirect := aik == AIK_Direct
+		if isDirect {
 			bt := tm.getBackendType(arg)
-			argInfo := &directArgInfo{argOffset: len(argTypes), valType: bt.ToLLVM(tm.ctx)}
-			fi.argInfos = append(fi.argInfos, argInfo)
-			argTypes, fi.argAttrs = tm.expandType(argTypes, fi.argAttrs, bt)
-			argInfo.argTypes = argTypes[argInfo.argOffset:len(argTypes)]
+			directArgTypes, directArgAttrs, numInt, numSSE := tm.expandType(argTypes, fi.argAttrs, bt)
 
-		case AIK_Indirect:
+			// Check if the argument can fit into the remaining registers, or if
+			// it would just occupy one register (which pushes the whole argument
+			// onto the stack anyway).
+			if numInt <= remainingInt && numSSE <= remainingSSE || numInt+numSSE == 1 {
+				remainingInt -= numInt
+				remainingSSE -= numSSE
+				argInfo := &directArgInfo{argOffset: len(argTypes), valType: bt.ToLLVM(tm.ctx)}
+				fi.argInfos = append(fi.argInfos, argInfo)
+				argTypes = directArgTypes
+				fi.argAttrs = directArgAttrs
+				argInfo.argTypes = argTypes[argInfo.argOffset:len(argTypes)]
+			} else {
+				// No remaining registers; pass on the stack.
+				isDirect = false
+			}
+		}
+
+		if !isDirect {
 			fi.argInfos = append(fi.argInfos, &indirectArgInfo{len(argTypes)})
 			argTypes = append(argTypes, llvm.PointerType(tm.ToLLVM(arg), 0))
 			fi.argAttrs = append(fi.argAttrs, llvm.ByValAttribute)
