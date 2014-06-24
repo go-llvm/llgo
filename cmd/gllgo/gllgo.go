@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/go-llvm/llgo"
+	"github.com/go-llvm/llgo/debug"
 	"github.com/go-llvm/llvm"
 )
 
@@ -47,11 +48,12 @@ func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
 		importPaths = append(importPaths, filepath.Join(opts.prefix, "lib", "go"))
 	}
 	copts := llgo.CompilerOptions{
-		TargetTriple:  opts.triple,
-		GenerateDebug: opts.generateDebug,
-		DumpSSA:       opts.dumpSSA,
-		GccgoPath:     opts.gccgoPath,
-		ImportPaths:   importPaths,
+		TargetTriple:    opts.triple,
+		GenerateDebug:   opts.generateDebug,
+		DebugPrefixMaps: opts.debugPrefixMaps,
+		DumpSSA:         opts.dumpSSA,
+		GccgoPath:       opts.gccgoPath,
+		ImportPaths:     importPaths,
 	}
 	return llgo.NewCompiler(copts)
 }
@@ -74,24 +76,25 @@ type driverOptions struct {
 	actions []action
 	output  string
 
-	bprefix       string
-	dumpSSA       bool
-	gccgoPath     string
-	generateDebug bool
-	importPaths   []string
-	libPaths      []string
-	llvmArgs      []string
-	lto           bool
-	optLevel      int
-	pic           bool
-	pkgpath       string
-	plugins       []string
-	prefix        string
-	sizeLevel     int
-	staticLibgcc  bool
-	staticLibgo   bool
-	staticLink    bool
-	triple        string
+	bprefix         string
+	debugPrefixMaps []debug.PrefixMap
+	dumpSSA         bool
+	gccgoPath       string
+	generateDebug   bool
+	importPaths     []string
+	libPaths        []string
+	llvmArgs        []string
+	lto             bool
+	optLevel        int
+	pic             bool
+	pkgpath         string
+	plugins         []string
+	prefix          string
+	sizeLevel       int
+	staticLibgcc    bool
+	staticLibgo     bool
+	staticLink      bool
+	triple          string
 }
 
 func getInstPrefix() (string, error) {
@@ -184,6 +187,13 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case args[0] == "-c":
 			actionKind = actionCompile
+
+		case strings.HasPrefix(args[0], "-fdebug-prefix-map="):
+			split := strings.SplitN(args[0][19:], "=", 2)
+			if len(split) < 2 {
+				return opts, fmt.Errorf("argument '%s' must be of form '-fdebug-prefix-map=SOURCE=REPLACEMENT'", args[0])
+			}
+			opts.debugPrefixMaps = append(opts.debugPrefixMaps, debug.PrefixMap{split[0], split[1]})
 
 		case args[0] == "-fdump-ssa":
 			opts.dumpSSA = true

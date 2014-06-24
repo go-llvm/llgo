@@ -242,8 +242,6 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	// Push the compile unit and function onto the debug context.
 	if u.GenerateDebug {
-		u.debug.PushCompileUnit(f.Pos())
-		defer u.debug.PopCompileUnit()
 		u.debug.PushFunction(fr.function, f.Signature, f.Pos())
 		defer u.debug.PopFunction()
 		u.debug.SetLocation(fr.builder, f.Pos())
@@ -530,10 +528,6 @@ func (fr *frame) setupUnwindBlock(rec *ssa.BasicBlock, results *types.Tuple) {
 }
 
 func (fr *frame) translateBlock(b *ssa.BasicBlock, llb llvm.BasicBlock) {
-	if fr.GenerateDebug {
-		fr.debug.PushLexicalBlock(b.Instrs[0].Pos())
-		defer fr.debug.PopLexicalBlock()
-	}
 	fr.builder.SetInsertPointAtEnd(llb)
 	for _, instr := range b.Instrs {
 		fr.instruction(instr)

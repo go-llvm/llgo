@@ -54,6 +54,10 @@ type CompilerOptions struct {
 	// generated in the output module.
 	GenerateDebug bool
 
+	// DebugPrefixMaps is a list of mappings from source prefixes to
+	// replacement prefixes, to be applied in debug info.
+	DebugPrefixMaps []debug.PrefixMap
+
 	// Logger is a logger used for tracing compilation.
 	Logger *log.Logger
 
@@ -213,6 +217,7 @@ func (compiler *compiler) compile(filenames []string, importpath string) (m *Mod
 			types.Sizes(compiler.llvmtypes),
 			compiler.module.Module,
 			impcfg.Fset,
+			compiler.DebugPrefixMaps,
 		)
 		defer compiler.debug.Destroy()
 		defer compiler.debug.Finalize()
