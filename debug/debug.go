@@ -34,7 +34,8 @@ type DIBuilder struct {
 	builder    *llvm.DIBuilder
 	module     llvm.Module
 	files      map[*token.File]llvm.Value
-	cu         llvm.Value
+	cu, fn, lb llvm.Value
+	fnFile     string
 	debugScope []llvm.Value
 	sizes      types.Sizes
 	fset       *token.FileSet
@@ -53,7 +54,6 @@ func NewDIBuilder(sizes types.Sizes, module llvm.Module, fset *token.FileSet, pr
 	d.prefixMaps = prefixMaps
 	d.builder = llvm.NewDIBuilder(d.module)
 	d.cu = d.createCompileUnit()
-	d.pushScope(d.cu)
 	return &d
 }
 
@@ -62,21 +62,14 @@ func (d *DIBuilder) Destroy() {
 	d.builder.Destroy()
 }
 
-func (d *DIBuilder) pushScope(scope llvm.Value) {
-	d.debugScope = append(d.debugScope, scope)
-}
-
-func (d *DIBuilder) popScope() (top llvm.Value) {
-	n := len(d.debugScope)
-	top, d.debugScope = d.debugScope[n-1], d.debugScope[:n-1]
-	return top
-}
-
 func (d *DIBuilder) scope() llvm.Value {
-	if len(d.debugScope) == 0 {
-		panic("no scope set")
+	if d.lb.C != nil {
+		return d.lb
 	}
-	return d.debugScope[len(d.debugScope)-1]
+	if d.fn.C != nil {
+		return d.fn
+	}
+	return d.cu
 }
 
 func (d *DIBuilder) remapFilePath(path string) string {
@@ -124,10 +117,11 @@ func (d *DIBuilder) PushFunction(fnptr llvm.Value, sig *types.Signature, pos tok
 	var diFile llvm.Value
 	var line int
 	if file := d.fset.File(pos); file != nil {
+		d.fnFile = file.Name()
 		diFile = d.getFile(file)
 		line = file.Line(pos)
 	}
-	d.pushScope(d.builder.CreateFunction(d.scope(), llvm.DIFunction{
+	d.fn = d.builder.CreateFunction(d.scope(), llvm.DIFunction{
 		Name:         fnptr.Name(), // TODO(axw) unmangled name?
 		LinkageName:  fnptr.Name(),
 		File:         diFile,
@@ -135,12 +129,14 @@ func (d *DIBuilder) PushFunction(fnptr llvm.Value, sig *types.Signature, pos tok
 		Type:         d.DIType(sig),
 		IsDefinition: true,
 		Function:     fnptr,
-	}))
+	})
 }
 
 // PopFunction pops the previously pushed function off the scope stack.
 func (d *DIBuilder) PopFunction() {
-	d.popScope()
+	d.lb = llvm.Value{nil}
+	d.fn = llvm.Value{nil}
+	d.fnFile = ""
 }
 
 // Declare creates an llvm.dbg.declare call for the specified function
@@ -178,6 +174,12 @@ func (d *DIBuilder) SetLocation(b llvm.Builder, pos token.Pos) {
 		return
 	}
 	position := d.fset.Position(pos)
+	d.lb = llvm.Value{nil}
+	if position.Filename != d.fnFile {
+		// This can happen rarely, e.g. in init functions.
+		diFile := d.builder.CreateFile(d.remapFilePath(position.Filename), "")
+		d.lb = d.builder.CreateLexicalBlockFile(d.scope(), diFile)
+	}
 	b.SetCurrentDebugLocation(llvm.MDNode([]llvm.Value{
 		llvm.ConstInt(llvm.Int32Type(), uint64(position.Line), false),
 		llvm.ConstInt(llvm.Int32Type(), uint64(position.Column), false),
