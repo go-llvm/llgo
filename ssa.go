@@ -14,6 +14,7 @@ import (
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
+	"github.com/go-llvm/llgo/ssaopt"
 	"github.com/go-llvm/llvm"
 )
 
@@ -225,6 +226,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 	if len(f.Blocks) == 0 {
 		return
 	}
+
+	ssaopt.LowerAllocsToStack(f)
 
 	if u.DumpSSA {
 		f.WriteTo(os.Stderr)
