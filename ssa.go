@@ -305,7 +305,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		fr.memsetZero(alloca, llvm.SizeOf(typ))
-		value := newValue(alloca, local.Type())
+		bcalloca := fr.builder.CreateBitCast(alloca, llvm.PointerType(llvm.Int8Type(), 0), "")
+		value := newValue(bcalloca, local.Type())
 		fr.env[local] = value
 		if fr.GenerateDebug {
 			paramIndex, ok := paramPos[local.Pos()]
