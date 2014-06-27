@@ -7,7 +7,7 @@ bootstrap: workdir/.bootstrap-stamp
 install: bootstrap
 	./install.sh $(prefix)
 
-workdir/.bootstrap-stamp: workdir/.update-libgo-stamp workdir/.update-clang-stamp bootstrap.sh *.go build/*.go cmd/gllgo/*.go cmd/cc-wrapper/*.go debug/*.go
+workdir/.bootstrap-stamp: workdir/.update-libgo-stamp workdir/.update-clang-stamp bootstrap.sh *.go build/*.go cmd/gllgo/*.go cmd/cc-wrapper/*.go debug/*.go ssaopt/*.go
 	./bootstrap.sh $(bootstrap) -j$(j)
 
 workdir/.update-clang-stamp: update_clang.sh

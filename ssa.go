@@ -14,6 +14,7 @@ import (
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
+	"github.com/go-llvm/llgo/ssaopt"
 	"github.com/go-llvm/llvm"
 )
 
@@ -226,6 +227,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		return
 	}
 
+	ssaopt.LowerAllocsToStack(f)
+
 	if u.DumpSSA {
 		f.WriteTo(os.Stderr)
 	}
@@ -305,7 +308,8 @@ func (u *unit) defineFunction(f *ssa.Function) {
 		typ := fr.llvmtypes.ToLLVM(deref(local.Type()))
 		alloca := fr.builder.CreateAlloca(typ, local.Comment)
 		fr.memsetZero(alloca, llvm.SizeOf(typ))
-		value := newValue(alloca, local.Type())
+		bcalloca := fr.builder.CreateBitCast(alloca, llvm.PointerType(llvm.Int8Type(), 0), "")
+		value := newValue(bcalloca, local.Type())
 		fr.env[local] = value
 		if fr.GenerateDebug {
 			paramIndex, ok := paramPos[local.Pos()]
