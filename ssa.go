@@ -18,10 +18,82 @@ import (
 	"github.com/go-llvm/llvm"
 )
 
+// A globalInit is used to temporarily store a global's initializer until
+// we are ready to build it.
+type globalInit struct {
+	val   llvm.Value
+	elems []globalInit
+}
+
+func (gi *globalInit) update(typ llvm.Type, indices []uint32, val llvm.Value) {
+	if len(indices) == 0 {
+		gi.val = val
+		return
+	}
+
+	if gi.val.C != nil {
+		gi.val = llvm.ConstInsertValue(gi.val, val, indices)
+	}
+
+	tk := typ.TypeKind()
+
+	if len(gi.elems) == 0 {
+		switch tk {
+		case llvm.StructTypeKind:
+			gi.elems = make([]globalInit, typ.StructElementTypesCount())
+		case llvm.ArrayTypeKind:
+			gi.elems = make([]globalInit, typ.ArrayLength())
+		default:
+			panic("unexpected type")
+		}
+	}
+
+	var eltyp llvm.Type
+	switch tk {
+	case llvm.StructTypeKind:
+		eltyp = typ.StructElementTypes()[indices[0]]
+	case llvm.ArrayTypeKind:
+		eltyp = typ.ElementType()
+	default:
+		panic("unexpected type")
+	}
+
+	gi.elems[indices[0]].update(eltyp, indices[1:], val)
+}
+
+func (gi *globalInit) build(typ llvm.Type) llvm.Value {
+	if gi.val.C != nil {
+		return gi.val
+	}
+	if len(gi.elems) == 0 {
+		return llvm.ConstNull(typ)
+	}
+
+	switch typ.TypeKind() {
+	case llvm.StructTypeKind:
+		eltypes := typ.StructElementTypes()
+		elems := make([]llvm.Value, len(eltypes))
+		for i, eltyp := range eltypes {
+			elems[i] = gi.elems[i].build(eltyp)
+		}
+		return llvm.ConstStruct(elems, false)
+	case llvm.ArrayTypeKind:
+		eltyp := typ.ElementType()
+		elems := make([]llvm.Value, len(gi.elems))
+		for i := range gi.elems {
+			elems[i] = gi.elems[i].build(eltyp)
+		}
+		return llvm.ConstArray(eltyp, elems)
+	default:
+		panic("unexpected type")
+	}
+}
+
 type unit struct {
 	*compiler
-	pkg     *ssa.Package
-	globals map[ssa.Value]llvm.Value
+	pkg         *ssa.Package
+	globals     map[ssa.Value]llvm.Value
+	globalInits map[llvm.Value]*globalInit
 
 	// funcDescriptors maps *ssa.Functions to function descriptors,
 	// the first-class representation of functions.
@@ -39,6 +111,7 @@ func newUnit(c *compiler, pkg *ssa.Package) *unit {
 		compiler:        c,
 		pkg:             pkg,
 		globals:         make(map[ssa.Value]llvm.Value),
+		globalInits:     make(map[llvm.Value]*globalInit),
 		funcDescriptors: make(map[*ssa.Function]llvm.Value),
 		undefinedFuncs:  make(map[*ssa.Function]bool),
 	}
@@ -100,13 +173,12 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 			llelemtyp := u.llvmtypes.ToLLVM(elemtyp)
 			vname := u.types.mc.mangleGlobalName(v)
 			global := llvm.AddGlobal(u.module.Module, llelemtyp, vname)
-			global.SetInitializer(llvm.ConstNull(llelemtyp))
 			if !v.Object().Exported() {
 				global.SetLinkage(llvm.InternalLinkage)
 			}
+			u.addGlobal(global, elemtyp)
 			global = llvm.ConstBitCast(global, u.llvmtypes.ToLLVM(v.Type()))
 			u.globals[v] = global
-			u.maybeAddGcRoot(global, elemtyp)
 		case *ssa.Type:
 			u.types.getTypeDescriptorPointer(v.Type())
 		}
@@ -122,9 +194,17 @@ func (u *unit) translatePackage(pkg *ssa.Package) {
 	// Define remaining functions that were resolved during
 	// runtime type mapping, but not defined.
 	u.defineFunctionsInOrder(u.undefinedFuncs)
+
+	// Set initializers for globals.
+	for global, init := range u.globalInits {
+		initval := init.build(global.Type().ElementType())
+		global.SetInitializer(initval)
+	}
 }
 
-func (u *unit) maybeAddGcRoot(global llvm.Value, ty types.Type) {
+func (u *unit) addGlobal(global llvm.Value, ty types.Type) {
+	u.globalInits[global] = new(globalInit)
+
 	if hasPointers(ty) {
 		global = llvm.ConstBitCast(global, llvm.PointerType(llvm.Int8Type(), 0))
 		size := llvm.ConstInt(u.types.inttype, uint64(u.types.Sizeof(ty)), false)
@@ -672,9 +752,13 @@ func (fr *frame) maybeStoreInInitializer(val, addr llvm.Value) bool {
 		// TODO(pcc): Explicitly check that this is a constant GEP.
 		// I don't think there are any other kinds of constantexpr which
 		// satisfy the conditions we test for here, so this is probably safe.
-		!addr.Operand(0).IsAGlobalVariable().IsNil() && !addr.Operand(0).Initializer().IsNil() &&
+		!addr.Operand(0).IsAGlobalVariable().IsNil() &&
 		addr.Operand(1).IsNull() {
 		gv := addr.Operand(0)
+		globalInit, ok := fr.globalInits[gv]
+		if !ok {
+			return false
+		}
 		indices := make([]uint32, addr.OperandsCount()-2)
 		for i := range indices {
 			op := addr.Operand(i + 2)
@@ -683,11 +767,14 @@ func (fr *frame) maybeStoreInInitializer(val, addr llvm.Value) bool {
 			}
 			indices[i] = uint32(op.ZExtValue())
 		}
-		gv.SetInitializer(llvm.ConstInsertValue(gv.Initializer(), val, indices))
+		globalInit.update(gv.Type().ElementType(), indices, val)
 		return true
-	} else if !addr.IsAGlobalVariable().IsNil() && !addr.Initializer().IsNil() {
-		addr.SetInitializer(val)
-		return true
+	} else if !addr.IsAGlobalVariable().IsNil() {
+		if globalInit, ok := fr.globalInits[addr]; ok {
+			globalInit.update(addr.Type().ElementType(), nil, val)
+			return true
+		}
+		return false
 	} else {
 		return false
 	}
@@ -714,8 +801,7 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 			// variables as static initializations.
 			global := llvm.AddGlobal(fr.module.Module, llvmtyp, "")
 			global.SetLinkage(llvm.InternalLinkage)
-			global.SetInitializer(llvm.ConstNull(llvmtyp))
-			fr.maybeAddGcRoot(global, typ)
+			fr.addGlobal(global, typ)
 			ptr := llvm.ConstBitCast(global, llvm.PointerType(llvm.Int8Type(), 0))
 			fr.env[instr] = newValue(ptr, instr.Type())
 		} else {
