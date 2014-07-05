@@ -30,6 +30,8 @@ func (fr *frame) mapLookup(m, k *govalue) (v *govalue, ok *govalue) {
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
 	valptr := fr.runtime.mapIndex.call(fr, m.value, pk, boolLLVMValue(false))[0]
+	valptr.AddInstrAttribute(2, llvm.NoCaptureAttribute)
+	valptr.AddInstrAttribute(2, llvm.ReadOnlyAttribute)
 	okbit := fr.builder.CreateIsNotNull(valptr, "")
 
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
@@ -44,6 +46,8 @@ func (fr *frame) mapUpdate(m, k, v *govalue) {
 	pk := fr.allocaBuilder.CreateAlloca(llk.Type(), "")
 	fr.builder.CreateStore(llk, pk)
 	valptr := fr.runtime.mapIndex.call(fr, m.value, pk, boolLLVMValue(true))[0]
+	valptr.AddInstrAttribute(2, llvm.NoCaptureAttribute)
+	valptr.AddInstrAttribute(2, llvm.ReadOnlyAttribute)
 
 	elemtyp := m.Type().Underlying().(*types.Map).Elem()
 	llelemtyp := fr.types.ToLLVM(elemtyp)

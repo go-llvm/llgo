@@ -308,7 +308,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 	return opts, nil
 }
 
-func runPasses(opts *driverOptions, m llvm.Module) {
+func runPasses(opts *driverOptions, tm llvm.TargetMachine, m llvm.Module) {
 	fpm := llvm.NewFunctionPassManagerForModule(m)
 	defer fpm.Dispose()
 
@@ -320,6 +320,15 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 
 	pmb.SetOptLevel(opts.optLevel)
 	pmb.SetSizeLevel(opts.sizeLevel)
+
+	target := tm.TargetData()
+	mpm.Add(target)
+	fpm.Add(target)
+	tm.AddAnalysisPasses(mpm)
+	tm.AddAnalysisPasses(fpm)
+
+	mpm.AddVerifierPass()
+	fpm.AddVerifierPass()
 
 	pmb.Populate(mpm)
 	pmb.PopulateFunc(fpm)
@@ -374,7 +383,28 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			edataglobal.SetSection(".go_export")
 		}
 
-		runPasses(opts, module.Module)
+		target, err := llvm.GetTargetFromTriple(opts.triple)
+		if err != nil {
+			return err
+		}
+
+		optLevel := [...]llvm.CodeGenOptLevel{
+			llvm.CodeGenLevelNone,
+			llvm.CodeGenLevelLess,
+			llvm.CodeGenLevelDefault,
+			llvm.CodeGenLevelAggressive,
+		}[opts.optLevel]
+
+		relocMode := llvm.RelocStatic
+		if opts.pic {
+			relocMode = llvm.RelocPIC
+		}
+
+		tm := target.CreateTargetMachine(opts.triple, "", "", optLevel,
+			relocMode, llvm.CodeModelDefault)
+		defer tm.Dispose()
+
+		runPasses(opts, tm, module.Module)
 
 		var file *os.File
 		if output == "-" {
@@ -389,27 +419,6 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 		switch {
 		case !opts.lto:
-			target, err := llvm.GetTargetFromTriple(opts.triple)
-			if err != nil {
-				return err
-			}
-
-			optLevel := [...]llvm.CodeGenOptLevel{
-				llvm.CodeGenLevelNone,
-				llvm.CodeGenLevelLess,
-				llvm.CodeGenLevelDefault,
-				llvm.CodeGenLevelAggressive,
-			}[opts.optLevel]
-
-			relocMode := llvm.RelocStatic
-			if opts.pic {
-				relocMode = llvm.RelocPIC
-			}
-
-			tm := target.CreateTargetMachine(opts.triple, "", "", optLevel,
-				relocMode, llvm.CodeModelDefault)
-			defer tm.Dispose()
-
 			fileType := llvm.AssemblyFile
 			if kind == actionCompile {
 				fileType = llvm.ObjectFile
