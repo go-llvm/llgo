@@ -451,6 +451,7 @@ type frame struct {
 	unwindBlock            llvm.BasicBlock
 	frameptr               llvm.Value
 	env                    map[ssa.Value]*govalue
+	ptr                    map[ssa.Value]llvm.Value
 	tuples                 map[ssa.Value][]*govalue
 	phis                   []pendingPhi
 	canRecover             llvm.Value
@@ -464,6 +465,7 @@ func newFrame(u *unit, fn llvm.Value) *frame {
 		builder:       llvm.GlobalContext().NewBuilder(),
 		allocaBuilder: llvm.GlobalContext().NewBuilder(),
 		env:           make(map[ssa.Value]*govalue),
+		ptr:           make(map[ssa.Value]llvm.Value),
 		tuples:        make(map[ssa.Value][]*govalue),
 	}
 }
@@ -685,6 +687,19 @@ func (fr *frame) nilCheck(v ssa.Value, llptr llvm.Value) {
 	}
 }
 
+func (fr *frame) canAvoidElementLoad(refs []ssa.Instruction) bool {
+	for _, ref := range refs {
+		switch ref.(type) {
+		case *ssa.Field, *ssa.Index:
+			// ok
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
 // If this value is sufficiently large, look through referrers to see if we can
 // avoid a load.
 func (fr *frame) canAvoidLoad(instr *ssa.UnOp, op llvm.Value) bool {
@@ -693,25 +708,32 @@ func (fr *frame) canAvoidLoad(instr *ssa.UnOp, op llvm.Value) bool {
 		return false
 	}
 
-	// We only know how to avoid loads if they are used to create an interface.
-	// If we see a non-MakeInterface referrer, abort.
+	// Keep track of whether our pointer may escape. We conservatively assume
+	// that MakeInterfaces will escape.
+	esc := false
+
+	// We only know how to avoid loads if they are used to create an interface
+	// or read an element of the structure. If we see any other referrer, abort.
 	for _, ref := range *instr.Referrers() {
-		if _, ok := ref.(*ssa.MakeInterface); !ok {
+		switch ref.(type) {
+		case *ssa.MakeInterface:
+			esc = true
+		case *ssa.Field, *ssa.Index:
+			// ok
+		default:
 			return false
 		}
 	}
 
-	// We now know that each referrer is a MakeInterface. Create the
-	// interfaces and store them in fr.env. Although the MakeInterface could
-	// be in another basic block, it is safe to create the interfaces here
-	// because the operation cannot fail. We cannot create the interface at
-	// the point where the MakeInterface instruction is because the memory
-	// might have changed in the meantime.
-	for _, ref := range *instr.Referrers() {
-		mi := ref.(*ssa.MakeInterface)
-		fr.env[mi] = fr.makeInterfaceFromPointer(op, instr.Type(), mi.Type())
+	var opcopy llvm.Value
+	if esc {
+		opcopy = fr.createTypeMalloc(instr.Type())
+	} else {
+		opcopy = fr.allocaBuilder.CreateAlloca(fr.types.ToLLVM(instr.Type()), "")
 	}
+	fr.memcpy(opcopy, op, llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(instr.Type())), false))
 
+	fr.ptr[instr] = opcopy
 	return true
 }
 
@@ -861,10 +883,19 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = newValue(elem, elemtyp)
 
 	case *ssa.Field:
-		value := fr.llvmvalue(instr.X)
-		field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
 		fieldtyp := instr.Type()
-		fr.env[instr] = newValue(field, fieldtyp)
+		if p, ok := fr.ptr[instr.X]; ok {
+			field := fr.builder.CreateStructGEP(p, instr.Field, instr.Name())
+			if fr.canAvoidElementLoad(*instr.Referrers()) {
+				fr.ptr[instr] = field
+			} else {
+				fr.env[instr] = newValue(fr.builder.CreateLoad(field, ""), fieldtyp)
+			}
+		} else {
+			value := fr.llvmvalue(instr.X)
+			field := fr.builder.CreateExtractValue(value, instr.Field, instr.Name())
+			fr.env[instr] = newValue(field, fieldtyp)
+		}
 
 	case *ssa.FieldAddr:
 		ptr := fr.llvmvalue(instr.X)
@@ -890,15 +921,20 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.builder.CreateCondBr(cond, trueBlock, falseBlock)
 
 	case *ssa.Index:
-		// The optimiser will remove the alloca/store/load
-		// instructions if the array is already addressable.
-		array := fr.llvmvalue(instr.X)
-		arrayptr := fr.allocaBuilder.CreateAlloca(array.Type(), "")
+		var arrayptr llvm.Value
+
+		if ptr, ok := fr.ptr[instr.X]; ok {
+			arrayptr = ptr
+		} else {
+			array := fr.llvmvalue(instr.X)
+			arrayptr = fr.allocaBuilder.CreateAlloca(array.Type(), "")
+
+			fr.builder.CreateStore(array, arrayptr)
+		}
+		index := fr.llvmvalue(instr.Index)
+
 		arraytyp := instr.X.Type().Underlying().(*types.Array)
 		arraylen := llvm.ConstInt(fr.llvmtypes.inttype, uint64(arraytyp.Len()), false)
-
-		fr.builder.CreateStore(array, arrayptr)
-		index := fr.llvmvalue(instr.Index)
 
 		// The index may not have been promoted to int (for example, if it
 		// came from a composite literal).
@@ -914,7 +950,11 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.condBrRuntimeError(cond, gccgoRuntimeErrorARRAY_INDEX_OUT_OF_BOUNDS)
 
 		addr := fr.builder.CreateGEP(arrayptr, []llvm.Value{zero, index}, "")
-		fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
+		if fr.canAvoidElementLoad(*instr.Referrers()) {
+			fr.ptr[instr] = addr
+		} else {
+			fr.env[instr] = newValue(fr.builder.CreateLoad(addr, ""), instr.Type())
+		}
 
 	case *ssa.IndexAddr:
 		x := fr.llvmvalue(instr.X)
@@ -988,8 +1028,10 @@ func (fr *frame) instruction(instr ssa.Instruction) {
 		fr.env[instr] = fr.makeClosure(fn, bindings)
 
 	case *ssa.MakeInterface:
-		// fr.env[instr] will be set if a pointer load was elided by canAvoidLoad
-		if _, ok := fr.env[instr]; !ok {
+		// fr.ptr[instr.X] will be set if a pointer load was elided by canAvoidLoad
+		if ptr, ok := fr.ptr[instr.X]; ok {
+			fr.env[instr] = fr.makeInterfaceFromPointer(ptr, instr.X.Type(), instr.Type())
+		} else {
 			receiver := fr.llvmvalue(instr.X)
 			fr.env[instr] = fr.makeInterface(receiver, instr.X.Type(), instr.Type())
 		}

@@ -69,24 +69,17 @@ func (fr *frame) compareInterfaces(a, b *govalue) *govalue {
 }
 
 func (fr *frame) makeInterface(llv llvm.Value, vty types.Type, iface types.Type) *govalue {
-	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
 	if _, ok := vty.Underlying().(*types.Pointer); !ok {
 		ptr := fr.createTypeMalloc(vty)
 		fr.builder.CreateStore(llv, ptr)
-		llv = fr.builder.CreateBitCast(ptr, i8ptr, "")
+		llv = ptr
 	}
-	value := llvm.Undef(fr.types.ToLLVM(iface))
-	itab := fr.types.getItabPointer(vty, iface.Underlying().(*types.Interface))
-	value = fr.builder.CreateInsertValue(value, itab, 0, "")
-	value = fr.builder.CreateInsertValue(value, llv, 1, "")
-	return newValue(value, iface)
+	return fr.makeInterfaceFromPointer(llv, vty, iface)
 }
 
 func (fr *frame) makeInterfaceFromPointer(vptr llvm.Value, vty types.Type, iface types.Type) *govalue {
 	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
-	ptr := fr.createTypeMalloc(vty)
-	fr.memcpy(ptr, vptr, llvm.ConstInt(fr.types.inttype, uint64(fr.types.Sizeof(vty)), false))
-	llv := fr.builder.CreateBitCast(ptr, i8ptr, "")
+	llv := fr.builder.CreateBitCast(vptr, i8ptr, "")
 	value := llvm.Undef(fr.types.ToLLVM(iface))
 	itab := fr.types.getItabPointer(vty, iface.Underlying().(*types.Interface))
 	value = fr.builder.CreateInsertValue(value, itab, 0, "")
