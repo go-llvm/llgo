@@ -79,6 +79,7 @@ type driverOptions struct {
 	bprefix         string
 	debugPrefixMaps []debug.PrefixMap
 	dumpSSA         bool
+	emitIR          bool
 	gccgoPath       string
 	generateDebug   bool
 	importPaths     []string
@@ -214,7 +215,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-fno-toplevel-reorder":
 			// This is a GCC-specific code generation option. Ignore.
 
-		case args[0] == "-emit-llvm", args[0] == "-flto":
+		case args[0] == "-emit-llvm":
+			opts.emitIR = true
+
+		case args[0] == "-flto":
 			opts.lto = true
 
 		case args[0] == "-fPIC":
@@ -445,7 +449,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 
 		switch {
-		case !opts.lto:
+		case !opts.lto && !opts.emitIR:
 			if module.ExportData != nil {
 				asm := getMetadataSectionInlineAsm(".go_export")
 				asm += getDataInlineAsm(module.ExportData)
@@ -457,6 +461,39 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 				fileType = llvm.ObjectFile
 			}
 			mb, err := tm.EmitToMemoryBuffer(module.Module, fileType)
+			if err != nil {
+				return err
+			}
+			defer mb.Dispose()
+
+			bytes := mb.Bytes()
+			_, err = file.Write(bytes)
+			return err
+
+		case opts.lto:
+			bcmb := llvm.WriteBitcodeToMemoryBuffer(module.Module)
+			defer bcmb.Dispose()
+
+			// This is a bit of a hack. We just want an object file
+			// containing some metadata sections. This might be simpler
+			// if we had bindings for the MC library, but for now we create
+			// a fresh module containing only inline asm that creates the
+			// sections.
+			outmodule := llvm.NewModule("")
+			defer outmodule.Dispose()
+			asm := getMetadataSectionInlineAsm(".llvmbc")
+			asm += getDataInlineAsm(bcmb.Bytes())
+			if module.ExportData != nil {
+				asm += getMetadataSectionInlineAsm(".go_export")
+				asm += getDataInlineAsm(module.ExportData)
+			}
+			outmodule.SetInlineAsm(asm)
+
+			fileType := llvm.AssemblyFile
+			if kind == actionCompile {
+				fileType = llvm.ObjectFile
+			}
+			mb, err := tm.EmitToMemoryBuffer(outmodule, fileType)
 			if err != nil {
 				return err
 			}
