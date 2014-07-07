@@ -342,6 +342,41 @@ func runPasses(opts *driverOptions, tm llvm.TargetMachine, m llvm.Module) {
 	mpm.Run(m)
 }
 
+func getMetadataSectionInlineAsm(name string) string {
+	// ELF: creates a non-allocated excluded section.
+	return ".section \"" + name + "\", \"e\"\n"
+}
+
+func getDataInlineAsm(data []byte) string {
+	edata := make([]byte, len(data)*4+10)
+
+	j := copy(edata, ".ascii \"")
+	for i := range data {
+		switch data[i] {
+		case '\000':
+			edata[j] = '\\'
+			edata[j+1] = '0'
+			edata[j+2] = '0'
+			edata[j+3] = '0'
+			j += 4
+			continue
+		case '\n':
+			edata[j] = '\\'
+			edata[j+1] = 'n'
+			j += 2
+			continue
+		case '"', '\\':
+			edata[j] = '\\'
+			j++
+		}
+		edata[j] = data[i]
+		j++
+	}
+	edata[j] = '"'
+	edata[j+1] = '\n'
+	return string(edata[0 : j+2])
+}
+
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
 	case actionPrint:
@@ -374,14 +409,6 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 
 		defer module.Dispose()
-
-		// TODO(pcc): Decide how we want to expose export data for LTO.
-		if !opts.lto && module.ExportData != nil {
-			edatainit := llvm.ConstString(string(module.ExportData), false)
-			edataglobal := llvm.AddGlobal(module.Module, edatainit.Type(), module.Path+".export")
-			edataglobal.SetInitializer(edatainit)
-			edataglobal.SetSection(".go_export")
-		}
 
 		target, err := llvm.GetTargetFromTriple(opts.triple)
 		if err != nil {
@@ -419,6 +446,12 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 		switch {
 		case !opts.lto:
+			if module.ExportData != nil {
+				asm := getMetadataSectionInlineAsm(".go_export")
+				asm += getDataInlineAsm(module.ExportData)
+				module.Module.SetInlineAsm(asm)
+			}
+
 			fileType := llvm.AssemblyFile
 			if kind == actionCompile {
 				fileType = llvm.ObjectFile
