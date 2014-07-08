@@ -79,6 +79,7 @@ type driverOptions struct {
 	bprefix         string
 	debugPrefixMaps []debug.PrefixMap
 	dumpSSA         bool
+	emitIR          bool
 	gccgoPath       string
 	generateDebug   bool
 	importPaths     []string
@@ -214,7 +215,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-fno-toplevel-reorder":
 			// This is a GCC-specific code generation option. Ignore.
 
-		case args[0] == "-emit-llvm", args[0] == "-flto":
+		case args[0] == "-emit-llvm":
+			opts.emitIR = true
+
+		case args[0] == "-flto":
 			opts.lto = true
 
 		case args[0] == "-fPIC":
@@ -308,7 +312,7 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 	return opts, nil
 }
 
-func runPasses(opts *driverOptions, m llvm.Module) {
+func runPasses(opts *driverOptions, tm llvm.TargetMachine, m llvm.Module) {
 	fpm := llvm.NewFunctionPassManagerForModule(m)
 	defer fpm.Dispose()
 
@@ -321,6 +325,15 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 	pmb.SetOptLevel(opts.optLevel)
 	pmb.SetSizeLevel(opts.sizeLevel)
 
+	target := tm.TargetData()
+	mpm.Add(target)
+	fpm.Add(target)
+	tm.AddAnalysisPasses(mpm)
+	tm.AddAnalysisPasses(fpm)
+
+	mpm.AddVerifierPass()
+	fpm.AddVerifierPass()
+
 	pmb.Populate(mpm)
 	pmb.PopulateFunc(fpm)
 
@@ -331,6 +344,41 @@ func runPasses(opts *driverOptions, m llvm.Module) {
 	fpm.FinalizeFunc()
 
 	mpm.Run(m)
+}
+
+func getMetadataSectionInlineAsm(name string) string {
+	// ELF: creates a non-allocated excluded section.
+	return ".section \"" + name + "\", \"e\"\n"
+}
+
+func getDataInlineAsm(data []byte) string {
+	edata := make([]byte, len(data)*4+10)
+
+	j := copy(edata, ".ascii \"")
+	for i := range data {
+		switch data[i] {
+		case '\000':
+			edata[j] = '\\'
+			edata[j+1] = '0'
+			edata[j+2] = '0'
+			edata[j+3] = '0'
+			j += 4
+			continue
+		case '\n':
+			edata[j] = '\\'
+			edata[j+1] = 'n'
+			j += 2
+			continue
+		case '"', '\\':
+			edata[j] = '\\'
+			j++
+		}
+		edata[j] = data[i]
+		j++
+	}
+	edata[j] = '"'
+	edata[j+1] = '\n'
+	return string(edata[0 : j+2])
 }
 
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
@@ -366,15 +414,28 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 
 		defer module.Dispose()
 
-		// TODO(pcc): Decide how we want to expose export data for LTO.
-		if !opts.lto && module.ExportData != nil {
-			edatainit := llvm.ConstString(string(module.ExportData), false)
-			edataglobal := llvm.AddGlobal(module.Module, edatainit.Type(), module.Path+".export")
-			edataglobal.SetInitializer(edatainit)
-			edataglobal.SetSection(".go_export")
+		target, err := llvm.GetTargetFromTriple(opts.triple)
+		if err != nil {
+			return err
 		}
 
-		runPasses(opts, module.Module)
+		optLevel := [...]llvm.CodeGenOptLevel{
+			llvm.CodeGenLevelNone,
+			llvm.CodeGenLevelLess,
+			llvm.CodeGenLevelDefault,
+			llvm.CodeGenLevelAggressive,
+		}[opts.optLevel]
+
+		relocMode := llvm.RelocStatic
+		if opts.pic {
+			relocMode = llvm.RelocPIC
+		}
+
+		tm := target.CreateTargetMachine(opts.triple, "", "", optLevel,
+			relocMode, llvm.CodeModelDefault)
+		defer tm.Dispose()
+
+		runPasses(opts, tm, module.Module)
 
 		var file *os.File
 		if output == "-" {
@@ -388,33 +449,51 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		}
 
 		switch {
-		case !opts.lto:
-			target, err := llvm.GetTargetFromTriple(opts.triple)
-			if err != nil {
-				return err
+		case !opts.lto && !opts.emitIR:
+			if module.ExportData != nil {
+				asm := getMetadataSectionInlineAsm(".go_export")
+				asm += getDataInlineAsm(module.ExportData)
+				module.Module.SetInlineAsm(asm)
 			}
-
-			optLevel := [...]llvm.CodeGenOptLevel{
-				llvm.CodeGenLevelNone,
-				llvm.CodeGenLevelLess,
-				llvm.CodeGenLevelDefault,
-				llvm.CodeGenLevelAggressive,
-			}[opts.optLevel]
-
-			relocMode := llvm.RelocStatic
-			if opts.pic {
-				relocMode = llvm.RelocPIC
-			}
-
-			tm := target.CreateTargetMachine(opts.triple, "", "", optLevel,
-				relocMode, llvm.CodeModelDefault)
-			defer tm.Dispose()
 
 			fileType := llvm.AssemblyFile
 			if kind == actionCompile {
 				fileType = llvm.ObjectFile
 			}
 			mb, err := tm.EmitToMemoryBuffer(module.Module, fileType)
+			if err != nil {
+				return err
+			}
+			defer mb.Dispose()
+
+			bytes := mb.Bytes()
+			_, err = file.Write(bytes)
+			return err
+
+		case opts.lto:
+			bcmb := llvm.WriteBitcodeToMemoryBuffer(module.Module)
+			defer bcmb.Dispose()
+
+			// This is a bit of a hack. We just want an object file
+			// containing some metadata sections. This might be simpler
+			// if we had bindings for the MC library, but for now we create
+			// a fresh module containing only inline asm that creates the
+			// sections.
+			outmodule := llvm.NewModule("")
+			defer outmodule.Dispose()
+			asm := getMetadataSectionInlineAsm(".llvmbc")
+			asm += getDataInlineAsm(bcmb.Bytes())
+			if module.ExportData != nil {
+				asm += getMetadataSectionInlineAsm(".go_export")
+				asm += getDataInlineAsm(module.ExportData)
+			}
+			outmodule.SetInlineAsm(asm)
+
+			fileType := llvm.AssemblyFile
+			if kind == actionCompile {
+				fileType = llvm.ObjectFile
+			}
+			mb, err := tm.EmitToMemoryBuffer(outmodule, fileType)
 			if err != nil {
 				return err
 			}
