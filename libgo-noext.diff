@@ -1,25 +1,16 @@
-diff -r 4d88292e0727 libgo/runtime/chan.c
---- a/libgo/runtime/chan.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/chan.c	Thu May 29 18:15:32 2014 -0700
-@@ -47,7 +47,7 @@
- 	uintgo	recvx;			// receive index
- 	WaitQ	recvq;			// list of recv waiters
- 	WaitQ	sendq;			// list of send waiters
--	Lock;
-+	Lock	lock;
- };
- 
- uint32 runtime_Hchansize = sizeof(Hchan);
-@@ -200,7 +200,7 @@
+diff -r 225a208260a6 libgo/runtime/chan.goc
+--- a/libgo/runtime/chan.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/chan.goc	Tue Sep 23 15:59:57 2014 -0700
+@@ -115,7 +115,7 @@
  		mysg.releasetime = -1;
  	}
  
 -	runtime_lock(c);
 +	runtime_lock(&c->lock);
  	if(raceenabled)
- 		runtime_racereadpc(c, pc, runtime_chansend);
+ 		runtime_racereadpc(c, pc, chansend);
  	if(c->closed)
-@@ -213,7 +213,7 @@
+@@ -128,7 +128,7 @@
  	if(sg != nil) {
  		if(raceenabled)
  			racesync(c, sg);
@@ -28,21 +19,21 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  
  		gp = sg->g;
  		gp->param = sg;
-@@ -229,7 +229,7 @@
+@@ -141,7 +141,7 @@
  	}
  
- 	if(pres != nil) {
+ 	if(!block) {
 -		runtime_unlock(c);
 +		runtime_unlock(&c->lock);
- 		*pres = false;
- 		return;
+ 		return false;
  	}
-@@ -239,10 +239,10 @@
- 	mysg.selgen = NOSELGEN;
+ 
+@@ -150,10 +150,10 @@
+ 	mysg.selectdone = nil;
  	g->param = nil;
  	enqueue(&c->sendq, &mysg);
--	runtime_park(runtime_unlock, c, "chan send");
-+	runtime_park(runtime_unlock, &c->lock, "chan send");
+-	runtime_parkunlock(c, "chan send");
++	runtime_parkunlock(&c->lock, "chan send");
  
  	if(g->param == nil) {
 -		runtime_lock(c);
@@ -50,28 +41,27 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  		if(!c->closed)
  			runtime_throw("chansend: spurious wakeup");
  		goto closed;
-@@ -259,7 +259,7 @@
+@@ -170,16 +170,16 @@
  
  	if(c->qcount >= c->dataqsiz) {
- 		if(pres != nil) {
+ 		if(!block) {
 -			runtime_unlock(c);
 +			runtime_unlock(&c->lock);
- 			*pres = false;
- 			return;
+ 			return false;
  		}
-@@ -267,9 +267,9 @@
+ 		mysg.g = g;
  		mysg.elem = nil;
- 		mysg.selgen = NOSELGEN;
+ 		mysg.selectdone = nil;
  		enqueue(&c->sendq, &mysg);
--		runtime_park(runtime_unlock, c, "chan send");
-+		runtime_park(runtime_unlock, &c->lock, "chan send");
+-		runtime_parkunlock(c, "chan send");
++		runtime_parkunlock(&c->lock, "chan send");
  
 -		runtime_lock(c);
 +		runtime_lock(&c->lock);
  		goto asynch;
  	}
  
-@@ -284,12 +284,12 @@
+@@ -196,18 +196,18 @@
  	sg = dequeue(&c->recvq);
  	if(sg != nil) {
  		gp = sg->g;
@@ -83,19 +73,17 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  	} else
 -		runtime_unlock(c);
 +		runtime_unlock(&c->lock);
- 	if(pres != nil)
- 		*pres = true;
  	if(mysg.releasetime > 0)
-@@ -297,7 +297,7 @@
- 	return;
+ 		runtime_blockevent(mysg.releasetime - t0, 2);
+ 	return true;
  
  closed:
 -	runtime_unlock(c);
 +	runtime_unlock(&c->lock);
  	runtime_panicstring("send on closed channel");
+ 	return false;  // not reached
  }
- 
-@@ -336,7 +336,7 @@
+@@ -247,7 +247,7 @@
  		mysg.releasetime = -1;
  	}
  
@@ -104,7 +92,7 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  	if(c->dataqsiz > 0)
  		goto asynch;
  
-@@ -347,7 +347,7 @@
+@@ -258,7 +258,7 @@
  	if(sg != nil) {
  		if(raceenabled)
  			racesync(c, sg);
@@ -113,21 +101,21 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  
  		if(ep != nil)
  			runtime_memmove(ep, sg->elem, c->elemsize);
-@@ -365,7 +365,7 @@
+@@ -274,7 +274,7 @@
  	}
  
- 	if(selected != nil) {
+ 	if(!block) {
 -		runtime_unlock(c);
 +		runtime_unlock(&c->lock);
- 		*selected = false;
- 		return;
+ 		return false;
  	}
-@@ -375,10 +375,10 @@
- 	mysg.selgen = NOSELGEN;
+ 
+@@ -283,10 +283,10 @@
+ 	mysg.selectdone = nil;
  	g->param = nil;
  	enqueue(&c->recvq, &mysg);
--	runtime_park(runtime_unlock, c, "chan receive");
-+	runtime_park(runtime_unlock, &c->lock, "chan receive");
+-	runtime_parkunlock(c, "chan receive");
++	runtime_parkunlock(&c->lock, "chan receive");
  
  	if(g->param == nil) {
 -		runtime_lock(c);
@@ -135,28 +123,28 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  		if(!c->closed)
  			runtime_throw("chanrecv: spurious wakeup");
  		goto closed;
-@@ -396,7 +396,7 @@
+@@ -304,7 +304,7 @@
  			goto closed;
  
- 		if(selected != nil) {
+ 		if(!block) {
 -			runtime_unlock(c);
 +			runtime_unlock(&c->lock);
- 			*selected = false;
  			if(received != nil)
  				*received = false;
-@@ -406,9 +406,9 @@
+ 			return false;
+@@ -313,9 +313,9 @@
  		mysg.elem = nil;
- 		mysg.selgen = NOSELGEN;
+ 		mysg.selectdone = nil;
  		enqueue(&c->recvq, &mysg);
--		runtime_park(runtime_unlock, c, "chan receive");
-+		runtime_park(runtime_unlock, &c->lock, "chan receive");
+-		runtime_parkunlock(c, "chan receive");
++		runtime_parkunlock(&c->lock, "chan receive");
  
 -		runtime_lock(c);
 +		runtime_lock(&c->lock);
  		goto asynch;
  	}
  
-@@ -425,12 +425,12 @@
+@@ -334,12 +334,12 @@
  	sg = dequeue(&c->sendq);
  	if(sg != nil) {
  		gp = sg->g;
@@ -169,9 +157,9 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
 -		runtime_unlock(c);
 +		runtime_unlock(&c->lock);
  
- 	if(selected != nil)
- 		*selected = true;
-@@ -449,7 +449,7 @@
+ 	if(received != nil)
+ 		*received = true;
+@@ -354,7 +354,7 @@
  		*received = false;
  	if(raceenabled)
  		runtime_raceacquire(c);
@@ -179,8 +167,8 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
 +	runtime_unlock(&c->lock);
  	if(mysg.releasetime > 0)
  		runtime_blockevent(mysg.releasetime - t0, 2);
- }
-@@ -851,7 +851,7 @@
+ 	return true;
+@@ -628,7 +628,7 @@
  		c0 = sel->lockorder[i];
  		if(c0 && c0 != c) {
  			c = sel->lockorder[i];
@@ -189,7 +177,7 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  		}
  	}
  }
-@@ -879,7 +879,7 @@
+@@ -656,7 +656,7 @@
  		c = sel->lockorder[i];
  		if(i>0 && sel->lockorder[i-1] == c)
  			continue;  // will unlock it on the next iteration
@@ -198,7 +186,7 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  	}
  }
  
-@@ -1328,9 +1328,9 @@
+@@ -1071,9 +1071,9 @@
  	if(runtime_gcwaiting())
  		runtime_gosched();
  
@@ -210,7 +198,7 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  		runtime_panicstring("close of closed channel");
  	}
  
-@@ -1365,7 +1365,7 @@
+@@ -1108,7 +1108,7 @@
  		runtime_ready(gp);
  	}
  
@@ -219,10 +207,43 @@ diff -r 4d88292e0727 libgo/runtime/chan.c
  }
  
  void
-diff -r 4d88292e0727 libgo/runtime/malloc.goc
---- a/libgo/runtime/malloc.goc	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/malloc.goc	Thu May 29 18:15:32 2014 -0700
-@@ -290,9 +290,9 @@
+diff -r 225a208260a6 libgo/runtime/chan.h
+--- a/libgo/runtime/chan.h	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/chan.h	Tue Sep 23 15:59:57 2014 -0700
+@@ -39,7 +39,7 @@
+ 	uintgo	recvx;			// receive index
+ 	WaitQ	recvq;			// list of recv waiters
+ 	WaitQ	sendq;			// list of send waiters
+-	Lock;
++	Lock	lock;
+ };
+ 
+ // Buffer follows Hchan immediately in memory.
+diff -r 225a208260a6 libgo/runtime/heapdump.c
+--- a/libgo/runtime/heapdump.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/heapdump.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -387,7 +387,7 @@
+ 				if(sp->kind != KindSpecialFinalizer)
+ 					continue;
+ 				spf = (SpecialFinalizer*)sp;
+-				p = (byte*)((s->start << PageShift) + spf->offset);
++				p = (byte*)((s->start << PageShift) + spf->special.offset);
+ 				dumpfinalizer(p, spf->fn, spf->ft, spf->ot);
+ 			}
+ 		}
+@@ -566,7 +566,7 @@
+ 			if(sp->kind != KindSpecialProfile)
+ 				continue;
+ 			spp = (SpecialProfile*)sp;
+-			p = (byte*)((s->start << PageShift) + spp->offset);
++			p = (byte*)((s->start << PageShift) + spp->special.offset);
+ 			dumpint(TagAllocSample);
+ 			dumpint((uintptr)p);
+ 			dumpint((uintptr)spp->b);
+diff -r 225a208260a6 libgo/runtime/malloc.goc
+--- a/libgo/runtime/malloc.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/malloc.goc	Tue Sep 23 15:59:57 2014 -0700
+@@ -440,9 +440,9 @@
  	m->mcache->local_nlookup++;
  	if (sizeof(void*) == 4 && m->mcache->local_nlookup >= (1<<30)) {
  		// purge cache stats to prevent overflow
@@ -234,32 +255,7 @@ diff -r 4d88292e0727 libgo/runtime/malloc.goc
  	}
  
  	s = runtime_MHeap_LookupMaybe(&runtime_mheap, v);
-@@ -334,9 +334,9 @@
- 	intgo rate;
- 	MCache *c;
- 
--	runtime_lock(&runtime_mheap);
-+	runtime_lock(&runtime_mheap.lock);
- 	c = runtime_FixAlloc_Alloc(&runtime_mheap.cachealloc);
--	runtime_unlock(&runtime_mheap);
-+	runtime_unlock(&runtime_mheap.lock);
- 	runtime_memclr((byte*)c, sizeof(*c));
- 
- 	// Set first allocation sample size.
-@@ -353,10 +353,10 @@
- runtime_freemcache(MCache *c)
- {
- 	runtime_MCache_ReleaseAll(c);
--	runtime_lock(&runtime_mheap);
-+	runtime_lock(&runtime_mheap.lock);
- 	runtime_purgecachedstats(c);
- 	runtime_FixAlloc_Free(&runtime_mheap.cachealloc, c);
--	runtime_unlock(&runtime_mheap);
-+	runtime_unlock(&runtime_mheap.lock);
- }
- 
- void
-@@ -584,7 +584,7 @@
+@@ -743,7 +743,7 @@
  
  static struct
  {
@@ -268,7 +264,7 @@ diff -r 4d88292e0727 libgo/runtime/malloc.goc
  	byte*	pos;
  	byte*	end;
  } persistent;
-@@ -613,19 +613,19 @@
+@@ -772,19 +772,19 @@
  		align = 8;
  	if(size >= PersistentAllocMaxBlock)
  		return runtime_SysAlloc(size, stat);
@@ -291,28 +287,46 @@ diff -r 4d88292e0727 libgo/runtime/malloc.goc
  	if(stat != &mstats.other_sys) {
  		// reaccount the allocation against provided stat
  		runtime_xadd64(stat, size);
-diff -r 4d88292e0727 libgo/runtime/malloc.h
---- a/libgo/runtime/malloc.h	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/malloc.h	Thu May 29 18:15:32 2014 -0700
-@@ -380,7 +380,7 @@
+diff -r 225a208260a6 libgo/runtime/malloc.h
+--- a/libgo/runtime/malloc.h	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/malloc.h	Tue Sep 23 15:59:57 2014 -0700
+@@ -390,7 +390,7 @@
+ typedef struct SpecialFinalizer SpecialFinalizer;
+ struct SpecialFinalizer
+ {
+-	Special;
++	Special		special;
+ 	FuncVal*	fn;
+ 	const FuncType*	ft;
+ 	const PtrType*	ot;
+@@ -401,7 +401,7 @@
+ typedef struct SpecialProfile SpecialProfile;
+ struct SpecialProfile
+ {
+-	Special;
++	Special	special;
+ 	Bucket*	b;
+ };
+ 
+@@ -458,7 +458,7 @@
  // Central list of free objects of a given size.
  struct MCentral
  {
 -	Lock;
 +	Lock  lock;
  	int32 sizeclass;
- 	MSpan nonempty;
- 	MSpan empty;
-@@ -397,7 +397,7 @@
+ 	MSpan nonempty;	// list of spans with a free object
+ 	MSpan empty;	// list of spans with no free objects (or cached in an MCache)
+@@ -476,7 +476,7 @@
  // but all the other global data is here too.
  struct MHeap
  {
 -	Lock;
 +	Lock lock;
  	MSpan free[MaxMHeapList];	// free lists of given length
- 	MSpan large;			// free lists length >= MaxMHeapList
- 	MSpan **allspans;
-@@ -420,7 +420,7 @@
+ 	MSpan freelarge;		// free lists length >= MaxMHeapList
+ 	MSpan busy[MaxMHeapList];	// busy lists of large objects of given length
+@@ -505,7 +505,7 @@
  	// spaced CacheLineSize bytes apart, so that each MCentral.Lock
  	// gets its own cache line.
  	struct {
@@ -321,63 +335,151 @@ diff -r 4d88292e0727 libgo/runtime/malloc.h
  		byte pad[64];
  	} central[NumSizeClasses];
  
-diff -r 4d88292e0727 libgo/runtime/mcache.c
---- a/libgo/runtime/mcache.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/mcache.c	Thu May 29 18:15:32 2014 -0700
-@@ -19,7 +19,7 @@
- 	l = &c->list[sizeclass];
- 	if(l->list)
- 		runtime_throw("MCache_Refill: the list is not empty");
--	l->nlist = runtime_MCentral_AllocList(&runtime_mheap.central[sizeclass], &l->list);
-+	l->nlist = runtime_MCentral_AllocList(&runtime_mheap.central[sizeclass].mcentral, &l->list);
- 	if(l->list == nil)
+diff -r 225a208260a6 libgo/runtime/mcache.c
+--- a/libgo/runtime/mcache.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/mcache.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -23,9 +23,9 @@
+ 	MCache *c;
+ 	int32 i;
+ 
+-	runtime_lock(&runtime_mheap);
++	runtime_lock(&runtime_mheap.lock);
+ 	c = runtime_FixAlloc_Alloc(&runtime_mheap.cachealloc);
+-	runtime_unlock(&runtime_mheap);
++	runtime_unlock(&runtime_mheap.lock);
+ 	runtime_memclr((byte*)c, sizeof(*c));
+ 	for(i = 0; i < NumSizeClasses; i++)
+ 		c->alloc[i] = &emptymspan;
+@@ -44,10 +44,10 @@
+ runtime_freemcache(MCache *c)
+ {
+ 	runtime_MCache_ReleaseAll(c);
+-	runtime_lock(&runtime_mheap);
++	runtime_lock(&runtime_mheap.lock);
+ 	runtime_purgecachedstats(c);
+ 	runtime_FixAlloc_Free(&runtime_mheap.cachealloc, c);
+-	runtime_unlock(&runtime_mheap);
++	runtime_unlock(&runtime_mheap.lock);
+ }
+ 
+ // Gets a span that has a free object in it and assigns it
+@@ -64,19 +64,19 @@
+ 	if(s->freelist != nil)
+ 		runtime_throw("refill on a nonempty span");
+ 	if(s != &emptymspan)
+-		runtime_MCentral_UncacheSpan(&runtime_mheap.central[sizeclass], s);
++		runtime_MCentral_UncacheSpan(&runtime_mheap.central[sizeclass].mcentral, s);
+ 
+ 	// Push any explicitly freed objects to the central lists.
+ 	// Not required, but it seems like a good time to do it.
+ 	l = &c->free[sizeclass];
+ 	if(l->nlist > 0) {
+-		runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass], l->list);
++		runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass].mcentral, l->list);
+ 		l->list = nil;
+ 		l->nlist = 0;
+ 	}
+ 
+ 	// Get a new cached span from the central lists.
+-	s = runtime_MCentral_CacheSpan(&runtime_mheap.central[sizeclass]);
++	s = runtime_MCentral_CacheSpan(&runtime_mheap.central[sizeclass].mcentral);
+ 	if(s == nil)
  		runtime_throw("out of memory");
- }
-@@ -41,7 +41,7 @@
- 	l->nlist -= n;
- 
- 	// Return them to central free list.
--	runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass], first);
-+	runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass].mcentral, first);
- }
- 
- void
-@@ -73,7 +73,7 @@
+ 	if(s->freelist == nil) {
+@@ -102,7 +102,7 @@
+ 	// We transfer a span at a time from MCentral to MCache,
+ 	// so we'll do the same in the other direction.
+ 	if(l->nlist >= (runtime_class_to_allocnpages[sizeclass]<<PageShift)/size) {
+-		runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass], l->list);
++		runtime_MCentral_FreeList(&runtime_mheap.central[sizeclass].mcentral, l->list);
+ 		l->list = nil;
+ 		l->nlist = 0;
+ 	}
+@@ -118,12 +118,12 @@
  	for(i=0; i<NumSizeClasses; i++) {
- 		l = &c->list[i];
- 		if(l->list) {
+ 		s = c->alloc[i];
+ 		if(s != &emptymspan) {
+-			runtime_MCentral_UncacheSpan(&runtime_mheap.central[i], s);
++			runtime_MCentral_UncacheSpan(&runtime_mheap.central[i].mcentral, s);
+ 			c->alloc[i] = &emptymspan;
+ 		}
+ 		l = &c->free[i];
+ 		if(l->nlist > 0) {
 -			runtime_MCentral_FreeList(&runtime_mheap.central[i], l->list);
 +			runtime_MCentral_FreeList(&runtime_mheap.central[i].mcentral, l->list);
  			l->list = nil;
  			l->nlist = 0;
  		}
-diff -r 4d88292e0727 libgo/runtime/mcentral.c
---- a/libgo/runtime/mcentral.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/mcentral.c	Thu May 29 18:15:32 2014 -0700
-@@ -40,11 +40,11 @@
- 	MSpan *s;
+diff -r 225a208260a6 libgo/runtime/mcentral.c
+--- a/libgo/runtime/mcentral.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/mcentral.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -39,14 +39,14 @@
+ 	int32 cap, n;
+ 	uint32 sg;
+ 
+-	runtime_lock(c);
++	runtime_lock(&c->lock);
+ 	sg = runtime_mheap.sweepgen;
+ retry:
+ 	for(s = c->nonempty.next; s != &c->nonempty; s = s->next) {
+ 		if(s->sweepgen == sg-2 && runtime_cas(&s->sweepgen, sg-2, sg-1)) {
+-			runtime_unlock(c);
++			runtime_unlock(&c->lock);
+ 			runtime_MSpan_Sweep(s);
+-			runtime_lock(c);
++			runtime_lock(&c->lock);
+ 			// the span could have been moved to heap, retry
+ 			goto retry;
+ 		}
+@@ -65,9 +65,9 @@
+ 			runtime_MSpanList_Remove(s);
+ 			// swept spans are at the end of the list
+ 			runtime_MSpanList_InsertBack(&c->empty, s);
+-			runtime_unlock(c);
++			runtime_unlock(&c->lock);
+ 			runtime_MSpan_Sweep(s);
+-			runtime_lock(c);
++			runtime_lock(&c->lock);
+ 			// the span could be moved to nonempty or heap, retry
+ 			goto retry;
+ 		}
+@@ -82,7 +82,7 @@
+ 
+ 	// Replenish central list if empty.
+ 	if(!MCentral_Grow(c)) {
+-		runtime_unlock(c);
++		runtime_unlock(&c->lock);
+ 		return nil;
+ 	}
+ 	goto retry;
+@@ -98,7 +98,7 @@
+ 	runtime_MSpanList_Remove(s);
+ 	runtime_MSpanList_InsertBack(&c->empty, s);
+ 	s->incache = true;
+-	runtime_unlock(c);
++	runtime_unlock(&c->lock);
+ 	return s;
+ }
+ 
+@@ -109,7 +109,7 @@
+ 	MLink *v;
  	int32 cap, n;
  
 -	runtime_lock(c);
 +	runtime_lock(&c->lock);
- 	// Replenish central list if empty.
- 	if(runtime_MSpanList_IsEmpty(&c->nonempty)) {
- 		if(!MCentral_Grow(c)) {
--			runtime_unlock(c);
-+			runtime_unlock(&c->lock);
- 			*pfirst = nil;
- 			return 0;
- 		}
-@@ -58,7 +58,7 @@
- 	c->nfree -= n;
- 	runtime_MSpanList_Remove(s);
- 	runtime_MSpanList_Insert(&c->empty, s);
+ 
+ 	s->incache = false;
+ 
+@@ -135,7 +135,7 @@
+ 		runtime_MSpanList_Remove(s);
+ 		runtime_MSpanList_Insert(&c->nonempty, s);
+ 	}
 -	runtime_unlock(c);
 +	runtime_unlock(&c->lock);
- 	return n;
  }
  
-@@ -68,12 +68,12 @@
+ // Free the list of objects back into the central free list c.
+@@ -145,12 +145,12 @@
  {
  	MLink *next;
  
@@ -392,42 +494,34 @@ diff -r 4d88292e0727 libgo/runtime/mcentral.c
  }
  
  // Helper: free one object back into the central free list.
-@@ -109,9 +109,9 @@
- 		*(uintptr*)(s->start<<PageShift) = 1;  // needs zeroing
- 		s->freelist = nil;
- 		c->nfree -= (s->npages << PageShift) / size;
--		runtime_unlock(c);
-+		runtime_unlock(&c->lock);
- 		runtime_MHeap_Free(&runtime_mheap, s, 0);
+@@ -193,7 +193,7 @@
+ 	// If s is completely freed, return it to the heap.
+ 	if(s->ref == 0) {
+ 		MCentral_ReturnToHeap(c, s); // unlocks c
 -		runtime_lock(c);
 +		runtime_lock(&c->lock);
  	}
  }
  
-@@ -122,7 +122,7 @@
+@@ -206,7 +206,7 @@
  {
- 	int32 size;
- 
+ 	if(s->incache)
+ 		runtime_throw("freespan into cached span");
 -	runtime_lock(c);
 +	runtime_lock(&c->lock);
  
  	// Move to nonempty if necessary.
  	if(s->freelist == nil) {
-@@ -143,11 +143,11 @@
- 		*(uintptr*)(s->start<<PageShift) = 1;  // needs zeroing
- 		s->freelist = nil;
- 		c->nfree -= (s->npages << PageShift) / size;
--		runtime_unlock(c);
-+		runtime_unlock(&c->lock);
- 		runtime_unmarkspan((byte*)(s->start<<PageShift), s->npages<<PageShift);
- 		runtime_MHeap_Free(&runtime_mheap, s, 0);
- 	} else {
--		runtime_unlock(c);
-+		runtime_unlock(&c->lock);
- 	}
- }
+@@ -227,7 +227,7 @@
+ 	runtime_atomicstore(&s->sweepgen, runtime_mheap.sweepgen);
  
-@@ -175,12 +175,12 @@
+ 	if(s->ref != 0) {
+-		runtime_unlock(c);
++		runtime_unlock(&c->lock);
+ 		return false;
+ 	}
+ 
+@@ -260,12 +260,12 @@
  	byte *p;
  	MSpan *s;
  
@@ -442,7 +536,7 @@ diff -r 4d88292e0727 libgo/runtime/mcentral.c
  		return false;
  	}
  
-@@ -197,7 +197,7 @@
+@@ -282,7 +282,7 @@
  	*tailp = nil;
  	runtime_markspan((byte*)(s->start<<PageShift), size, n, size*n < (s->npages<<PageShift));
  
@@ -451,105 +545,37 @@ diff -r 4d88292e0727 libgo/runtime/mcentral.c
  	c->nfree += n;
  	runtime_MSpanList_Insert(&c->nonempty, s);
  	return true;
-diff -r 4d88292e0727 libgo/runtime/mfinal.c
---- a/libgo/runtime/mfinal.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/mfinal.c	Thu May 29 18:15:32 2014 -0700
-@@ -27,7 +27,7 @@
- typedef struct Fintab Fintab;
- struct Fintab
- {
--	Lock;
-+	Lock lock;
- 	void **fkey;
- 	Fin *val;
- 	int32 nkey;	// number of non-nil entries in key
-@@ -36,10 +36,10 @@
- };
- 
- #define TABSZ 17
--#define TAB(p) (&fintab[((uintptr)(p)>>3)%TABSZ])
-+#define TAB(p) (&fintab[((uintptr)(p)>>3)%TABSZ].fintab)
- 
- static struct {
--	Fintab;
-+	Fintab fintab;
- 	uint8 pad[0 /* CacheLineSize - sizeof(Fintab) */];	
- } fintab[TABSZ];
- 
-@@ -152,15 +152,15 @@
- 	}
- 	
- 	tab = TAB(p);
--	runtime_lock(tab);
-+	runtime_lock(&tab->lock);
- 	if(f == nil) {
- 		lookfintab(tab, p, true, nil);
--		runtime_unlock(tab);
-+		runtime_unlock(&tab->lock);
- 		return true;
- 	}
- 
- 	if(lookfintab(tab, p, false, nil)) {
--		runtime_unlock(tab);
-+		runtime_unlock(&tab->lock);
- 		return false;
- 	}
- 
-@@ -172,7 +172,7 @@
- 
- 	addfintab(tab, p, f, ft, ot);
- 	runtime_setblockspecial(p, true);
--	runtime_unlock(tab);
-+	runtime_unlock(&tab->lock);
- 	return true;
+@@ -301,7 +301,7 @@
+ 	if(s->ref != 0)
+ 		runtime_throw("ref wrong");
+ 	c->nfree -= (s->npages << PageShift) / size;
+-	runtime_unlock(c);
++	runtime_unlock(&c->lock);
+ 	runtime_unmarkspan((byte*)(s->start<<PageShift), s->npages<<PageShift);
+ 	runtime_MHeap_Free(&runtime_mheap, s, 0);
  }
- 
-@@ -186,9 +186,9 @@
- 	Fin f;
- 	
- 	tab = TAB(p);
--	runtime_lock(tab);
-+	runtime_lock(&tab->lock);
- 	res = lookfintab(tab, p, del, &f);
--	runtime_unlock(tab);
-+	runtime_unlock(&tab->lock);
- 	if(res==false)
- 		return false;
- 	*fn = f.fn;
-@@ -205,14 +205,14 @@
- 	int32 i;
- 
- 	for(i=0; i<TABSZ; i++) {
--		runtime_lock(&fintab[i]);
--		key = fintab[i].fkey;
--		ekey = key + fintab[i].max;
-+		runtime_lock(&fintab[i].fintab.lock);
-+		key = fintab[i].fintab.fkey;
-+		ekey = key + fintab[i].fintab.max;
- 		for(; key < ekey; key++)
- 			if(*key != nil && *key != ((void*)-1))
- 				fn(*key);
--		addroot((Obj){(byte*)&fintab[i].fkey, sizeof(void*), 0});
--		addroot((Obj){(byte*)&fintab[i].val, sizeof(void*), 0});
--		runtime_unlock(&fintab[i]);
-+		addroot((Obj){(byte*)&fintab[i].fintab.fkey, sizeof(void*), 0});
-+		addroot((Obj){(byte*)&fintab[i].fintab.val, sizeof(void*), 0});
-+		runtime_unlock(&fintab[i].fintab.lock);
- 	}
- }
-diff -r 4d88292e0727 libgo/runtime/mgc0.c
---- a/libgo/runtime/mgc0.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/mgc0.c	Thu May 29 18:15:32 2014 -0700
-@@ -173,7 +173,7 @@
+diff -r 225a208260a6 libgo/runtime/mgc0.c
+--- a/libgo/runtime/mgc0.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/mgc0.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -225,7 +225,7 @@
+ 	Note	alldone;
  	ParFor	*markfor;
- 	ParFor	*sweepfor;
  
 -	Lock;
 +	Lock	lock;
  	byte	*chunk;
  	uintptr	nchunk;
- 
-@@ -1246,7 +1246,7 @@
+ } work __attribute__((aligned(8)));
+@@ -1337,7 +1337,7 @@
+ 				// retain everything it points to.
+ 				spf = (SpecialFinalizer*)sp;
+ 				// A finalizer can be set for an inner byte of an object, find object beginning.
+-				p = (void*)((s->start << PageShift) + spf->offset/s->elemsize*s->elemsize);
++				p = (void*)((s->start << PageShift) + spf->special.offset/s->elemsize*s->elemsize);
+ 				enqueue1(&wbuf, (Obj){p, s->elemsize, 0});
+ 				enqueue1(&wbuf, (Obj){(void*)&spf->fn, PtrSize, 0});
+ 				enqueue1(&wbuf, (Obj){(void*)&spf->ft, PtrSize, 0});
+@@ -1378,7 +1378,7 @@
  	b = (Workbuf*)runtime_lfstackpop(&work.empty);
  	if(b == nil) {
  		// Need to allocate.
@@ -558,7 +584,7 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  		if(work.nchunk < sizeof *b) {
  			work.nchunk = 1<<20;
  			work.chunk = runtime_SysAlloc(work.nchunk, &mstats.gc_sys);
-@@ -1256,7 +1256,7 @@
+@@ -1388,7 +1388,7 @@
  		b = (Workbuf*)work.chunk;
  		work.chunk += sizeof *b;
  		work.nchunk -= sizeof *b;
@@ -567,16 +593,16 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  	}
  	b->nobj = 0;
  	return b;
-@@ -1687,7 +1687,7 @@
- 	if(nfree) {
+@@ -1802,7 +1802,7 @@
  		c->local_nsmallfree[cl] += nfree;
  		c->local_cachealloc -= nfree * size;
--		runtime_MCentral_FreeSpan(&runtime_mheap.central[cl], s, nfree, head.next, end);
-+		runtime_MCentral_FreeSpan(&runtime_mheap.central[cl].mcentral, s, nfree, head.next, end);
+ 		runtime_xadd64(&mstats.next_gc, -(uint64)(nfree * size * (gcpercent + 100)/100));
+-		res = runtime_MCentral_FreeSpan(&runtime_mheap.central[cl], s, nfree, head.next, end);
++		res = runtime_MCentral_FreeSpan(&runtime_mheap.central[cl].mcentral, s, nfree, head.next, end);
+ 		//MCentral_FreeSpan updates sweepgen
  	}
- }
- 
-@@ -1965,10 +1965,10 @@
+ 	return res;
+@@ -2147,10 +2147,10 @@
  		return;
  
  	if(gcpercent == GcpercentUnknown) {	// first time through
@@ -589,7 +615,7 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  	}
  	if(gcpercent < 0)
  		return;
-@@ -2205,7 +2205,7 @@
+@@ -2421,7 +2421,7 @@
  
  	// Pass back: pauses, last gc (absolute time), number of gc, total pause ns.
  	p = (uint64*)pauses->array;
@@ -598,7 +624,7 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  	n = mstats.numgc;
  	if(n > nelem(mstats.pause_ns))
  		n = nelem(mstats.pause_ns);
-@@ -2220,7 +2220,7 @@
+@@ -2436,7 +2436,7 @@
  	p[n] = mstats.last_gc;
  	p[n+1] = mstats.numgc;
  	p[n+2] = mstats.pause_total_ns;	
@@ -607,9 +633,9 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  	pauses->__count = n+3;
  }
  
-@@ -2232,14 +2232,14 @@
- {
- 	intgo out;
+@@ -2444,14 +2444,14 @@
+ runtime_setgcpercent(int32 in) {
+ 	int32 out;
  
 -	runtime_lock(&runtime_mheap);
 +	runtime_lock(&runtime_mheap.lock);
@@ -624,19 +650,49 @@ diff -r 4d88292e0727 libgo/runtime/mgc0.c
  	return out;
  }
  
-diff -r 4d88292e0727 libgo/runtime/mheap.c
---- a/libgo/runtime/mheap.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/mheap.c	Thu May 29 18:15:32 2014 -0700
-@@ -62,7 +62,7 @@
- 		runtime_MSpanList_Init(&h->free[i]);
- 	runtime_MSpanList_Init(&h->large);
+diff -r 225a208260a6 libgo/runtime/mheap.c
+--- a/libgo/runtime/mheap.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/mheap.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -70,7 +70,7 @@
+ 	runtime_MSpanList_Init(&h->freelarge);
+ 	runtime_MSpanList_Init(&h->busylarge);
  	for(i=0; i<nelem(h->central); i++)
 -		runtime_MCentral_Init(&h->central[i], i);
 +		runtime_MCentral_Init(&h->central[i].mcentral, i);
  }
  
  void
-@@ -91,7 +91,7 @@
+@@ -109,9 +109,9 @@
+ 			runtime_MSpanList_Remove(s);
+ 			// swept spans are at the end of the list
+ 			runtime_MSpanList_InsertBack(list, s);
+-			runtime_unlock(h);
++			runtime_unlock(&h->lock);
+ 			n += runtime_MSpan_Sweep(s);
+-			runtime_lock(h);
++			runtime_lock(&h->lock);
+ 			if(n >= npages)
+ 				return n;
+ 			// the span could have been moved elsewhere
+@@ -156,7 +156,7 @@
+ 	}
+ 
+ 	// Now sweep everything that is not yet swept.
+-	runtime_unlock(h);
++	runtime_unlock(&h->lock);
+ 	for(;;) {
+ 		n = runtime_sweepone();
+ 		if(n == (uintptr)-1)  // all spans are swept
+@@ -165,7 +165,7 @@
+ 		if(reclaimed >= npage)
+ 			break;
+ 	}
+-	runtime_lock(h);
++	runtime_lock(&h->lock);
+ }
+ 
+ // Allocate a new span of npage pages from the heap
+@@ -175,7 +175,7 @@
  {
  	MSpan *s;
  
@@ -645,16 +701,16 @@ diff -r 4d88292e0727 libgo/runtime/mheap.c
  	mstats.heap_alloc += runtime_m()->mcache->local_cachealloc;
  	runtime_m()->mcache->local_cachealloc = 0;
  	s = MHeap_AllocLocked(h, npage, sizeclass);
-@@ -102,7 +102,7 @@
- 			mstats.heap_alloc += npage<<PageShift;
+@@ -191,7 +191,7 @@
+ 				runtime_MSpanList_InsertBack(&h->busylarge, s);
  		}
  	}
 -	runtime_unlock(h);
 +	runtime_unlock(&h->lock);
- 	if(s != nil && *(uintptr*)(s->start<<PageShift) != 0 && zeroed)
- 		runtime_memclr((byte*)(s->start<<PageShift), s->npages<<PageShift);
- 	return s;
-@@ -304,7 +304,7 @@
+ 	if(s != nil) {
+ 		if(needzero && s->needzero)
+ 			runtime_memclr((byte*)(s->start<<PageShift), s->npages<<PageShift);
+@@ -386,7 +386,7 @@
  void
  runtime_MHeap_Free(MHeap *h, MSpan *s, int32 acct)
  {
@@ -663,7 +719,7 @@ diff -r 4d88292e0727 libgo/runtime/mheap.c
  	mstats.heap_alloc += runtime_m()->mcache->local_cachealloc;
  	runtime_m()->mcache->local_cachealloc = 0;
  	mstats.heap_inuse -= s->npages<<PageShift;
-@@ -313,7 +313,7 @@
+@@ -395,7 +395,7 @@
  		mstats.heap_objects--;
  	}
  	MHeap_FreeLocked(h, s);
@@ -672,37 +728,37 @@ diff -r 4d88292e0727 libgo/runtime/mheap.c
  }
  
  static void
-@@ -472,10 +472,10 @@
+@@ -548,10 +548,10 @@
  		runtime_noteclear(&note);
  		runtime_notetsleepg(&note, tick);
  
 -		runtime_lock(h);
 +		runtime_lock(&h->lock);
- 		now = runtime_nanotime();
- 		if(now - mstats.last_gc > forcegc) {
+ 		unixnow = runtime_unixnanotime();
+ 		if(unixnow - mstats.last_gc > forcegc) {
 -			runtime_unlock(h);
 +			runtime_unlock(&h->lock);
  			// The scavenger can not block other goroutines,
  			// otherwise deadlock detector can fire spuriously.
  			// GC blocks other goroutines via the runtime_worldsema.
-@@ -485,11 +485,11 @@
+@@ -561,11 +561,11 @@
  			runtime_notetsleepg(&note, -1);
  			if(runtime_debug.gctrace > 0)
  				runtime_printf("scvg%d: GC forced\n", k);
 -			runtime_lock(h);
 +			runtime_lock(&h->lock);
- 			now = runtime_nanotime();
  		}
+ 		now = runtime_nanotime();
  		scavenge(k, now, limit);
 -		runtime_unlock(h);
 +		runtime_unlock(&h->lock);
  	}
  }
  
-@@ -499,9 +499,9 @@
+@@ -575,9 +575,9 @@
  runtime_debug_freeOSMemory(void)
  {
- 	runtime_gc(1);
+ 	runtime_gc(2);  // force GC and do eager sweep
 -	runtime_lock(&runtime_mheap);
 +	runtime_lock(&runtime_mheap.lock);
  	scavenge(-1, ~(uintptr)0, 0);
@@ -711,19 +767,89 @@ diff -r 4d88292e0727 libgo/runtime/mheap.c
  }
  
  // Initialize a new span with the given start and npages.
-diff -r 4d88292e0727 libgo/runtime/netpoll.goc
---- a/libgo/runtime/netpoll.goc	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/netpoll.goc	Thu May 29 18:15:32 2014 -0700
-@@ -29,7 +29,7 @@
- struct PollDesc
- {
- 	PollDesc* link;	// in pollcache, protected by pollcache.Lock
+@@ -752,11 +752,11 @@
+ 	runtime_lock(&runtime_mheap.speciallock);
+ 	s = runtime_FixAlloc_Alloc(&runtime_mheap.specialfinalizeralloc);
+ 	runtime_unlock(&runtime_mheap.speciallock);
+-	s->kind = KindSpecialFinalizer;
++	s->special.kind = KindSpecialFinalizer;
+ 	s->fn = f;
+ 	s->ft = ft;
+ 	s->ot = ot;
+-	if(addspecial(p, s))
++	if(addspecial(p, &s->special))
+ 		return true;
+ 
+ 	// There was an old finalizer
+@@ -789,9 +789,9 @@
+ 	runtime_lock(&runtime_mheap.speciallock);
+ 	s = runtime_FixAlloc_Alloc(&runtime_mheap.specialprofilealloc);
+ 	runtime_unlock(&runtime_mheap.speciallock);
+-	s->kind = KindSpecialProfile;
++	s->special.kind = KindSpecialProfile;
+ 	s->b = b;
+-	if(!addspecial(p, s))
++	if(!addspecial(p, &s->special))
+ 		runtime_throw("setprofilebucket: profile already set");
+ }
+ 
+@@ -879,14 +879,14 @@
+ 	// remove the span from whatever list it is in now
+ 	if(s->sizeclass > 0) {
+ 		// must be in h->central[x].empty
+-		c = &h->central[s->sizeclass];
+-		runtime_lock(c);
++		c = &h->central[s->sizeclass].mcentral;
++		runtime_lock(&c->lock);
+ 		runtime_MSpanList_Remove(s);
+-		runtime_unlock(c);
+-		runtime_lock(h);
++		runtime_unlock(&c->lock);
++		runtime_lock(&h->lock);
+ 	} else {
+ 		// must be in h->busy/busylarge
+-		runtime_lock(h);
++		runtime_lock(&h->lock);
+ 		runtime_MSpanList_Remove(s);
+ 	}
+ 	// heap is locked now
+@@ -933,18 +933,18 @@
+ 
+ 	// place the span into a new list
+ 	if(s->sizeclass > 0) {
+-		runtime_unlock(h);
+-		c = &h->central[s->sizeclass];
+-		runtime_lock(c);
++		runtime_unlock(&h->lock);
++		c = &h->central[s->sizeclass].mcentral;
++		runtime_lock(&c->lock);
+ 		// swept spans are at the end of the list
+ 		runtime_MSpanList_InsertBack(&c->empty, s);
+-		runtime_unlock(c);
++		runtime_unlock(&c->lock);
+ 	} else {
+ 		// Swept spans are at the end of lists.
+ 		if(s->npages < nelem(h->free))
+ 			runtime_MSpanList_InsertBack(&h->busy[s->npages], s);
+ 		else
+ 			runtime_MSpanList_InsertBack(&h->busylarge, s);
+-		runtime_unlock(h);
++		runtime_unlock(&h->lock);
+ 	}
+ }
+diff -r 225a208260a6 libgo/runtime/netpoll.goc
+--- a/libgo/runtime/netpoll.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/netpoll.goc	Tue Sep 23 15:59:57 2014 -0700
+@@ -53,7 +53,7 @@
+ 	// pollReset, pollWait, pollWaitCanceled and runtime_netpollready (IO rediness notification)
+ 	// proceed w/o taking the lock. So closing, rg, rd, wg and wd are manipulated
+ 	// in a lock-free way by all operations.
 -	Lock;		// protectes the following fields
 +	Lock	lock;	// protectes the following fields
  	uintptr	fd;
  	bool	closing;
  	uintptr	seq;	// protects from stale timers and ready notifications
-@@ -43,7 +43,7 @@
+@@ -68,7 +68,7 @@
  
  static struct
  {
@@ -732,7 +858,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	PollDesc*	first;
  	// PollDesc objects must be type-stable,
  	// because we can get ready notification from epoll/kqueue
-@@ -70,7 +70,7 @@
+@@ -100,7 +100,7 @@
  
  func runtime_pollOpen(fd uintptr) (pd *PollDesc, errno int) {
  	pd = allocPollDesc();
@@ -741,7 +867,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	if(pd->wg != nil && pd->wg != READY)
  		runtime_throw("runtime_pollOpen: blocked write on free descriptor");
  	if(pd->rg != nil && pd->rg != READY)
-@@ -82,7 +82,7 @@
+@@ -112,7 +112,7 @@
  	pd->rd = 0;
  	pd->wg = nil;
  	pd->wd = 0;
@@ -750,7 +876,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  
  	errno = runtime_netpollopen(fd, pd);
  }
-@@ -95,14 +95,14 @@
+@@ -125,10 +125,10 @@
  	if(pd->rg != nil && pd->rg != READY)
  		runtime_throw("runtime_pollClose: blocked read on closing descriptor");
  	runtime_netpollclose(pd->fd);
@@ -763,43 +889,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  }
  
  func runtime_pollReset(pd *PollDesc, mode int) (err int) {
--	runtime_lock(pd);
-+	runtime_lock(&pd->lock);
- 	err = checkerr(pd, mode);
- 	if(err)
- 		goto ret;
-@@ -111,11 +111,11 @@
- 	else if(mode == 'w')
- 		pd->wg = nil;
- ret:
--	runtime_unlock(pd);
-+	runtime_unlock(&pd->lock);
- }
- 
- func runtime_pollWait(pd *PollDesc, mode int) (err int) {
--	runtime_lock(pd);
-+	runtime_lock(&pd->lock);
- 	err = checkerr(pd, mode);
- 	if(err == 0) {
- 		while(!netpollblock(pd, mode)) {
-@@ -127,23 +127,23 @@
- 			// Pretend it has not happened and retry.
- 		}
- 	}
--	runtime_unlock(pd);
-+	runtime_unlock(&pd->lock);
- }
- 
- func runtime_pollWaitCanceled(pd *PollDesc, mode int) {
--	runtime_lock(pd);
-+	runtime_lock(&pd->lock);
- 	// wait for ioready, ignore closing or timeouts.
- 	while(!netpollblock(pd, mode))
- 		;
--	runtime_unlock(pd);
-+	runtime_unlock(&pd->lock);
- }
- 
+@@ -169,9 +169,9 @@
  func runtime_pollSetDeadline(pd *PollDesc, d int64, mode int) {
  	G *rg, *wg;
  
@@ -811,7 +901,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  		return;
  	}
  	pd->seq++;  // invalidate current timers
-@@ -195,7 +195,7 @@
+@@ -223,7 +223,7 @@
  		rg = netpollunblock(pd, 'r', false);
  	if(pd->wd < 0)
  		wg = netpollunblock(pd, 'w', false);
@@ -820,7 +910,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	if(rg)
  		runtime_ready(rg);
  	if(wg)
-@@ -205,7 +205,7 @@
+@@ -233,7 +233,7 @@
  func runtime_pollUnblock(pd *PollDesc) {
  	G *rg, *wg;
  
@@ -829,7 +919,7 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	if(pd->closing)
  		runtime_throw("runtime_pollUnblock: already closing");
  	pd->closing = true;
-@@ -220,7 +220,7 @@
+@@ -249,7 +249,7 @@
  		runtime_deltimer(&pd->wt);
  		pd->wt.fv = nil;
  	}
@@ -838,33 +928,23 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	if(rg)
  		runtime_ready(rg);
  	if(wg)
-@@ -240,12 +240,12 @@
- 	G *rg, *wg;
- 
- 	rg = wg = nil;
+@@ -277,13 +277,13 @@
+ void
+ runtime_netpolllock(PollDesc *pd)
+ {
 -	runtime_lock(pd);
 +	runtime_lock(&pd->lock);
- 	if(mode == 'r' || mode == 'r'+'w')
- 		rg = netpollunblock(pd, 'r', true);
- 	if(mode == 'w' || mode == 'r'+'w')
- 		wg = netpollunblock(pd, 'w', true);
+ }
+ 
+ void
+ runtime_netpollunlock(PollDesc *pd)
+ {
 -	runtime_unlock(pd);
 +	runtime_unlock(&pd->lock);
- 	if(rg) {
- 		rg->schedlink = *gpp;
- 		*gpp = rg;
-@@ -282,8 +282,8 @@
- 	if(*gpp != nil)
- 		runtime_throw("netpollblock: double wait");
- 	*gpp = runtime_g();
--	runtime_park(runtime_unlock, &pd->Lock, "IO wait");
--	runtime_lock(pd);
-+	runtime_park(runtime_unlock, &pd->lock, "IO wait");
-+	runtime_lock(&pd->lock);
- 	if(runtime_g()->param)
- 		return true;
- 	return false;
-@@ -326,10 +326,10 @@
+ }
+ 
+ // make pd ready, newly runnable goroutines (if any) are enqueued info gpp list
+@@ -401,10 +401,10 @@
  	// If it's stale, ignore the timer event.
  	seq = (uintptr)arg.type;
  	rg = wg = nil;
@@ -877,8 +957,8 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  		return;
  	}
  	if(read) {
-@@ -346,7 +346,7 @@
- 		pd->wt.fv = nil;
+@@ -421,7 +421,7 @@
+ 		runtime_atomicstorep(&pd->wt.fv, nil);  // full memory barrier between store to wd and load of wg in netpollunblock
  		wg = netpollunblock(pd, 'w', false);
  	}
 -	runtime_unlock(pd);
@@ -886,16 +966,16 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
  	if(rg)
  		runtime_ready(rg);
  	if(wg)
-@@ -377,7 +377,7 @@
+@@ -452,7 +452,7 @@
  	PollDesc *pd;
  	uint32 i, n;
  
 -	runtime_lock(&pollcache);
 +	runtime_lock(&pollcache.lock);
  	if(pollcache.first == nil) {
- 		n = PageSize/sizeof(*pd);
+ 		n = PollBlockSize/sizeof(*pd);
  		if(n == 0)
-@@ -392,6 +392,6 @@
+@@ -467,6 +467,6 @@
  	}
  	pd = pollcache.first;
  	pollcache.first = pd->link;
@@ -903,10 +983,10 @@ diff -r 4d88292e0727 libgo/runtime/netpoll.goc
 +	runtime_unlock(&pollcache.lock);
  	return pd;
  }
-diff -r 4d88292e0727 libgo/runtime/proc.c
---- a/libgo/runtime/proc.c	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/proc.c	Thu May 29 18:15:32 2014 -0700
-@@ -360,7 +360,7 @@
+diff -r 225a208260a6 libgo/runtime/proc.c
+--- a/libgo/runtime/proc.c	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/proc.c	Tue Sep 23 15:59:57 2014 -0700
+@@ -357,7 +357,7 @@
  
  typedef struct Sched Sched;
  struct Sched {
@@ -915,7 +995,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	uint64	goidgen;
  	M*	midle;	 // idle m's waiting for work
-@@ -733,7 +733,7 @@
+@@ -770,7 +770,7 @@
  
  	mp->fastrand = 0x49f6428aUL + mp->id + runtime_cputicks();
  
@@ -924,7 +1004,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	mp->id = runtime_sched.mcount++;
  	checkmcount();
  	runtime_mpreinit(mp);
-@@ -744,7 +744,7 @@
+@@ -781,7 +781,7 @@
  	// runtime_NumCgoCall() iterates over allm w/o schedlock,
  	// so we need to publish it safely.
  	runtime_atomicstorep(&runtime_allm, mp);
@@ -933,7 +1013,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  }
  
  // Mark gp ready to run.
-@@ -771,7 +771,7 @@
+@@ -808,7 +808,7 @@
  
  	// Figure out how many CPUs to use during GC.
  	// Limited by gomaxprocs, number of actual CPUs, and MaxGcproc.
@@ -942,7 +1022,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	n = runtime_gomaxprocs;
  	if(n > runtime_ncpu)
  		n = runtime_ncpu > 0 ? runtime_ncpu : 1;
-@@ -779,7 +779,7 @@
+@@ -816,7 +816,7 @@
  		n = MaxGcproc;
  	if(n > runtime_sched.nmidle+1) // one M is currently running
  		n = runtime_sched.nmidle+1;
@@ -951,7 +1031,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	return n;
  }
  
-@@ -788,14 +788,14 @@
+@@ -825,14 +825,14 @@
  {
  	int32 n;
  
@@ -968,7 +1048,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	return n > 0;
  }
  
-@@ -805,7 +805,7 @@
+@@ -842,7 +842,7 @@
  	M *mp;
  	int32 n, pos;
  
@@ -977,7 +1057,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	pos = 0;
  	for(n = 1; n < nproc; n++) {  // one M is currently running
  		if(runtime_allp[pos]->mcache == m->mcache)
-@@ -818,7 +818,7 @@
+@@ -855,7 +855,7 @@
  		pos++;
  		runtime_notewakeup(&mp->park);
  	}
@@ -986,7 +1066,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  }
  
  // Similar to stoptheworld but best-effort and can be called several times.
-@@ -857,7 +857,7 @@
+@@ -894,7 +894,7 @@
  	P *p;
  	bool wait;
  
@@ -995,7 +1075,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	runtime_sched.stopwait = runtime_gomaxprocs;
  	runtime_atomicstore((uint32*)&runtime_sched.gcwaiting, 1);
  	preemptall();
-@@ -877,7 +877,7 @@
+@@ -914,7 +914,7 @@
  		runtime_sched.stopwait--;
  	}
  	wait = runtime_sched.stopwait > 0;
@@ -1004,7 +1084,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	// wait for remaining P's to stop voluntarily
  	if(wait) {
-@@ -911,7 +911,7 @@
+@@ -948,7 +948,7 @@
  	gp = runtime_netpoll(false);  // non-blocking
  	injectglist(gp);
  	add = needaddgcproc();
@@ -1013,7 +1093,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	if(newprocs) {
  		procresize(newprocs);
  		newprocs = 0;
-@@ -935,7 +935,7 @@
+@@ -972,7 +972,7 @@
  		runtime_sched.sysmonwait = false;
  		runtime_notewakeup(&runtime_sched.sysmonnote);
  	}
@@ -1022,23 +1102,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	while(p1) {
  		p = p1;
-@@ -1200,13 +1200,13 @@
- 	gp->lockedm = mp;
- 	gp->goid = runtime_xadd64(&runtime_sched.goidgen, 1);
- 	// put on allg for garbage collector
--	runtime_lock(&runtime_sched);
-+	runtime_lock(&runtime_sched.lock);
- 	if(runtime_lastg == nil)
- 		runtime_allg = gp;
- 	else
- 		runtime_lastg->alllink = gp;
- 	runtime_lastg = gp;
--	runtime_unlock(&runtime_sched);
-+	runtime_unlock(&runtime_sched.lock);
- 	gp->goid = runtime_xadd64(&runtime_sched.goidgen, 1);
- 
- 	// The context for gp will be set up in runtime_needm.  But
-@@ -1357,9 +1357,9 @@
+@@ -1404,9 +1404,9 @@
  	}
  
  retry:
@@ -1050,7 +1114,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	runtime_notesleep(&m->park);
  	runtime_noteclear(&m->park);
  	if(m->helpgc) {
-@@ -1386,18 +1386,18 @@
+@@ -1433,18 +1433,18 @@
  	M *mp;
  	void (*fn)(void);
  
@@ -1072,7 +1136,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	if(mp == nil) {
  		fn = nil;
  		if(spinning)
-@@ -1430,28 +1430,28 @@
+@@ -1477,28 +1477,28 @@
  		startm(p, true);
  		return;
  	}
@@ -1106,7 +1170,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  }
  
  // Tries to add one more P to execute G's.
-@@ -1523,11 +1523,11 @@
+@@ -1570,11 +1570,11 @@
  		runtime_xadd(&runtime_sched.nmspinning, -1);
  	}
  	p = releasep();
@@ -1120,7 +1184,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	stopm();
  }
  
-@@ -1575,9 +1575,9 @@
+@@ -1625,9 +1625,9 @@
  		return gp;
  	// global runq
  	if(runtime_sched.runqsize) {
@@ -1132,7 +1196,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  		if(gp)
  			return gp;
  	}
-@@ -1611,19 +1611,19 @@
+@@ -1661,19 +1661,19 @@
  	}
  stop:
  	// return P and block
@@ -1156,7 +1220,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	if(m->spinning) {
  		m->spinning = false;
  		runtime_xadd(&runtime_sched.nmspinning, -1);
-@@ -1632,9 +1632,9 @@
+@@ -1682,9 +1682,9 @@
  	for(i = 0; i < runtime_gomaxprocs; i++) {
  		p = runtime_allp[i];
  		if(p && p->runqhead != p->runqtail) {
@@ -1168,7 +1232,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  			if(p) {
  				acquirep(p);
  				goto top;
-@@ -1651,9 +1651,9 @@
+@@ -1701,9 +1701,9 @@
  		gp = runtime_netpoll(true);  // block until new work is available
  		runtime_atomicstore64(&runtime_sched.lastpoll, runtime_nanotime());
  		if(gp) {
@@ -1180,7 +1244,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  			if(p) {
  				acquirep(p);
  				injectglist(gp->schedlink);
-@@ -1696,14 +1696,14 @@
+@@ -1746,14 +1746,14 @@
  
  	if(glist == nil)
  		return;
@@ -1197,7 +1261,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	for(; n && runtime_sched.npidle; n--)
  		startm(nil, false);
-@@ -1734,9 +1734,9 @@
+@@ -1784,9 +1784,9 @@
  	// This is a fancy way to say tick%61==0,
  	// it uses 2 MUL instructions instead of a single DIV and so is faster on modern processors.
  	if(tick - (((uint64)tick*0x4325c53fu)>>36)*61 == 0 && runtime_sched.runqsize > 0) {
@@ -1209,7 +1273,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  		if(gp)
  			resetspinning();
  	}
-@@ -1804,9 +1804,9 @@
+@@ -1880,9 +1880,9 @@
  	gp->status = Grunnable;
  	gp->m = nil;
  	m->curg = nil;
@@ -1221,7 +1285,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	if(m->lockedg) {
  		stoplockedm();
  		execute(gp);  // Never returns.
-@@ -1899,24 +1899,24 @@
+@@ -1985,24 +1985,24 @@
  	g->status = Gsyscall;
  
  	if(runtime_atomicload(&runtime_sched.sysmonwait)) {  // TODO: fast atomic
@@ -1250,7 +1314,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	}
  
  	m->locks--;
-@@ -2026,13 +2026,13 @@
+@@ -2113,13 +2113,13 @@
  	// Try to get any other idle P.
  	m->p = nil;
  	if(runtime_sched.pidle) {
@@ -1266,7 +1330,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  		if(p) {
  			acquirep(p);
  			return true;
-@@ -2051,7 +2051,7 @@
+@@ -2138,7 +2138,7 @@
  	gp->status = Grunnable;
  	gp->m = nil;
  	m->curg = nil;
@@ -1275,7 +1339,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	p = pidleget();
  	if(p == nil)
  		globrunqput(gp);
-@@ -2059,7 +2059,7 @@
+@@ -2146,7 +2146,7 @@
  		runtime_atomicstore(&runtime_sched.sysmonwait, 0);
  		runtime_notewakeup(&runtime_sched.sysmonnote);
  	}
@@ -1284,23 +1348,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	if(p) {
  		acquirep(p);
  		execute(gp);  // Never returns.
-@@ -2181,13 +2181,13 @@
- #endif
- 	} else {
- 		newg = runtime_malg(StackMin, &sp, &spsize);
--		runtime_lock(&runtime_sched);
-+		runtime_lock(&runtime_sched.lock);
- 		if(runtime_lastg == nil)
- 			runtime_allg = newg;
- 		else
- 			runtime_lastg->alllink = newg;
- 		runtime_lastg = newg;
--		runtime_unlock(&runtime_sched);
-+		runtime_unlock(&runtime_sched.lock);
- 	}
- 
- 	newg->entry = (byte*)fn;
-@@ -2309,13 +2309,13 @@
+@@ -2425,13 +2425,13 @@
  
  	if(n > MaxGomaxprocs)
  		n = MaxGomaxprocs;
@@ -1317,25 +1365,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	runtime_semacquire(&runtime_worldsema, false);
  	m->gcing = 1;
-@@ -2417,7 +2417,7 @@
- 	int32 n, s;
- 
- 	n = 0;
--	runtime_lock(&runtime_sched);
-+	runtime_lock(&runtime_sched.lock);
- 	// TODO(dvyukov): runtime.NumGoroutine() is O(N).
- 	// We do not want to increment/decrement centralized counter in newproc/goexit,
- 	// just to make runtime.NumGoroutine() faster.
-@@ -2427,7 +2427,7 @@
- 		if(s == Grunnable || s == Grunning || s == Gsyscall || s == Gwaiting)
- 			n++;
- 	}
--	runtime_unlock(&runtime_sched);
-+	runtime_unlock(&runtime_sched.lock);
- 	return n;
- }
- 
-@@ -2438,7 +2438,7 @@
+@@ -2536,7 +2536,7 @@
  }
  
  static struct {
@@ -1343,29 +1373,29 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
 +	Lock lock;
  	void (*fn)(uintptr*, int32);
  	int32 hz;
- 	uintptr pcbuf[100];
-@@ -2464,9 +2464,9 @@
- 	if(!Windows && (m == nil || m->mcache == nil))
+ 	uintptr pcbuf[TracebackMaxFrames];
+@@ -2568,9 +2568,9 @@
+ 	if(mp->mcache == nil)
  		traceback = false;
- 	
+ 
 -	runtime_lock(&prof);
 +	runtime_lock(&prof.lock);
  	if(prof.fn == nil) {
 -		runtime_unlock(&prof);
 +		runtime_unlock(&prof.lock);
+ 		mp->mallocing--;
  		return;
  	}
- 	n = 0;
-@@ -2490,7 +2490,7 @@
- 		prof.pcbuf[1] = (uintptr)System + 1;
+@@ -2598,7 +2598,7 @@
+ 			prof.pcbuf[1] = (uintptr)System;
  	}
  	prof.fn(prof.pcbuf, n);
 -	runtime_unlock(&prof);
 +	runtime_unlock(&prof.lock);
+ 	mp->mallocing--;
  }
  
- // Arrange to call fn with a traceback hz times a second.
-@@ -2514,13 +2514,13 @@
+@@ -2623,13 +2623,13 @@
  	// it would deadlock.
  	runtime_resetcpuprofiler(0);
  
@@ -1383,7 +1413,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  
  	if(hz != 0)
  		runtime_resetcpuprofiler(hz);
-@@ -2642,11 +2642,11 @@
+@@ -2767,11 +2767,11 @@
  static void
  incidlelocked(int32 v)
  {
@@ -1397,7 +1427,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  }
  
  // Check for deadlock situation.
-@@ -2704,16 +2704,16 @@
+@@ -2840,16 +2840,16 @@
  		runtime_usleep(delay);
  		if(runtime_debug.schedtrace <= 0 &&
  			(runtime_sched.gcwaiting || runtime_atomicload(&runtime_sched.npidle) == (uint32)runtime_gomaxprocs)) {  // TODO: fast atomic
@@ -1417,7 +1447,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  		}
  		// poll network if not polled for more than 10ms
  		lastpoll = runtime_atomicload64(&runtime_sched.lastpoll);
-@@ -2838,7 +2838,7 @@
+@@ -2978,7 +2978,7 @@
  	if(starttime == 0)
  		starttime = now;
  
@@ -1426,7 +1456,7 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	runtime_printf("SCHED %Dms: gomaxprocs=%d idleprocs=%d threads=%d idlethreads=%d runqueue=%d",
  		(now-starttime)/1000000, runtime_gomaxprocs, runtime_sched.npidle, runtime_sched.mcount,
  		runtime_sched.nmidle, runtime_sched.runqsize);
-@@ -2878,7 +2878,7 @@
+@@ -3014,7 +3014,7 @@
  		}
  	}
  	if(!detailed) {
@@ -1435,92 +1465,30 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  		return;
  	}
  	for(mp = runtime_allm; mp; mp = mp->alllink) {
-@@ -2907,7 +2907,7 @@
- 			gp->goid, gp->status, gp->waitreason, mp ? mp->id : -1,
+@@ -3046,7 +3046,7 @@
  			lockedm ? lockedm->id : -1);
  	}
+ 	runtime_unlock(&allglock);
 -	runtime_unlock(&runtime_sched);
 +	runtime_unlock(&runtime_sched.lock);
  }
  
  // Put mp on midle list.
-@@ -3010,7 +3010,7 @@
+@@ -3202,9 +3202,9 @@
+ 	for(i=0; i<n; i++)
+ 		batch[i]->schedlink = batch[i+1];
+ 	// Now put the batch on global queue.
+-	runtime_lock(&runtime_sched);
++	runtime_lock(&runtime_sched.lock);
+ 	globrunqputbatch(batch[0], batch[n], n+1);
+-	runtime_unlock(&runtime_sched);
++	runtime_unlock(&runtime_sched.lock);
+ 	return true;
+ }
+ 
+@@ -3356,11 +3356,11 @@
  {
- 	int32 h, t, s;
- 
--	runtime_lock(p);
-+	runtime_lock(&p->lock);
- retry:
- 	h = p->runqhead;
- 	t = p->runqtail;
-@@ -3023,7 +3023,7 @@
- 	if(t == s)
- 		t = 0;
- 	p->runqtail = t;
--	runtime_unlock(p);
-+	runtime_unlock(&p->lock);
- }
- 
- // Get g from local runnable queue.
-@@ -3035,19 +3035,19 @@
- 
- 	if(p->runqhead == p->runqtail)
- 		return nil;
--	runtime_lock(p);
-+	runtime_lock(&p->lock);
- 	h = p->runqhead;
- 	t = p->runqtail;
- 	s = p->runqsize;
- 	if(t == h) {
--		runtime_unlock(p);
-+		runtime_unlock(&p->lock);
- 		return nil;
- 	}
- 	gp = p->runq[h++];
- 	if(h == s)
- 		h = 0;
- 	p->runqhead = h;
--	runtime_unlock(p);
-+	runtime_unlock(&p->lock);
- 	return gp;
- }
- 
-@@ -3090,16 +3090,16 @@
- 		return nil;
- 	// sort locks to prevent deadlocks
- 	if(p < p2)
--		runtime_lock(p);
--	runtime_lock(p2);
-+		runtime_lock(&p->lock);
-+	runtime_lock(&p2->lock);
- 	if(p2->runqhead == p2->runqtail) {
--		runtime_unlock(p2);
-+		runtime_unlock(&p2->lock);
- 		if(p < p2)
--			runtime_unlock(p);
-+			runtime_unlock(&p->lock);
- 		return nil;
- 	}
- 	if(p >= p2)
--		runtime_lock(p);
-+		runtime_lock(&p->lock);
- 	// now we've locked both queues and know the victim is not empty
- 	h = p->runqhead;
- 	t = p->runqtail;
-@@ -3132,8 +3132,8 @@
- 	}
- 	p->runqtail = t;
- 	p2->runqhead = h2;
--	runtime_unlock(p2);
--	runtime_unlock(p);
-+	runtime_unlock(&p2->lock);
-+	runtime_unlock(&p->lock);
- 	return gp;
- }
- 
-@@ -3230,11 +3230,11 @@
- {
- 	intgo out;
+ 	int32 out;
  
 -	runtime_lock(&runtime_sched);
 +	runtime_lock(&runtime_sched.lock);
@@ -1532,10 +1500,10 @@ diff -r 4d88292e0727 libgo/runtime/proc.c
  	return out;
  }
  
-diff -r 4d88292e0727 libgo/runtime/runtime.h
---- a/libgo/runtime/runtime.h	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/runtime.h	Thu May 29 18:15:32 2014 -0700
-@@ -288,7 +288,7 @@
+diff -r 225a208260a6 libgo/runtime/runtime.h
+--- a/libgo/runtime/runtime.h	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/runtime.h	Tue Sep 23 15:59:57 2014 -0700
+@@ -286,7 +286,7 @@
  
  struct P
  {
@@ -1544,7 +1512,7 @@ diff -r 4d88292e0727 libgo/runtime/runtime.h
  
  	int32	id;
  	uint32	status;		// one of Pidle/Prunning/...
-@@ -362,7 +362,7 @@
+@@ -384,7 +384,7 @@
  
  struct	Timers
  {
@@ -1553,9 +1521,9 @@ diff -r 4d88292e0727 libgo/runtime/runtime.h
  	G	*timerproc;
  	bool		sleeping;
  	bool		rescheduling;
-diff -r 4d88292e0727 libgo/runtime/sema.goc
---- a/libgo/runtime/sema.goc	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/sema.goc	Thu May 29 18:15:32 2014 -0700
+diff -r 225a208260a6 libgo/runtime/sema.goc
+--- a/libgo/runtime/sema.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/sema.goc	Tue Sep 23 15:59:57 2014 -0700
 @@ -35,7 +35,7 @@
  typedef struct SemaRoot SemaRoot;
  struct SemaRoot
@@ -1601,8 +1569,8 @@ diff -r 4d88292e0727 libgo/runtime/sema.goc
  		// Any semrelease after the cansemacquire knows we're waiting
  		// (we set nwait above), so go to sleep.
  		semqueue(root, addr, &s);
--		runtime_park(runtime_unlock, root, "semacquire");
-+		runtime_park(runtime_unlock, &root->lock, "semacquire");
+-		runtime_parkunlock(root, "semacquire");
++		runtime_parkunlock(&root->lock, "semacquire");
  		if(cansemacquire(addr)) {
  			if(t0)
  				runtime_blockevent(s.releasetime - t0, 3);
@@ -1660,8 +1628,8 @@ diff -r 4d88292e0727 libgo/runtime/sema.goc
  		else
  			s->tail->next = &w;
  		s->tail = &w;
--		runtime_park(runtime_unlock, s, "semacquire");
-+		runtime_park(runtime_unlock, &s->lock, "semacquire");
+-		runtime_parkunlock(s, "semacquire");
++		runtime_parkunlock(&s->lock, "semacquire");
  		if(t0)
  			runtime_blockevent(w.releasetime - t0, 2);
  	}
@@ -1678,15 +1646,15 @@ diff -r 4d88292e0727 libgo/runtime/sema.goc
  		else
  			s->tail->next = &w;
  		s->tail = &w;
--		runtime_park(runtime_unlock, s, "semarelease");
-+		runtime_park(runtime_unlock, &s->lock, "semarelease");
+-		runtime_parkunlock(s, "semarelease");
++		runtime_parkunlock(&s->lock, "semarelease");
  	} else
 -		runtime_unlock(s);
 +		runtime_unlock(&s->lock);
  }
-diff -r 4d88292e0727 libgo/runtime/sigqueue.goc
---- a/libgo/runtime/sigqueue.goc	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/sigqueue.goc	Thu May 29 18:15:32 2014 -0700
+diff -r 225a208260a6 libgo/runtime/sigqueue.goc
+--- a/libgo/runtime/sigqueue.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/sigqueue.goc	Tue Sep 23 15:59:57 2014 -0700
 @@ -32,7 +32,7 @@
  #include "defs.h"
  
@@ -1725,18 +1693,18 @@ diff -r 4d88292e0727 libgo/runtime/sigqueue.goc
  		return;
  	}
  	
-diff -r 4d88292e0727 libgo/runtime/time.goc
---- a/libgo/runtime/time.goc	Thu May 29 13:21:58 2014 -0700
-+++ b/libgo/runtime/time.goc	Thu May 29 18:15:32 2014 -0700
-@@ -76,17 +76,17 @@
+diff -r 225a208260a6 libgo/runtime/time.goc
+--- a/libgo/runtime/time.goc	Mon Sep 22 14:14:24 2014 -0700
++++ b/libgo/runtime/time.goc	Tue Sep 23 15:59:57 2014 -0700
+@@ -94,17 +94,17 @@
  	t.period = 0;
  	t.fv = &readyv;
  	t.arg.__object = g;
 -	runtime_lock(&timers);
 +	runtime_lock(&timers.lock);
  	addtimer(&t);
--	runtime_park(runtime_unlock, &timers, reason);
-+	runtime_park(runtime_unlock, &timers.lock, reason);
+-	runtime_parkunlock(&timers, reason);
++	runtime_parkunlock(&timers.lock, reason);
  }
  
  void
@@ -1750,7 +1718,7 @@ diff -r 4d88292e0727 libgo/runtime/time.goc
  }
  
  // Add a timer to the heap and start or kick the timer proc
-@@ -151,14 +151,14 @@
+@@ -169,14 +169,14 @@
  	i = t->i;
  	gi = i;
  
@@ -1767,7 +1735,7 @@ diff -r 4d88292e0727 libgo/runtime/time.goc
  		return false;
  	}
  
-@@ -174,7 +174,7 @@
+@@ -192,7 +192,7 @@
  	}
  	if(debug)
  		dumptimers("deltimer");
@@ -1776,7 +1744,7 @@ diff -r 4d88292e0727 libgo/runtime/time.goc
  	return true;
  }
  
-@@ -191,7 +191,7 @@
+@@ -210,7 +210,7 @@
  	Eface arg;
  
  	for(;;) {
@@ -1785,24 +1753,29 @@ diff -r 4d88292e0727 libgo/runtime/time.goc
  		timers.sleeping = false;
  		now = runtime_nanotime();
  		for(;;) {
-@@ -216,23 +216,23 @@
- 			}
+@@ -236,7 +236,7 @@
+ 			fv = t->fv;
  			f = (void*)t->fv->fn;
  			arg = t->arg;
 -			runtime_unlock(&timers);
 +			runtime_unlock(&timers.lock);
  			if(raceenabled)
  				runtime_raceacquire(t);
- 			__go_set_closure(t->fv);
- 			f(now, arg);
+ 			__go_set_closure(fv);
+@@ -249,20 +249,20 @@
+ 			arg.__object = nil;
+ 			USED(&arg);
+ 
 -			runtime_lock(&timers);
 +			runtime_lock(&timers.lock);
  		}
  		if(delta < 0) {
  			// No timers left - put goroutine to sleep.
  			timers.rescheduling = true;
--			runtime_park(runtime_unlock, &timers, "timer goroutine (idle)");
-+			runtime_park(runtime_unlock, &timers.lock, "timer goroutine (idle)");
+ 			runtime_g()->isbackground = true;
+-			runtime_parkunlock(&timers, "timer goroutine (idle)");
++			runtime_parkunlock(&timers.lock, "timer goroutine (idle)");
+ 			runtime_g()->isbackground = false;
  			continue;
  		}
  		// At least one timer pending.  Sleep until then.
