@@ -69,6 +69,9 @@ type TypeMap struct {
 
 	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity, hashFnError        llvm.Value
 	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity, equalFnError llvm.Value
+
+	zeroType  llvm.Type
+	zeroValue llvm.Value
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
@@ -130,6 +133,14 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
 	tm.equalFnError = llvm.AddFunction(tm.module, "__go_type_equal_error", tm.equalFnType)
 
+	// The body of this type is set in emitTypeDescInitializers once we have scanned
+	// every type, as it needs to be as large and well aligned as the
+	// largest/most aligned type.
+	tm.zeroType = tm.ctx.StructCreateNamed("zero")
+	tm.zeroValue = llvm.AddGlobal(tm.module, tm.zeroType, "go$zerovalue")
+	tm.zeroValue.SetLinkage(llvm.CommonLinkage)
+	tm.zeroValue.SetInitializer(llvm.ConstNull(tm.zeroType))
+
 	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
 
@@ -162,6 +173,7 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 		stringPtrType,                            // string
 		llvm.PointerType(tm.uncommonTypeType, 0), // uncommonType
 		commonTypeTypePtr,                        // ptrToThis
+		llvm.PointerType(tm.zeroType, 0),         // zero
 	}, false)
 
 	tm.typeSliceType = tm.makeNamedSliceType("typeSlice", commonTypeTypePtr)
@@ -1037,6 +1049,9 @@ func (ts byTypeName) Less(i, j int) bool {
 }
 
 func (tm *TypeMap) emitTypeDescInitializers() {
+	var maxSize, maxAlign int64
+	maxAlign = 1
+
 	for changed := true; changed; {
 		changed = false
 
@@ -1058,9 +1073,18 @@ func (tm *TypeMap) emitTypeDescInitializers() {
 			sort.Sort(byTypeName(ts))
 			for _, t := range ts {
 				t.tdi.global.SetInitializer(tm.makeTypeDescInitializer(t.typ))
+				if size := tm.Sizeof(t.typ); size > maxSize {
+					maxSize = size
+				}
+				if align := tm.Alignof(t.typ); align > maxAlign {
+					maxAlign = align
+				}
 			}
 		}
 	}
+
+	tm.zeroType.StructSetBody([]llvm.Type{llvm.ArrayType(tm.ctx.Int8Type(), int(maxSize))}, false)
+	tm.zeroValue.SetAlignment(int(maxAlign))
 }
 
 func (tm *TypeMap) makeTypeDescInitializer(t types.Type) llvm.Value {
@@ -1543,7 +1567,7 @@ func runtimeTypeKind(t types.Type) (k uint8) {
 }
 
 func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
-	var vals [10]llvm.Value
+	var vals [11]llvm.Value
 	vals[0] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(runtimeTypeKind(t)), false)
 	vals[1] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(tm.Alignof(t)), false)
 	vals[2] = vals[1]
@@ -1561,6 +1585,7 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	} else {
 		vals[9] = llvm.ConstPointerNull(llvm.PointerType(tm.commonTypeType, 0))
 	}
+	vals[10] = tm.zeroValue
 
 	return llvm.ConstNamedStruct(tm.commonTypeType, vals[:])
 }
