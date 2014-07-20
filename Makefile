@@ -14,7 +14,7 @@ check-libgo: bootstrap
 check-llgo: bootstrap
 	$(llvmdir)/bin/llvm-lit -s test
 
-workdir/.bootstrap-stamp: workdir/.update-libgo-stamp workdir/.update-clang-stamp bootstrap.sh *.go build/*.go cmd/gllgo/*.go cmd/cc-wrapper/*.go debug/*.go ssaopt/*.go
+workdir/.bootstrap-stamp: workdir/.update-libgo-stamp workdir/.update-clang-stamp bootstrap.sh build/*.go cmd/gllgo/*.go cmd/cc-wrapper/*.go debug/*.go irgen/*.go ssaopt/*.go
 	./bootstrap.sh $(bootstrap) -j$(j)
 
 workdir/.update-clang-stamp: update_clang.sh

@@ -4,7 +4,7 @@
 
 // This file implements commonly used type predicates.
 
-package llgo
+package irgen
 
 import (
 	"code.google.com/p/go.tools/go/types"

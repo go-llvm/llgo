@@ -1,4 +1,4 @@
-package llgo
+package irgen
 
 import (
 	"code.google.com/p/go.tools/go/types"

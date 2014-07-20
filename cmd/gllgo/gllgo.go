@@ -19,8 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-llvm/llgo"
 	"github.com/go-llvm/llgo/debug"
+	"github.com/go-llvm/llgo/irgen"
 	"github.com/go-llvm/llvm"
 )
 
@@ -35,19 +35,19 @@ func report(err error) {
 }
 
 func displayVersion() {
-	fmt.Printf("llgo version %s (%s)\n", llgo.Version(), llgo.GoVersion())
+	fmt.Printf("llgo version %s (%s)\n", irgen.Version(), irgen.GoVersion())
 	fmt.Println()
 	os.Exit(0)
 }
 
-func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
+func initCompiler(opts *driverOptions) (*irgen.Compiler, error) {
 	importPaths := make([]string, len(opts.importPaths)+len(opts.libPaths))
 	copy(importPaths, opts.importPaths)
 	copy(importPaths[len(opts.importPaths):], opts.libPaths)
 	if opts.prefix != "" {
 		importPaths = append(importPaths, filepath.Join(opts.prefix, "lib", "go"))
 	}
-	copts := llgo.CompilerOptions{
+	copts := irgen.CompilerOptions{
 		TargetTriple:    opts.triple,
 		GenerateDebug:   opts.generateDebug,
 		DebugPrefixMaps: opts.debugPrefixMaps,
@@ -55,7 +55,7 @@ func initCompiler(opts *driverOptions) (*llgo.Compiler, error) {
 		GccgoPath:       opts.gccgoPath,
 		ImportPaths:     importPaths,
 	}
-	return llgo.NewCompiler(copts)
+	return irgen.NewCompiler(copts)
 }
 
 type actionKind int
