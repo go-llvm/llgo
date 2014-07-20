@@ -1,4 +1,0 @@
-We currently depend on a patch to go.tools which is under review. The
-following need to be patched into your copy of go.tools:
-
-https://codereview.appspot.com/92780044
