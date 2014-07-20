@@ -7,7 +7,7 @@ llgodir=$(dirname "$0")
 llgodir=$(cd "$llgodir" && pwd)
 
 gofrontendrepo=https://code.google.com/p/gofrontend/
-gofrontendrev=c63d4fe75597
+gofrontendrev=ca381cdd378c
 
 gccrepo=svn://gcc.gnu.org/svn/gcc/trunk
 gccrev=209880
