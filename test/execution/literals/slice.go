@@ -1,0 +1,18 @@
+// RUN: llgo -o %t %s
+// RUN: %t > %t1 2>&1
+// RUN: go run %s > %t2 2>&1
+// RUN: diff -u %t1 %t2
+
+package main
+
+func main() {
+	x := []string{"abc", "123"}
+	println(x[0])
+	println(x[1])
+
+	// Elements are composite literals, so the '&' can be elided.
+	type S struct{ string }
+	y := []*S{{"abc"}, {"123"}}
+	println(y[0].string)
+	println(y[1].string)
+}

@@ -5,9 +5,4 @@
 _obj
 bin
 cmd/gllgo/gllgo
-cmd/llgo/llgo
-cmd/llgo-dist/llgo-dist
-cmd/llgo-build/llgo-build
-llgo/llgo
-llgo/gotest.out*
 workdir

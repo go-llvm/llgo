@@ -3,7 +3,9 @@
 
 llgo is a [Go](http://golang.org) frontend for [LLVM](http://llvm.org), written in Go.
 
-llgo is under active development, but is still considered experimental. It is not presently useful for real work. Progress will be reported at [http://blog.awilkins.id.au](http://blog.awilkins.id.au).
+llgo is under active development. It compiles and passes most of the standard library test suite and a substantial portion of the gc test suite, but there are some corner cases that are known not to be handled correctly yet. Nevertheless it can compile modestly substantial programs (including itself; it is self hosting on x86-64 Linux).
+
+Progress will be reported on the [mailing list](https://groups.google.com/d/forum/llgo-dev).
 
 # Installation
 
@@ -15,7 +17,7 @@ To install llgo, use make:
 
 You may need to build LLVM. See GoLLVM's README.md for more information.
 
-llgo requires Go 1.3, or Go 1.2 with a [bug fix](https://codereview.appspot.com/96790047/) applied. See also README.patches for a list of additional patches to apply.
+llgo requires Go 1.3 or later.
 
 # Running
 
