@@ -9,15 +9,28 @@ Progress will be reported on the [mailing list](https://groups.google.com/d/foru
 
 # Installation
 
-To install llgo, use make:
+llgo requires:
+* Go 1.3 or later.
+* [CMake](http://cmake.org/) 2.8.8 or later (to build LLVM).
+* A [modern C++ toolchain](http://llvm.org/docs/GettingStarted.html#getting-a-modern-host-c-toolchain) (to build LLVM).
 
-    go get github.com/go-llvm/llgo
-    cd $GOPATH/src/github.com/go-llvm/llgo
-    make install prefix=/path/to/prefix
+Note that Ubuntu Precise is one Linux distribution which does not package a sufficiently new CMake or C++ toolchain.
 
-You may need to build LLVM. See GoLLVM's README.md for more information.
+If you built a newer GCC following the linked instructions above, you will need to set the following environment variables before proceeding:
 
-llgo requires Go 1.3 or later.
+    export PATH=/path/to/gcc-inst/bin:$PATH
+    export LD_LIBRARY_PATH=/path/to/gcc-inst/lib64:$LD_LIBRARY_PATH
+    export CC=`which gcc`
+    export CXX=`which g++`
+
+To build and install llgo:
+
+    # Ensure $GOPATH is set.
+    go get -d github.com/go-llvm/llgo/cmd/gllgo
+    cd $GOPATH/src/github.com/go-llvm/llvm
+    ./update_llvm.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
+    cd ../llgo
+    make install prefix=/path/to/prefix j=N  # where N is the number of cores on your machine.
 
 # Running
 
