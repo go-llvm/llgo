@@ -1,7 +1,6 @@
 #!/bin/sh -e
 
-# Fetch libgo and its dependencies, and build the dependencies.
-# We build libgo itself while bootstrapping.
+# Fetch libgo and its dependencies.
 
 llgodir=$(dirname "$0")
 llgodir=$(cd "$llgodir" && pwd)
@@ -14,7 +13,6 @@ gccrev=209880
 
 workdir=$llgodir/workdir
 gofrontenddir=$workdir/gofrontend
-gofrontend_builddir=$workdir/gofrontend_build
 
 mkdir -p $workdir
 if [ -d $gofrontenddir/.hg ] ; then
@@ -54,17 +52,6 @@ echo "#define IS_ABSOLUTE_PATH(path) ((path)[0] == '/')" > $gofrontenddir/includ
 
 for d in libbacktrace libffi ; do
   svn co -r $gccrev $gccrepo/$d $gofrontenddir/$d
-  mkdir -p $gofrontend_builddir/$d
-  case $d in
-  libbacktrace)
-    config_flags="--enable-host-shared"
-    ;;
-  *)
-    config_flags=""
-    ;;
-  esac
-  (cd $gofrontend_builddir/$d && CC="${LIBGO_CC:-$workdir/clang_build/bin/clang}" $gofrontenddir/$d/configure --disable-multilib $config_flags)
-  make -C $gofrontend_builddir/$d -j4
 done
 
 touch $workdir/.update-libgo-stamp

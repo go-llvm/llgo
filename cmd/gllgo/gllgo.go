@@ -381,6 +381,14 @@ func getDataInlineAsm(data []byte) string {
 	return string(edata[0 : j+2])
 }
 
+// Get the lib-relative path to the standard libraries for the given driver
+// options. This is normally '.' but can vary for cross compilation, LTO,
+// sanitizers etc.
+func getVariantDir(opts *driverOptions) string {
+	path := "."
+	return path
+}
+
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
 	case actionPrint:
@@ -391,8 +399,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			os.Stdout.Write(out)
 			return err
 		case "-print-multi-os-directory":
-			// TODO(pcc): Vary this for cross-compilation.
-			fmt.Println(".")
+			fmt.Println(getVariantDir(opts))
 			return nil
 		case "--version":
 			displayVersion()
@@ -541,7 +548,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			linkerPath = opts.bprefix + "gcc"
 
 			if opts.prefix != "" {
-				libdir := filepath.Join(opts.prefix, "lib")
+				libdir := filepath.Join(opts.prefix, "lib", getVariantDir(opts))
 				args = append(args, "-L", libdir)
 				if !opts.staticLibgo {
 					args = append(args, "-Wl,-rpath,"+libdir)
