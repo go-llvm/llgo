@@ -19,6 +19,35 @@ libgodeps | quick | full)
   ;;
 esac
 
+if test "$1" == "lto"; then
+  lto=1
+  shift
+fi
+
+if test "$1" == "asan"; then
+  asan=1
+  shift
+fi
+
+if test "$1" == "tsan"; then
+  tsan=1
+  shift
+fi
+
+if test "$1" == "msan"; then
+  msan=1
+  shift
+fi
+
+if test "$1" == "dfsan"; then
+  dfsan=1
+  shift
+fi
+
+if test "$lto" == "1" -o "$asan" == "1" -o "$tsan" == "1" -o "$msan" == "1" -o "$dfsan" == "1"; then
+  echo "# WARNING: support for LTO/sanitizer variants is EXPERIMENTAL and unlikely to work correctly!"
+fi
+
 llgo_cc="${LIBGO_CC:-$workdir/clang_build/bin/clang} $LIBGO_CFLAGS"
 llgo_cxx="${LIBGO_CXX:-$workdir/clang_build/bin/clang++} $LIBGO_CFLAGS"
 
@@ -141,4 +170,24 @@ if [ "$bootstrap_type" != "" ]; then
   cmp $workdir/gllgo-stage2.stripped $workdir/gllgo-stage3.stripped && \
   echo "# Bootstrap completed successfully." && touch $workdir/.bootstrap-stamp || \
   (echo "# Bootstrap failed, binaries differ." && exit 1)
+fi
+
+if [ "$lto" == "1" ]; then
+  build_libgo_variant $workdir/gllgo-stage3 "-flto" "-flto" lto "$*"
+fi
+
+if [ "$asan" == "1" ]; then
+  build_libgo_variant $workdir/gllgo-stage3 "-fsanitize=address" "-fsanitize=address -fcompilerrt-prefix=$workdir/clang_build" asan "$*"
+fi
+
+if [ "$tsan" == "1" ]; then
+  build_libgo_variant $workdir/gllgo-stage3 "-fsanitize=thread" "-fsanitize=thread -fcompilerrt-prefix=$workdir/clang_build" tsan "$*"
+fi
+
+if [ "$msan" == "1" ]; then
+  build_libgo_variant $workdir/gllgo-stage3 "-fsanitize=memory" "-fsanitize=memory -fcompilerrt-prefix=$workdir/clang_build" msan "$*"
+fi
+
+if [ "$dfsan" == "1" ]; then
+  build_libgo_variant $workdir/gllgo-stage3 "-fsanitize=dataflow" "-fsanitize=dataflow -fcompilerrt-prefix=$workdir/clang_build" dfsan "$*"
 fi
