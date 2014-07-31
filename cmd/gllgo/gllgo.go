@@ -157,6 +157,10 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case strings.HasPrefix(args[0], "-I"):
 			opts.importPaths = append(opts.importPaths, args[0][2:])
 
+		case args[0] == "-isystem":
+			otherInputs = append(otherInputs, args[0], args[1])
+			consumedArgs = 2
+
 		case args[0] == "-L":
 			if len(args) == 1 {
 				return opts, errors.New("missing path after '-L'")
@@ -537,7 +541,8 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		var linkerPath string
 		if opts.gccgoPath == "" {
 			// TODO(pcc): See if we can avoid calling gcc here.
-			// We currently rely on it to find crt*.o.
+			// We currently rely on it to find crt*.o and compile
+			// any C source files passed as arguments.
 			linkerPath = opts.bprefix + "gcc"
 
 			if opts.prefix != "" {
