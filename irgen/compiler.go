@@ -24,11 +24,6 @@ import (
 	"code.google.com/p/go.tools/go/types"
 )
 
-func addCommonFunctionAttrs(fn llvm.Value) {
-	fn.AddTargetDependentFunctionAttr("disable-tail-calls", "true")
-	fn.AddTargetDependentFunctionAttr("split-stack", "")
-}
-
 type Module struct {
 	llvm.Module
 	Path       string
@@ -72,6 +67,10 @@ type CompilerOptions struct {
 
 	// ImportPaths is the list of additional import paths
 	ImportPaths []string
+
+	// SanitizerAttribute is an attribute to apply to functions to enable
+	// dynamic instrumentation using a sanitizer.
+	SanitizerAttribute llvm.Attribute
 }
 
 type Compiler struct {
@@ -134,6 +133,14 @@ type compiler struct {
 func (c *compiler) logf(format string, v ...interface{}) {
 	if c.Logger != nil {
 		c.Logger.Printf(format, v...)
+	}
+}
+
+func (c *compiler) addCommonFunctionAttrs(fn llvm.Value) {
+	fn.AddTargetDependentFunctionAttr("disable-tail-calls", "true")
+	fn.AddTargetDependentFunctionAttr("split-stack", "")
+	if attr := c.SanitizerAttribute; attr != 0 {
+		fn.AddFunctionAttr(attr)
 	}
 }
 
@@ -298,7 +305,7 @@ func (c *compiler) createInitMainFunction(mainPkg *ssa.Package, initmap map[*typ
 
 	ftyp := llvm.FunctionType(llvm.VoidType(), nil, false)
 	initMain := llvm.AddFunction(c.module.Module, "__go_init_main", ftyp)
-	addCommonFunctionAttrs(initMain)
+	c.addCommonFunctionAttrs(initMain)
 	entry := llvm.AddBasicBlock(initMain, "entry")
 
 	builder := llvm.GlobalContext().NewBuilder()

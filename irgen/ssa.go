@@ -315,7 +315,7 @@ func (u *unit) defineFunction(f *ssa.Function) {
 
 	fr := newFrame(u, llfn)
 	defer fr.dispose()
-	addCommonFunctionAttrs(fr.function)
+	fr.addCommonFunctionAttrs(fr.function)
 	fr.function.SetLinkage(linkage)
 
 	fr.logf("Define function: %s", f.String())
@@ -501,7 +501,7 @@ func (fr *frame) bridgeRecoverFunc(llfn llvm.Value, fti functionTypeInfo) *frame
 	ftiRecover := fti
 	ftiRecover.functionType = llvm.FunctionType(returnType, argTypes, false)
 	llfnRecover := ftiRecover.declare(fr.module.Module, llfn.Name()+"$recover")
-	addCommonFunctionAttrs(llfnRecover)
+	fr.addCommonFunctionAttrs(llfnRecover)
 	llfnRecover.SetLinkage(llvm.InternalLinkage)
 	args := make([]llvm.Value, len(argTypes)-1, len(argTypes))
 	for i := range args {

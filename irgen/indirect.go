@@ -65,7 +65,7 @@ func (fr *frame) createThunk(call ssa.CallInstruction) (thunk llvm.Value, arg ll
 	thunkfntype := llvm.FunctionType(llvm.VoidType(), []llvm.Type{i8ptr}, false)
 	thunkfn := llvm.AddFunction(fr.module.Module, "", thunkfntype)
 	thunkfn.SetLinkage(llvm.InternalLinkage)
-	addCommonFunctionAttrs(thunkfn)
+	fr.addCommonFunctionAttrs(thunkfn)
 
 	thunkfr := newFrame(fr.unit, thunkfn)
 	defer thunkfr.dispose()

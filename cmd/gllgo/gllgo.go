@@ -48,12 +48,13 @@ func initCompiler(opts *driverOptions) (*irgen.Compiler, error) {
 		importPaths = append(importPaths, filepath.Join(opts.prefix, "lib", "go"))
 	}
 	copts := irgen.CompilerOptions{
-		TargetTriple:    opts.triple,
-		GenerateDebug:   opts.generateDebug,
-		DebugPrefixMaps: opts.debugPrefixMaps,
-		DumpSSA:         opts.dumpSSA,
-		GccgoPath:       opts.gccgoPath,
-		ImportPaths:     importPaths,
+		TargetTriple:       opts.triple,
+		GenerateDebug:      opts.generateDebug,
+		DebugPrefixMaps:    opts.debugPrefixMaps,
+		DumpSSA:            opts.dumpSSA,
+		GccgoPath:          opts.gccgoPath,
+		ImportPaths:        importPaths,
+		SanitizerAttribute: opts.sanitizer.getAttribute(),
 	}
 	return irgen.NewCompiler(copts)
 }
@@ -72,6 +73,73 @@ type action struct {
 	inputs []string
 }
 
+type sanitizerOptions struct {
+	blacklist string
+	crtPrefix string
+
+	address, thread, memory, dataflow bool
+}
+
+func (san *sanitizerOptions) resourcePath() string {
+	// TODO(pcc): detect the version here.
+	return filepath.Join(san.crtPrefix, "lib", "clang", "3.5.0")
+}
+
+func (san *sanitizerOptions) isPIEDefault() bool {
+	return san.thread || san.memory || san.dataflow
+}
+
+func (san *sanitizerOptions) addPasses(mpm, fpm llvm.PassManager) {
+	switch {
+	case san.address:
+		mpm.AddAddressSanitizerModulePass()
+		fpm.AddAddressSanitizerFunctionPass()
+	case san.thread:
+		mpm.AddThreadSanitizerPass()
+	case san.memory:
+		mpm.AddMemorySanitizerPass()
+	case san.dataflow:
+		blacklist := san.blacklist
+		if blacklist == "" {
+			blacklist = filepath.Join(san.resourcePath(), "dfsan_abilist.txt")
+		}
+		mpm.AddDataFlowSanitizerPass(blacklist)
+	}
+}
+
+func (san *sanitizerOptions) libPath(triple, sanitizerName string) string {
+	s := strings.Split(triple, "-")
+	return filepath.Join(san.resourcePath(), "lib", s[2], "libclang_rt."+sanitizerName+"-"+s[0]+".a")
+}
+
+func (san *sanitizerOptions) addLibs(triple string, flags []string) []string {
+	switch {
+	case san.address:
+		flags = append(flags, san.libPath(triple, "asan"), "-lrt", "-ldl")
+	case san.thread:
+		flags = append(flags, san.libPath(triple, "tsan"), "-lrt", "-ldl")
+	case san.memory:
+		flags = append(flags, san.libPath(triple, "msan"), "-lrt", "-ldl")
+	case san.dataflow:
+		flags = append(flags, san.libPath(triple, "dfsan"), "-lrt", "-ldl")
+	}
+
+	return flags
+}
+
+func (san *sanitizerOptions) getAttribute() llvm.Attribute {
+	switch {
+	case san.address:
+		return llvm.SanitizeAddressAttribute
+	case san.thread:
+		return llvm.SanitizeThreadAttribute
+	case san.memory:
+		return llvm.SanitizeMemoryAttribute
+	default:
+		return 0
+	}
+}
+
 type driverOptions struct {
 	actions []action
 	output  string
@@ -88,9 +156,11 @@ type driverOptions struct {
 	lto             bool
 	optLevel        int
 	pic             bool
+	pieLink         bool
 	pkgpath         string
 	plugins         []string
 	prefix          string
+	sanitizer       sanitizerOptions
 	sizeLevel       int
 	staticLibgcc    bool
 	staticLibgo     bool
@@ -193,6 +263,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-c":
 			actionKind = actionCompile
 
+		case strings.HasPrefix(args[0], "-fcompilerrt-prefix="):
+			opts.sanitizer.crtPrefix = args[0][20:]
+
 		case strings.HasPrefix(args[0], "-fdebug-prefix-map="):
 			split := strings.SplitN(args[0][19:], "=", 2)
 			if len(split) < 2 {
@@ -228,6 +301,23 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		case args[0] == "-fPIC":
 			opts.pic = true
 
+		case strings.HasPrefix(args[0], "-fsanitize-blacklist="):
+			opts.sanitizer.blacklist = args[0][21:]
+
+		// TODO(pcc): Enforce mutual exclusion between sanitizers.
+
+		case args[0] == "-fsanitize=address":
+			opts.sanitizer.address = true
+
+		case args[0] == "-fsanitize=thread":
+			opts.sanitizer.thread = true
+
+		case args[0] == "-fsanitize=memory":
+			opts.sanitizer.memory = true
+
+		case args[0] == "-fsanitize=dataflow":
+			opts.sanitizer.dataflow = true
+
 		case args[0] == "-g":
 			opts.generateDebug = true
 
@@ -247,6 +337,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 			}
 			opts.output = args[1]
 			consumedArgs = 2
+
+		case args[0] == "-pie":
+			opts.pieLink = true
 
 		case args[0] == "-print-libgcc-file-name",
 			args[0] == "-print-multi-os-directory",
@@ -279,6 +372,17 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 		if err != nil {
 			return opts, err
 		}
+	}
+
+	if opts.sanitizer.crtPrefix == "" {
+		opts.sanitizer.crtPrefix = opts.prefix
+	}
+
+	if opts.sanitizer.isPIEDefault() {
+		// This should really only be turning on -fPIE, but this isn't
+		// easy to do from Go, and -fPIC is a superset of it anyway.
+		opts.pic = true
+		opts.pieLink = true
 	}
 
 	switch actionKind {
@@ -341,6 +445,8 @@ func runPasses(opts *driverOptions, tm llvm.TargetMachine, m llvm.Module) {
 	pmb.Populate(mpm)
 	pmb.PopulateFunc(fpm)
 
+	opts.sanitizer.addPasses(mpm, fpm)
+
 	fpm.InitializeFunc()
 	for fn := m.FirstFunction(); !fn.IsNil(); fn = llvm.NextFunction(fn) {
 		fpm.RunFunc(fn)
@@ -385,6 +491,26 @@ func getDataInlineAsm(data []byte) string {
 	return string(edata[0 : j+2])
 }
 
+// Get the lib-relative path to the standard libraries for the given driver
+// options. This is normally '.' but can vary for cross compilation, LTO,
+// sanitizers etc.
+func getVariantDir(opts *driverOptions) string {
+	switch {
+	case opts.lto:
+		return "llvm-lto.0"
+	case opts.sanitizer.address:
+		return "llvm-asan.0"
+	case opts.sanitizer.thread:
+		return "llvm-tsan.0"
+	case opts.sanitizer.memory:
+		return "llvm-msan.0"
+	case opts.sanitizer.dataflow:
+		return "llvm-dfsan.0"
+	default:
+		return "."
+	}
+}
+
 func performAction(opts *driverOptions, kind actionKind, inputs []string, output string) error {
 	switch kind {
 	case actionPrint:
@@ -395,8 +521,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			os.Stdout.Write(out)
 			return err
 		case "-print-multi-os-directory":
-			// TODO(pcc): Vary this for cross-compilation.
-			fmt.Println(".")
+			fmt.Println(getVariantDir(opts))
 			return nil
 		case "--version":
 			displayVersion()
@@ -525,6 +650,9 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 		if opts.pic {
 			args = append(args, "-fPIC")
 		}
+		if opts.pieLink {
+			args = append(args, "-pie")
+		}
 		if opts.staticLink {
 			args = append(args, "-static")
 		}
@@ -546,7 +674,7 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 			linkerPath = opts.bprefix + "gcc"
 
 			if opts.prefix != "" {
-				libdir := filepath.Join(opts.prefix, "lib")
+				libdir := filepath.Join(opts.prefix, "lib", getVariantDir(opts))
 				args = append(args, "-L", libdir)
 				if !opts.staticLibgo {
 					args = append(args, "-Wl,-rpath,"+libdir)
@@ -565,6 +693,8 @@ func performAction(opts *driverOptions, kind actionKind, inputs []string, output
 				args = append(args, "-static-libgo")
 			}
 		}
+
+		args = opts.sanitizer.addLibs(opts.triple, args)
 
 		cmd := exec.Command(linkerPath, args...)
 		out, err := cmd.CombinedOutput()

@@ -22,6 +22,7 @@ If you built a newer GCC following the linked instructions above, you will need 
     export LD_LIBRARY_PATH=/path/to/gcc-inst/lib64:$LD_LIBRARY_PATH
     export CC=`which gcc`
     export CXX=`which g++`
+    export LIBGO_CFLAGS=--gcc-toolchain=/path/to/gcc-inst
 
 To build and install llgo:
 
