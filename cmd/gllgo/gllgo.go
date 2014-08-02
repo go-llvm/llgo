@@ -81,8 +81,8 @@ type sanitizerOptions struct {
 }
 
 func (san *sanitizerOptions) resourcePath() string {
-	// TODO(pcc): detect the version here.
-	return filepath.Join(san.crtPrefix, "lib", "clang", "3.5.0")
+	version := strings.Replace(llvm.Version, "svn", "", 1)
+	return filepath.Join(san.crtPrefix, "lib", "clang", version)
 }
 
 func (san *sanitizerOptions) isPIEDefault() bool {
