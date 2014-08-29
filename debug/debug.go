@@ -175,7 +175,7 @@ func (d *DIBuilder) SetLocation(b llvm.Builder, pos token.Pos) {
 	}
 	position := d.fset.Position(pos)
 	d.lb = llvm.Value{nil}
-	if position.Filename != d.fnFile {
+	if position.Filename != d.fnFile && position.Filename != "" {
 		// This can happen rarely, e.g. in init functions.
 		diFile := d.builder.CreateFile(d.remapFilePath(position.Filename), "")
 		d.lb = d.builder.CreateLexicalBlockFile(d.scope(), diFile, 0)
