@@ -5,4 +5,5 @@
 _obj
 bin
 cmd/gllgo/gllgo
+test/**/Output
 workdir
