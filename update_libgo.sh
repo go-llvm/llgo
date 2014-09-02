@@ -9,7 +9,7 @@ gofrontendrepo=https://code.google.com/p/gofrontend/
 gofrontendrev=c63d4fe75597
 
 gccrepo=svn://gcc.gnu.org/svn/gcc/trunk
-gccrev=209880
+gccrev=210256
 
 workdir=$llgodir/workdir
 gofrontenddir=$workdir/gofrontend
