@@ -1,0 +1,23 @@
+language: go
+go:
+  - 1.3.1
+env:
+  - APT_GET='apt-get --option=Dpkg::Options::=--force-confold --option=Dpkg::options::=--force-unsafe-io --assume-yes --quiet'
+before_install:
+  - sudo add-apt-repository -y ppa:kalakris/cmake # install newer cmake
+  - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test # install newer gcc
+  - sudo $APT_GET update
+  - sudo $APT_GET install mercurial git subversion cmake gcc-4.8 g++-4.8
+  - export CXX=g++-4.8 CC=gcc-4.8
+install:
+  - go get -d github.com/go-llvm/llvm
+  - $(go list -f '{{.Dir}}' github.com/go-llvm/llvm)/update_llvm.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
+  - make install prefix=`pwd`/.install
+script:
+  - make check-llgo check-libgo
+notifications:
+  email:
+    recipients:
+      - axwalk@gmail.com
+    on_success: change
+    on_failure: always
