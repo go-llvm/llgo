@@ -445,6 +445,12 @@ func runPasses(opts *driverOptions, tm llvm.TargetMachine, m llvm.Module) {
 	pmb.Populate(mpm)
 	pmb.PopulateFunc(fpm)
 
+	if opts.optLevel == 0 {
+		// Remove references (via the descriptor) to dead functions,
+		// for compatibility with other compilers.
+		mpm.AddGlobalDCEPass()
+	}
+
 	opts.sanitizer.addPasses(mpm, fpm)
 
 	fpm.InitializeFunc()
