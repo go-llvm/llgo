@@ -43,6 +43,7 @@ type typeDescInfo struct {
 	global        llvm.Value
 	commonTypePtr llvm.Value
 	mapDescPtr    llvm.Value
+	gc, gcPtr     llvm.Value
 
 	interfaceMethodTables typeutil.Map
 }
@@ -69,6 +70,9 @@ type TypeMap struct {
 
 	hashFnEmptyInterface, hashFnInterface, hashFnFloat, hashFnComplex, hashFnString, hashFnIdentity, hashFnError        llvm.Value
 	equalFnEmptyInterface, equalFnInterface, equalFnFloat, equalFnComplex, equalFnString, equalFnIdentity, equalFnError llvm.Value
+
+	zeroType  llvm.Type
+	zeroValue llvm.Value
 }
 
 func NewLLVMTypeMap(ctx llvm.Context, target llvm.TargetData) *llvmTypeMap {
@@ -130,6 +134,14 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 	tm.equalFnIdentity = llvm.AddFunction(tm.module, "__go_type_equal_identity", tm.equalFnType)
 	tm.equalFnError = llvm.AddFunction(tm.module, "__go_type_equal_error", tm.equalFnType)
 
+	// The body of this type is set in emitTypeDescInitializers once we have scanned
+	// every type, as it needs to be as large and well aligned as the
+	// largest/most aligned type.
+	tm.zeroType = tm.ctx.StructCreateNamed("zero")
+	tm.zeroValue = llvm.AddGlobal(tm.module, tm.zeroType, "go$zerovalue")
+	tm.zeroValue.SetLinkage(llvm.CommonLinkage)
+	tm.zeroValue.SetInitializer(llvm.ConstNull(tm.zeroType))
+
 	tm.commonTypeType = tm.ctx.StructCreateNamed("commonType")
 	commonTypeTypePtr := llvm.PointerType(tm.commonTypeType, 0)
 
@@ -159,9 +171,11 @@ func NewTypeMap(pkg *ssa.Package, llvmtm *llvmTypeMap, module llvm.Module, r *ru
 		tm.ctx.Int32Type(),                       // hash
 		llvm.PointerType(tm.hashFnType, 0),       // hashfn
 		llvm.PointerType(tm.equalFnType, 0),      // equalfn
+		voidPtrType,                              // gc
 		stringPtrType,                            // string
 		llvm.PointerType(tm.uncommonTypeType, 0), // uncommonType
 		commonTypeTypePtr,                        // ptrToThis
+		llvm.PointerType(tm.zeroType, 0),         // zero
 	}, false)
 
 	tm.typeSliceType = tm.makeNamedSliceType("typeSlice", commonTypeTypePtr)
@@ -1037,6 +1051,9 @@ func (ts byTypeName) Less(i, j int) bool {
 }
 
 func (tm *TypeMap) emitTypeDescInitializers() {
+	var maxSize, maxAlign int64
+	maxAlign = 1
+
 	for changed := true; changed; {
 		changed = false
 
@@ -1047,6 +1064,7 @@ func (tm *TypeMap) emitTypeDescInitializers() {
 			if tdi.global.Initializer().C == nil {
 				linkage, emit := tm.getTypeDescLinkage(key)
 				tdi.global.SetLinkage(linkage)
+				tdi.gc.SetLinkage(linkage)
 				if emit {
 					changed = true
 					ts = append(ts, typeAndInfo{key, key.String(), tdi})
@@ -1057,10 +1075,127 @@ func (tm *TypeMap) emitTypeDescInitializers() {
 		if changed {
 			sort.Sort(byTypeName(ts))
 			for _, t := range ts {
-				t.tdi.global.SetInitializer(tm.makeTypeDescInitializer(t.typ))
+				tm.emitTypeDescInitializer(t.typ, t.tdi)
+				if size := tm.Sizeof(t.typ); size > maxSize {
+					maxSize = size
+				}
+				if align := tm.Alignof(t.typ); align > maxAlign {
+					maxAlign = align
+				}
 			}
 		}
 	}
+
+	tm.zeroType.StructSetBody([]llvm.Type{llvm.ArrayType(tm.ctx.Int8Type(), int(maxSize))}, false)
+	tm.zeroValue.SetAlignment(int(maxAlign))
+}
+
+const (
+	// From libgo/runtime/mgc0.h
+	gcOpcodeEND = iota
+	gcOpcodePTR
+	gcOpcodeAPTR
+	gcOpcodeARRAY_START
+	gcOpcodeARRAY_NEXT
+	gcOpcodeCALL
+	gcOpcodeCHAN_PTR
+	gcOpcodeSTRING
+	gcOpcodeEFACE
+	gcOpcodeIFACE
+	gcOpcodeSLICE
+	gcOpcodeREGION
+
+	gcStackCapacity = 8
+)
+
+func (tm *TypeMap) makeGcInst(val int64) llvm.Value {
+	c := llvm.ConstInt(tm.inttype, uint64(val), false)
+	return llvm.ConstIntToPtr(c, llvm.PointerType(tm.ctx.Int8Type(), 0))
+}
+
+func (tm *TypeMap) appendGcInsts(insts []llvm.Value, t types.Type, offset, stackSize int64) []llvm.Value {
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		switch u.Kind() {
+		case types.String:
+			insts = append(insts, tm.makeGcInst(gcOpcodeSTRING), tm.makeGcInst(offset))
+		case types.UnsafePointer:
+			insts = append(insts, tm.makeGcInst(gcOpcodeAPTR), tm.makeGcInst(offset))
+		}
+	case *types.Pointer:
+		insts = append(insts, tm.makeGcInst(gcOpcodePTR), tm.makeGcInst(offset),
+			tm.getGcPointer(u.Elem()))
+	case *types.Signature, *types.Map:
+		insts = append(insts, tm.makeGcInst(gcOpcodeAPTR), tm.makeGcInst(offset))
+	case *types.Array:
+		if u.Len() == 0 {
+			return insts
+		} else if stackSize >= gcStackCapacity {
+			insts = append(insts, tm.makeGcInst(gcOpcodeREGION), tm.makeGcInst(offset),
+				tm.makeGcInst(tm.Sizeof(t)), tm.getGcPointer(t))
+		} else {
+			insts = append(insts, tm.makeGcInst(gcOpcodeARRAY_START), tm.makeGcInst(offset),
+				tm.makeGcInst(u.Len()), tm.makeGcInst(tm.Sizeof(u.Elem())))
+			insts = tm.appendGcInsts(insts, u.Elem(), 0, stackSize+1)
+			insts = append(insts, tm.makeGcInst(gcOpcodeARRAY_NEXT))
+		}
+	case *types.Slice:
+		if tm.Sizeof(u.Elem()) == 0 {
+			insts = append(insts, tm.makeGcInst(gcOpcodeAPTR), tm.makeGcInst(offset))
+		} else {
+			insts = append(insts, tm.makeGcInst(gcOpcodeSLICE), tm.makeGcInst(offset),
+				tm.getGcPointer(u.Elem()))
+		}
+	case *types.Chan:
+		insts = append(insts, tm.makeGcInst(gcOpcodeCHAN_PTR), tm.makeGcInst(offset),
+			tm.ToRuntime(t))
+	case *types.Struct:
+		fields := make([]*types.Var, u.NumFields())
+		for i := range fields {
+			fields[i] = u.Field(i)
+		}
+		offsets := tm.Offsetsof(fields)
+
+		for i, field := range fields {
+			insts = tm.appendGcInsts(insts, field.Type(), offset+offsets[i], stackSize)
+		}
+	case *types.Interface:
+		if u.NumMethods() == 0 {
+			insts = append(insts, tm.makeGcInst(gcOpcodeEFACE), tm.makeGcInst(offset))
+		} else {
+			insts = append(insts, tm.makeGcInst(gcOpcodeIFACE), tm.makeGcInst(offset))
+		}
+	default:
+		panic(fmt.Sprintf("unhandled type: %#v", t))
+	}
+
+	return insts
+}
+
+func (tm *TypeMap) emitTypeDescInitializer(t types.Type, tdi *typeDescInfo) {
+	// initialize type descriptor
+	tdi.global.SetInitializer(tm.makeTypeDescInitializer(t))
+
+	// initialize GC program
+	insts := []llvm.Value{tm.makeGcInst(tm.Sizeof(t))}
+	insts = tm.appendGcInsts(insts, t, 0, 0)
+	insts = append(insts, tm.makeGcInst(gcOpcodeEND))
+
+	i8ptr := llvm.PointerType(llvm.Int8Type(), 0)
+	instArray := llvm.ConstArray(i8ptr, insts)
+
+	newGc := llvm.AddGlobal(tm.module, instArray.Type(), "")
+	newGc.SetGlobalConstant(true)
+	newGc.SetInitializer(instArray)
+	gcName := tdi.gc.Name()
+	tdi.gc.SetName("")
+	newGc.SetName(gcName)
+	newGc.SetLinkage(tdi.gc.Linkage())
+
+	tdi.gc.ReplaceAllUsesWith(llvm.ConstBitCast(newGc, tdi.gc.Type()))
+	tdi.gc.EraseFromParentAsGlobal()
+	tdi.gc = llvm.Value{nil}
+	tdi.gcPtr = llvm.ConstBitCast(newGc, i8ptr)
 }
 
 func (tm *TypeMap) makeTypeDescInitializer(t types.Type) llvm.Value {
@@ -1347,6 +1482,10 @@ func (tm *TypeMap) getTypeDescInfo(t types.Type) *typeDescInfo {
 	global.SetGlobalConstant(true)
 	ptr := llvm.ConstBitCast(global, llvm.PointerType(tm.commonTypeType, 0))
 
+	gc := llvm.AddGlobal(tm.module, llvm.PointerType(llvm.Int8Type(), 0), b.String()+"$gc")
+	gc.SetGlobalConstant(true)
+	gcPtr := llvm.ConstBitCast(gc, llvm.PointerType(tm.ctx.Int8Type(), 0))
+
 	var mapDescPtr llvm.Value
 	if m, ok := t.Underlying().(*types.Map); ok {
 		var mapb bytes.Buffer
@@ -1358,7 +1497,13 @@ func (tm *TypeMap) getTypeDescInfo(t types.Type) *typeDescInfo {
 		mapDescPtr.SetInitializer(tm.makeMapDesc(ptr, m))
 	}
 
-	tdi := &typeDescInfo{global: global, commonTypePtr: ptr, mapDescPtr: mapDescPtr}
+	tdi := &typeDescInfo{
+		global:        global,
+		commonTypePtr: ptr,
+		mapDescPtr:    mapDescPtr,
+		gc:            gc,
+		gcPtr:         gcPtr,
+	}
 	tm.types.Set(t, tdi)
 	return tdi
 }
@@ -1369,6 +1514,10 @@ func (tm *TypeMap) getTypeDescriptorPointer(t types.Type) llvm.Value {
 
 func (tm *TypeMap) getMapDescriptorPointer(t types.Type) llvm.Value {
 	return tm.getTypeDescInfo(t).mapDescPtr
+}
+
+func (tm *TypeMap) getGcPointer(t types.Type) llvm.Value {
+	return tm.getTypeDescInfo(t).gcPtr
 }
 
 func (tm *TypeMap) getItabPointer(srctype types.Type, targettype *types.Interface) llvm.Value {
@@ -1543,7 +1692,7 @@ func runtimeTypeKind(t types.Type) (k uint8) {
 }
 
 func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
-	var vals [10]llvm.Value
+	var vals [12]llvm.Value
 	vals[0] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(runtimeTypeKind(t)), false)
 	vals[1] = llvm.ConstInt(tm.ctx.Int8Type(), uint64(tm.Alignof(t)), false)
 	vals[2] = vals[1]
@@ -1552,15 +1701,17 @@ func (tm *TypeMap) makeCommonType(t types.Type) llvm.Value {
 	hash, equal := tm.getAlgorithmFunctions(t)
 	vals[5] = hash
 	vals[6] = equal
+	vals[7] = tm.getGcPointer(t)
 	var b bytes.Buffer
 	tm.writeType(t, &b)
-	vals[7] = tm.globalStringPtr(b.String())
-	vals[8] = tm.makeUncommonTypePtr(t)
+	vals[8] = tm.globalStringPtr(b.String())
+	vals[9] = tm.makeUncommonTypePtr(t)
 	if _, ok := t.(*types.Named); ok {
-		vals[9] = tm.getTypeDescriptorPointer(types.NewPointer(t))
+		vals[10] = tm.getTypeDescriptorPointer(types.NewPointer(t))
 	} else {
-		vals[9] = llvm.ConstPointerNull(llvm.PointerType(tm.commonTypeType, 0))
+		vals[10] = llvm.ConstPointerNull(llvm.PointerType(tm.commonTypeType, 0))
 	}
+	vals[11] = tm.zeroValue
 
 	return llvm.ConstNamedStruct(tm.commonTypeType, vals[:])
 }
