@@ -318,7 +318,7 @@ func (d *DIBuilder) descriptorStruct(t *types.Struct, name string) llvm.Value {
 	for i, f := range fields {
 		// TODO(axw) file/line where member is defined.
 		t := f.Type()
-		members[i] = d.builder.CreateMemberType(d.scope(), llvm.DIMemberType{
+		members[i] = d.builder.CreateMemberType(d.cu, llvm.DIMemberType{
 			Name:         f.Name(),
 			Type:         d.DIType(t),
 			SizeInBits:   uint64(d.sizes.Sizeof(t) * 8),
@@ -327,7 +327,7 @@ func (d *DIBuilder) descriptorStruct(t *types.Struct, name string) llvm.Value {
 		})
 	}
 	// TODO(axw) file/line where struct is defined.
-	return d.builder.CreateStructType(d.scope(), llvm.DIStructType{
+	return d.builder.CreateStructType(d.cu, llvm.DIStructType{
 		Name:        name,
 		SizeInBits:  uint64(d.sizes.Sizeof(t) * 8),
 		AlignInBits: uint64(d.sizes.Alignof(t) * 8),
