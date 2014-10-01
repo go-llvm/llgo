@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"go/scanner"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,6 +56,9 @@ func initCompiler(opts *driverOptions) (*irgen.Compiler, error) {
 		GccgoPath:          opts.gccgoPath,
 		ImportPaths:        importPaths,
 		SanitizerAttribute: opts.sanitizer.getAttribute(),
+	}
+	if opts.dumpTrace {
+		copts.Logger = log.New(os.Stderr, "", 0)
 	}
 	return irgen.NewCompiler(copts)
 }
@@ -147,6 +151,7 @@ type driverOptions struct {
 	bprefix         string
 	debugPrefixMaps []debug.PrefixMap
 	dumpSSA         bool
+	dumpTrace       bool
 	emitIR          bool
 	gccgoPath       string
 	generateDebug   bool
@@ -275,6 +280,9 @@ func parseArguments(args []string) (opts driverOptions, err error) {
 
 		case args[0] == "-fdump-ssa":
 			opts.dumpSSA = true
+
+		case args[0] == "-fdump-trace":
+			opts.dumpTrace = true
 
 		case strings.HasPrefix(args[0], "-fgccgo-path="):
 			opts.gccgoPath = args[0][13:]
