@@ -483,7 +483,9 @@ func (ctx *manglerContext) mangleSignature(s *types.Signature, recv *types.Var, 
 }
 
 func (ctx *manglerContext) manglePackagePath(pkgpath string, b *bytes.Buffer) {
-	b.WriteString(strings.Replace(pkgpath, "/", "_", -1))
+	pkgpath = strings.Replace(pkgpath, "/", "_", -1)
+	pkgpath = strings.Replace(pkgpath, ".", "_", -1)
+	b.WriteString(pkgpath)
 }
 
 func (ctx *manglerContext) mangleType(t types.Type, b *bytes.Buffer) {
