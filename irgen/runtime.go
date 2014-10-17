@@ -9,7 +9,7 @@ import (
 
 	"code.google.com/p/go.tools/go/types"
 
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 type runtimeFnInfo struct {

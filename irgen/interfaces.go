@@ -6,7 +6,7 @@ package irgen
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 // interfaceMethod returns a function and receiver pointer for the specified

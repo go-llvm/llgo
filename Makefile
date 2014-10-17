@@ -1,7 +1,7 @@
 j = 1
 prefix = /usr/local
 bootstrap = quick
-gollvmdir = $(shell go list -f '{{.Dir}}' github.com/go-llvm/llvm)
+gollvmdir = $(shell go list -f '{{.Dir}}' llvm.org/llvm/bindings/go/llvm)
 llvmdir = $(gollvmdir)/workdir/llvm_build
 
 bootstrap: workdir/.bootstrap-stamp
@@ -21,10 +21,12 @@ workdir/.bootstrap-stamp: workdir/.build-libgodeps-stamp bootstrap.sh build/*.go
 workdir/.build-libgodeps-stamp: workdir/.update-clang-stamp workdir/.update-libgo-stamp bootstrap.sh
 	./bootstrap.sh libgodeps -j$(j)
 
-workdir/.update-clang-stamp: update_clang.sh $(gollvmdir)/llvm_dep.go
+workdir/.update-clang-stamp: update_clang.sh alwaysrun
 	./update_clang.sh
 
 workdir/.update-libgo-stamp: update_libgo.sh
 	./update_libgo.sh
 
 .SUFFIXES:
+
+alwaysrun:

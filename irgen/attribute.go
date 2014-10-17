@@ -6,8 +6,8 @@ package irgen
 
 import (
 	"fmt"
-	"github.com/go-llvm/llvm"
 	"go/ast"
+	"llvm.org/llvm/bindings/go/llvm"
 	"strings"
 )
 
@@ -89,10 +89,6 @@ func parseLinkageAttribute(value string) linkageAttribute {
 		switch strings.ToLower(field) {
 		case "private":
 			result |= linkageAttribute(llvm.PrivateLinkage)
-		case "linker_private":
-			result |= linkageAttribute(llvm.LinkerPrivateLinkage)
-		case "linker_private_weak":
-			result |= linkageAttribute(llvm.LinkerPrivateWeakLinkage)
 		case "internal":
 			result |= linkageAttribute(llvm.InternalLinkage)
 		case "available_externally":
@@ -113,10 +109,6 @@ func parseLinkageAttribute(value string) linkageAttribute {
 			result |= linkageAttribute(llvm.WeakODRLinkage)
 		case "external":
 			result |= linkageAttribute(llvm.ExternalLinkage)
-		case "dllimport":
-			result |= linkageAttribute(llvm.DLLImportLinkage)
-		case "dllexport":
-			result |= linkageAttribute(llvm.DLLExportLinkage)
 		}
 	}
 	return result

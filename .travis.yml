@@ -10,8 +10,8 @@ before_install:
   - sudo $APT_GET install mercurial git subversion cmake gcc-4.8 g++-4.8
   - export CXX=g++-4.8 CC=gcc-4.8
 install:
-  - go get -d github.com/go-llvm/llvm
-  - $(go list -f '{{.Dir}}' github.com/go-llvm/llvm)/update_llvm.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
+  - go get -d llvm.org/llvm/bindings/go/llvm
+  - $(go list -f '{{.Dir}}' llvm.org/llvm/bindings/go/llvm)/../build.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
   - make install prefix=`pwd`/.install
 script:
   - make check-llgo check-libgo

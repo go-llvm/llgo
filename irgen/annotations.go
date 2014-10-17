@@ -8,9 +8,9 @@ import (
 	"code.google.com/p/go.tools/go/loader"
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
-	"github.com/go-llvm/llvm"
 	"go/ast"
 	"go/token"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 // processAnnotations takes an *ssa.Package and a

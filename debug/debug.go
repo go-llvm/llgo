@@ -15,7 +15,7 @@ import (
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/go/types/typeutil"
 
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 const (
@@ -160,7 +160,8 @@ func (d *DIBuilder) Declare(b llvm.Builder, v ssa.Value, llv llvm.Value, paramIn
 		ArgNo: paramIndex + 1,
 		Type:  d.DIType(v.Type()),
 	})
-	d.builder.InsertDeclareAtEnd(llv, localVar, b.GetInsertBlock())
+	expr := d.builder.CreateExpression(nil)
+	d.builder.InsertDeclareAtEnd(llv, localVar, expr, b.GetInsertBlock())
 }
 
 // Value creates an llvm.dbg.value call for the specified register value.

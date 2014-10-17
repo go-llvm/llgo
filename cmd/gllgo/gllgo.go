@@ -22,7 +22,7 @@ import (
 
 	"github.com/go-llvm/llgo/debug"
 	"github.com/go-llvm/llgo/irgen"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 func report(err error) {
