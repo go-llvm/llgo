@@ -15,7 +15,7 @@ import (
 	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
 	"github.com/go-llvm/llgo/ssaopt"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 // A globalInit is used to temporarily store a global's initializer until

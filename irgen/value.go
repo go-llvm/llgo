@@ -8,8 +8,8 @@ import (
 	"code.google.com/p/go.tools/go/exact"
 	"code.google.com/p/go.tools/go/types"
 	"fmt"
-	"github.com/go-llvm/llvm"
 	"go/token"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 // govalue contains an LLVM value and a Go type,

@@ -6,14 +6,17 @@
 
 llgodir=$(dirname "$0")
 llgodir=$(cd "$llgodir" && pwd)
-gollvmdir=$(go list -f '{{.Dir}}' github.com/go-llvm/llvm)
+gollvmdir=$(go list -f '{{.Dir}}' llvm.org/llvm/bindings/go/llvm)
 
-llvmrev=$(grep run_update_llvm_sh_to_get_revision_ $gollvmdir/llvm_dep.go | \
-          sed -E -e 's/.*run_update_llvm_sh_to_get_revision_([0-9]+.*)/\1/g')
+llvmrev=$(cd $gollvmdir && (svn info || git svn info) | grep '^Revision:' | cut -d' ' -f2)
 
 workdir=$llgodir/workdir
 clangdir=$workdir/clang
 clang_builddir=$workdir/clang_build
+
+if [ "$llvmrev" = "$(cat $workdir/.update-clang-stamp 2>/dev/null)" ] ; then
+  exit 0
+fi
 
 mkdir -p $workdir
 svn co -r $llvmrev https://llvm.org/svn/llvm-project/cfe/trunk $clangdir
@@ -29,4 +32,4 @@ else
   make -C $clang_builddir -j4 clang
 fi
 
-touch $workdir/.update-clang-stamp
+echo $llvmrev > $workdir/.update-clang-stamp

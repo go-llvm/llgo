@@ -2,7 +2,7 @@ package irgen
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 func (fr *frame) loadOrNull(cond, ptr llvm.Value, ty types.Type) *govalue {

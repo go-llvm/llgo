@@ -6,8 +6,8 @@ package irgen
 
 import (
 	"code.google.com/p/go.tools/go/types"
-	"github.com/go-llvm/llvm"
 	"go/token"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 func (fr *frame) concatenateStrings(lhs, rhs *govalue) *govalue {

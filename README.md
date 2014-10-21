@@ -28,9 +28,8 @@ To build and install llgo:
 
     # Ensure $GOPATH is set.
     go get -d github.com/go-llvm/llgo/cmd/gllgo
-    cd $GOPATH/src/github.com/go-llvm/llvm
-    ./update_llvm.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
-    cd ../llgo
+    $GOPATH/src/llvm.org/llvm/bindings/go/build.sh -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=host
+    cd $GOPATH/src/github.com/go-llvm/llgo
     make install prefix=/path/to/prefix j=N  # where N is the number of cores on your machine.
 
 # Running

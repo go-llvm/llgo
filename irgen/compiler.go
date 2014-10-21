@@ -15,7 +15,7 @@ import (
 
 	llgobuild "github.com/go-llvm/llgo/build"
 	"github.com/go-llvm/llgo/debug"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 
 	"code.google.com/p/go.tools/go/gccgoimporter"
 	"code.google.com/p/go.tools/go/importer"

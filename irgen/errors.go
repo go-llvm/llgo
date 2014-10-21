@@ -5,7 +5,7 @@
 package irgen
 
 import (
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 const (

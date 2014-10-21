@@ -20,7 +20,7 @@ import (
 	"code.google.com/p/go.tools/go/ssa/ssautil"
 	"code.google.com/p/go.tools/go/types"
 	"code.google.com/p/go.tools/go/types/typeutil"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 type MethodResolver interface {

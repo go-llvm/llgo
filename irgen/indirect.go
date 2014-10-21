@@ -7,7 +7,7 @@ package irgen
 import (
 	"code.google.com/p/go.tools/go/ssa"
 	"code.google.com/p/go.tools/go/types"
-	"github.com/go-llvm/llvm"
+	"llvm.org/llvm/bindings/go/llvm"
 )
 
 // createThunk creates a thunk from a
