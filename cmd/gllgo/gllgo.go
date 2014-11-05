@@ -116,16 +116,21 @@ func (san *sanitizerOptions) libPath(triple, sanitizerName string) string {
 	return filepath.Join(san.resourcePath(), "lib", s[2], "libclang_rt."+sanitizerName+"-"+s[0]+".a")
 }
 
+func (san *sanitizerOptions) addLibsForSanitizer(flags []string, triple, sanitizerName string) []string {
+	return append(flags, san.libPath(triple, sanitizerName),
+		"-Wl,--no-as-needed", "-lpthread", "-lrt", "-lm", "-ldl")
+}
+
 func (san *sanitizerOptions) addLibs(triple string, flags []string) []string {
 	switch {
 	case san.address:
-		flags = append(flags, san.libPath(triple, "asan"), "-lrt", "-ldl")
+		flags = san.addLibsForSanitizer(flags, triple, "asan")
 	case san.thread:
-		flags = append(flags, san.libPath(triple, "tsan"), "-lrt", "-ldl")
+		flags = san.addLibsForSanitizer(flags, triple, "tsan")
 	case san.memory:
-		flags = append(flags, san.libPath(triple, "msan"), "-lrt", "-ldl")
+		flags = san.addLibsForSanitizer(flags, triple, "msan")
 	case san.dataflow:
-		flags = append(flags, san.libPath(triple, "dfsan"), "-lrt", "-ldl")
+		flags = san.addLibsForSanitizer(flags, triple, "dfsan")
 	}
 
 	return flags
