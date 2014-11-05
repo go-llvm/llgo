@@ -648,7 +648,7 @@ func (ctx *manglerContext) mangleFunctionName(f *ssa.Function) string {
 	if f.Parent() != nil {
 		// Anonymous functions are not guaranteed to
 		// have unique identifiers at the global scope.
-		b.WriteString(f.Parent().String())
+		b.WriteString(ctx.mangleFunctionName(f.Parent()))
 		b.WriteRune(':')
 		b.WriteString(f.String())
 		return b.String()
