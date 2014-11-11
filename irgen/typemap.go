@@ -16,10 +16,10 @@ import (
 	"strconv"
 	"strings"
 
-	"code.google.com/p/go.tools/go/ssa"
-	"code.google.com/p/go.tools/go/ssa/ssautil"
-	"code.google.com/p/go.tools/go/types"
-	"code.google.com/p/go.tools/go/types/typeutil"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
+	"golang.org/x/tools/go/types"
+	"golang.org/x/tools/go/types/typeutil"
 	"llvm.org/llvm/bindings/go/llvm"
 )
 

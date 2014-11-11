@@ -5,10 +5,10 @@
 package irgen
 
 import (
-	"code.google.com/p/go.tools/go/exact"
-	"code.google.com/p/go.tools/go/types"
 	"fmt"
 	"go/token"
+	"golang.org/x/tools/go/exact"
+	"golang.org/x/tools/go/types"
 	"llvm.org/llvm/bindings/go/llvm"
 )
 

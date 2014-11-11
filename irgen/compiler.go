@@ -17,11 +17,11 @@ import (
 	"github.com/go-llvm/llgo/debug"
 	"llvm.org/llvm/bindings/go/llvm"
 
-	"code.google.com/p/go.tools/go/gccgoimporter"
-	"code.google.com/p/go.tools/go/importer"
-	"code.google.com/p/go.tools/go/loader"
-	"code.google.com/p/go.tools/go/ssa"
-	"code.google.com/p/go.tools/go/types"
+	"golang.org/x/tools/go/gccgoimporter"
+	"golang.org/x/tools/go/importer"
+	"golang.org/x/tools/go/loader"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/types"
 )
 
 type Module struct {
