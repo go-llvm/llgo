@@ -11,10 +11,10 @@ import (
 	"os"
 	"sort"
 
-	"code.google.com/p/go.tools/go/ssa"
-	"code.google.com/p/go.tools/go/ssa/ssautil"
-	"code.google.com/p/go.tools/go/types"
 	"github.com/go-llvm/llgo/ssaopt"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
+	"golang.org/x/tools/go/types"
 	"llvm.org/llvm/bindings/go/llvm"
 )
 

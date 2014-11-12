@@ -5,11 +5,11 @@
 package irgen
 
 import (
-	"code.google.com/p/go.tools/go/loader"
-	"code.google.com/p/go.tools/go/ssa"
-	"code.google.com/p/go.tools/go/types"
 	"go/ast"
 	"go/token"
+	"golang.org/x/tools/go/loader"
+	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/types"
 	"llvm.org/llvm/bindings/go/llvm"
 )
 

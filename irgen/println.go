@@ -7,7 +7,7 @@ package irgen
 import (
 	"fmt"
 
-	"code.google.com/p/go.tools/go/types"
+	"golang.org/x/tools/go/types"
 )
 
 func (fr *frame) printValues(println_ bool, values ...*govalue) {

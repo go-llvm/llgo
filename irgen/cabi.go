@@ -1,7 +1,7 @@
 package irgen
 
 import (
-	"code.google.com/p/go.tools/go/types"
+	"golang.org/x/tools/go/types"
 	"llvm.org/llvm/bindings/go/llvm"
 )
 
