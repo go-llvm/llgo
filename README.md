@@ -1,4 +1,3 @@
-[![Build Status](https://drone.io/github.com/go-llvm/llgo/status.png)](https://drone.io/github.com/go-llvm/llgo/latest)
 # llgo
 
 llgo is a [Go](http://golang.org) frontend for [LLVM](http://llvm.org), written in Go.
