@@ -1,5 +1,7 @@
 # llgo
 
+**This project has moved to llvm.org. Any contributions or bug reports should be sent there. Please refer to the [llgo readme](http://llvm.org/svn/llvm-project/llgo/trunk/README.TXT) for more information.**
+
 llgo is a [Go](http://golang.org) frontend for [LLVM](http://llvm.org), written in Go.
 
 llgo is under active development. It compiles and passes most of the standard library test suite and a substantial portion of the gc test suite, but there are some corner cases that are known not to be handled correctly yet. Nevertheless it can compile modestly substantial programs (including itself; it is self hosting on x86-64 Linux).
